@@ -219,7 +219,9 @@ For open PRs, review status is derived rather than copied directly from GitHub:
 
 The client refetches the list every 60 seconds while open and on window focus.
 The explicit polling route also syncs PR metadata, but neither mechanism starts
-a review.
+a review. Although Settings stores `polling_interval_min`, the current client
+does not read it and the server has no background PR-polling scheduler; the
+60-second page refetch is hard-coded.
 
 Opening a PR refreshes its body, commits, file list, patch fragments, and stats
 from GitHub. If GitHub is unavailable, the endpoint reconstructs a response from
@@ -257,6 +259,11 @@ The pure engine is
 [`reviewer-core/src/review/run.ts`](../../reviewer-core/src/review/run.ts). It
 does not access Postgres, GitHub, Git, or the filesystem. Its only side effect is
 a structured completion through the injected LLM provider.
+
+The current operational caller is the studio server. `reviewer-core` also
+contains GitHub-review payload helpers and extension points intended for a
+future CI runner, but no end-to-end CI runner/export workflow is active in this
+repository.
 
 ```mermaid
 flowchart LR
@@ -344,9 +351,11 @@ score = max(0, 100
                -  3 × suggestion findings)
 ```
 
-The model verdict is retained on the review record, while blocker counts for run
-status are calculated deterministically from finding severities and the agent's
-`ci_fail_on` threshold.
+The model verdict is retained on the review record, while score and blocker
+counts are calculated deterministically from grounded finding severities and
+the agent's `ci_fail_on` threshold. The system does not normalize these into one
+decision authority, so a model verdict can disagree with the deterministic score
+or blocker count.
 
 ### Persistence and observability
 
@@ -358,6 +367,11 @@ For each successful agent run, the server persists:
 - one `run_traces` document containing configuration, statistics, assembled
   prompt, tool-call/chunk summary, raw model output, and the event log;
 - the reviewed head SHA on the PR.
+
+For a single-pass run, the persisted prompt assembly represents the actual one
+model call. For map-reduce, the trace stores the chunk labels and joined raw
+outputs, but `prompt_assembly` is a whole-diff representation rather than a
+complete copy of every exact per-file message sent to the model.
 
 Failures and cancellations update the run status and persist a trace containing
 the event log and error information available at that point. On server startup,
@@ -500,6 +514,13 @@ pipeline behavior, persistence, and primary browser journeys.
    a diff-only review.
 8. **Grounding is location validation, not semantic proof:** it verifies that a
    cited range belongs to the diff, not that the finding's reasoning is correct.
+9. **Page-driven PR refresh:** the stored polling interval is not wired to a
+   scheduler; current synchronization comes from a hard-coded browser refetch,
+   focus refresh, or explicit poll request.
+10. **Split decision authority:** the verdict is model-originated, while score
+    and blocker counts are deterministic and may not agree with it.
+11. **Partial map-reduce trace fidelity:** chunk identity and outputs are
+    retained, but exact per-file request messages are not individually persisted.
 
 ## Canonical implementation anchors
 
