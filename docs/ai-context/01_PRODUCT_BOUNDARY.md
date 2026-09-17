@@ -40,8 +40,11 @@ flow, read
 | Prompt-injection boundary | Operational | PR prose, diff content, repo maps, caller context, and project-context slots are delimiter-wrapped and treated as untrusted data. |
 | Citation grounding | Operational | Diff findings whose file/range does not intersect a real changed hunk are discarded. |
 | Deterministic score | Operational | Score starts at 100 and subtracts 35/12/3 for grounded critical/warning/suggestion findings, with a floor of zero. |
+| Review decision signals | Operational | The stored verdict remains model-generated, while score and blocker count are derived deterministically from grounded severities. These signals can disagree and are not normalized into one authority. |
 | Live run progress | Operational | Run events are streamed through SSE from an in-process event bus. |
 | Run history and trace | Operational | Run status, metrics, logs, prompt assembly, raw model output, and findings are persisted. Failure and cancellation traces are also retained. |
+| Map-reduce prompt trace | Partial | A map-reduce trace stores chunk labels, joined raw outputs, and a whole-diff prompt-assembly representation; it does not persist every exact per-file message sent to the model. |
+| Run cost attribution | Partial | The engine accumulates `costUsd`, but the studio executor does not persist it or expose a run-cost badge; it persists token counts only. |
 | Run cancellation | Partial | Cancellation is checked before model chunks. It cannot interrupt a model request already in flight, and a single-pass review has no later chunk checkpoint. |
 | Finding disposition | Operational | Findings can be accepted or dismissed locally. |
 | Inline GitHub comments | Operational | Comments authored in the Files view are read from and posted directly to GitHub; they are not a local comment mirror. |
@@ -60,6 +63,7 @@ flow, read
 | Evaluation and conformance | Schema and contracts exist without a registered eval module or current UI workflow. | Scaffolded. |
 | CI export / GitHub Action | CI tables and `reviewer-core` payload helpers exist, but this repository has no active CI runner/export product workflow. | Scaffolded. |
 | Automatic reviews | A manual polling route and UI refresh behavior exist, but polling explicitly does not trigger review and the UI displays auto-trigger as off. | Not operational; reviews are manual. |
+| Configurable/background PR polling | The `polling_interval_min` setting is stored, but no background scheduler consumes it. The current PR-list page uses a hard-coded 60-second refetch interval while open, plus refresh-on-focus and a manual poll endpoint. | Partial; there is page-driven synchronization, not scheduled background polling. |
 | Composed multi-agent review | Selecting all enabled agents is operational, but each agent produces an independent review. The `multi_agent_runs`/composed-review model is not wired into the current run path. | Scaffolded beyond independent sequential runs. |
 | Plugins | Installed-plugin schema exists without registered plugin import/export modules or UI. | Scaffolded. |
 | Agent performance dashboard | Trace and run metrics provide raw inputs, but no performance dashboard route or primary UI is registered. | Not operational. |
