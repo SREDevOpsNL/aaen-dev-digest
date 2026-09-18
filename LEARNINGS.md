@@ -1,20 +1,13 @@
-# DevDigest — insights
+# DevDigest — learnings
 
-Durable findings recorded by the `engineering-insights` skill: things that are
-true about this code but not visible in it. Append within a section, newest
-first. Correct a stale entry with a dated note beneath it rather than editing it
-away.
+Cross-package guidance maintained by
+[`engineering-insights`](.claude/skills/engineering-insights/SKILL.md). Apply it
+unless current source contradicts it; then trust the source and add a dated
+correction.
 
-This is the **root** file: it holds only findings that cross package boundaries.
-Anything scoped to one package lives in that package's file —
-[`client`](client/INSIGHTS.md) · [`server`](server/INSIGHTS.md) ·
-[`reviewer-core`](reviewer-core/INSIGHTS.md) · [`e2e`](e2e/INSIGHTS.md).
-
-Sections are fixed. Add to the one that fits; never invent a new heading. When an
-entry becomes stable reference material, promote it into `docs/` and delete it
-here.
-
-## Decisions
+Module-local findings belong beside their subject —
+[`client`](client/LEARNINGS.md) · [`server`](server/LEARNINGS.md) ·
+[`reviewer-core`](reviewer-core/LEARNINGS.md) · [`e2e`](e2e/LEARNINGS.md).
 
 ## What Works
 
@@ -42,7 +35,7 @@ here.
   the skills from Cursor. Evidence: `ls .cursor` → no such directory;
   `.claude/skills/README.md` now says so rather than asserting the link exists.
 
-## Codebase Patterns
+## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-17** — The starter ships scaffolding for lessons it has not built,
   well beyond empty tables: `client/messages/en/` carries 18 i18n namespaces
@@ -60,8 +53,10 @@ here.
   likewise formats a `GitHubReviewPayload` for a CI runner that is not in this
   tree. Evidence: `.gitignore:3-6`, `reviewer-core/package.json` description.
 
-## Tool & Library Notes
+## Decisions
 
 ## Recurring Errors & Fixes
+
+## Session Notes
 
 ## Open Questions

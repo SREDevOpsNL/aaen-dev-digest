@@ -80,7 +80,7 @@ quick loop, use the hermetic subset.
 
 ## Read when
 
-- Read [`INSIGHTS.md`](INSIGHTS.md) first for what was already tried here, and run
+- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and run
   the `engineering-insights` skill at the end of the task to add to it.
 - Read [`README.md`](README.md) for the API map and the request/DI flow diagram.
 - Read [`docs/`](docs/README.md) before changing the run lifecycle, the container,

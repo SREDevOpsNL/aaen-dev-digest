@@ -45,6 +45,6 @@ Intent lives in `specs/`, not here:
 
 - Do not restate `README.md`. Link to it.
 - Do not put intent here — that is `specs/`. Do not put rejected approaches here
-  — that is `INSIGHTS.md`.
+  — that is `LEARNINGS.md`.
 - If a doc goes stale, delete it. A wrong doc costs more than a missing one,
   because `CLAUDE.md` points agents at it as curated truth.

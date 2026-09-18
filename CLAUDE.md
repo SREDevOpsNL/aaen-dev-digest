@@ -11,15 +11,26 @@ Before answering a question or touching code, search the relevant module's
 curated files first. They are short, curated, and may already answer it in full.
 
 Order: `<module>/specs/` (what we intend to build) → `<module>/docs/` (how it
-works today) → `<module>/INSIGHTS.md` (what we already tried and rejected) →
+works today) → `<module>/LEARNINGS.md` (what we learned from prior work) →
 source. If a curated file answers the question, cite it instead of re-deriving
 from code.
 
+Read the module's `LEARNINGS.md` in full, and the root one for cross-package
+work. Then say `Read <file> — <up to 3 relevant points>` or `Read <file> —
+nothing relevant`. Treat applicable learnings as high-confidence guidance. Only
+current source makes an entry stale: if the code contradicts one, add a dated
+correction directly beneath it; if only a doc or spec disagrees, check the code
+before correcting anything.
+
 ## After finishing
 
-Run the `engineering-insights` skill at the end of any non-trivial task. It
-records what was learned into the `INSIGHTS.md` of the module you touched, after
-checking that a similar entry is not already there.
+Run the `engineering-insights` skill at the end of any task that involved a
+problem, fix, user correction, or non-obvious discovery. It records each finding
+in the `LEARNINGS.md` where that finding applies, after checking that a similar
+entry is not already there.
+
+Also capture a significant user correction, failed approach, or surprising
+discovery when it occurs rather than relying only on end-of-task invocation.
 
 Skip only the writing, and only when nothing non-obvious came up — a typo or a
 routine change is not an insight, and noise costs more than silence.
@@ -51,7 +62,7 @@ When two sources disagree, the higher one wins:
 4. Module `docs/`.
 5. Accepted specifications in `specs/` and `<module>/specs/`.
 6. README files and course/reference material.
-7. `INSIGHTS.md` and historical notes.
+7. `LEARNINGS.md` and historical notes.
 
 ## Stack
 
@@ -162,7 +173,7 @@ own GitHub Actions workflow with a path filter — see [TESTING.md](TESTING.md).
 - Update `<module>/docs/` when the behaviour stays local to one module.
 - Add or change a spec when acceptance behaviour changes — cross-package work in
   [specs/](specs/README.md), module-local work in `<module>/specs/`.
-- Record a discovery in `INSIGHTS.md` only when it is evidence-backed.
+- Record a discovery in `LEARNINGS.md` only when it is evidence-backed.
 - **Link to canonical documents; never copy them.**
 
 ## Skills
@@ -189,4 +200,4 @@ only what the task needs.
 - Read [reviewer-core/README.md](reviewer-core/README.md) when touching prompt
   assembly, structured output, or the grounding gate.
 - Read [e2e/README.md](e2e/README.md) before writing or debugging a browser flow.
-- Read [INSIGHTS.md](INSIGHTS.md) for findings that span more than one package.
+- Read [LEARNINGS.md](LEARNINGS.md) for findings that span more than one package.

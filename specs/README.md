@@ -10,7 +10,7 @@ that package's `specs/` instead —
 
 A spec describes **what to build and why it is done** — not how the code works
 today (that is [`../docs/`](../docs/README.md)) and not what we already rejected
-(that is [`../INSIGHTS.md`](../INSIGHTS.md)).
+(that is [`../LEARNINGS.md`](../LEARNINGS.md)).
 
 Typical cross-package work: repository registration across UI, API, job queue and
 indexer; review dispatch and its SSE completion path; finding disposition versus

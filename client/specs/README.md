@@ -9,7 +9,7 @@ one document.
 
 What does **not** belong here: how a screen works today (that is
 [`../docs/`](../docs/README.md)) and approaches already rejected (that is
-[`../INSIGHTS.md`](../INSIGHTS.md)).
+[`../LEARNINGS.md`](../LEARNINGS.md)).
 
 Suggested shape:
 

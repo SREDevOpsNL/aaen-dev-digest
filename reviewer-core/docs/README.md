@@ -11,7 +11,7 @@ rules, the map-reduce path and its reduce step.
 Not here: the pipeline diagram and public API (that is
 [`../README.md`](../README.md)), intent for unbuilt slots
 ([`../specs/`](../specs/README.md)), rejected approaches
-([`../INSIGHTS.md`](../INSIGHTS.md)).
+([`../LEARNINGS.md`](../LEARNINGS.md)).
 
 Built-in agent system prompts live in
 [`docs/agent-prompts/`](../../docs/agent-prompts/README.md) at repo root —

@@ -56,7 +56,7 @@ pnpm test         # vitest + jsdom, fetch mocked — no API needed
 - `src/vendor/ui` (`@devdigest/ui`) — vendored.
 - `src/vendor/shared` — a hand-copy of `server/src/vendor/shared` with no sync
   script. Change it only as part of a deliberate contract change, **server side
-  first**. See [`../INSIGHTS.md`](../INSIGHTS.md).
+  first**. See [`../LEARNINGS.md`](../LEARNINGS.md).
 
 ## Skills
 
@@ -66,7 +66,7 @@ content.
 
 ## Read when
 
-- Read [`INSIGHTS.md`](INSIGHTS.md) first for what was already tried here, and run
+- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and run
   the `engineering-insights` skill at the end of the task to add to it.
 - Read [`README.md`](README.md) for the UI route map and which endpoints each page
   leans on.

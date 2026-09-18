@@ -10,7 +10,7 @@ alters a shared contract or a public export, the spec belongs in the root
 
 What does **not** belong here: how the pipeline works today (that is
 [`../docs/`](../docs/README.md)) and approaches already rejected (that is
-[`../INSIGHTS.md`](../INSIGHTS.md)).
+[`../LEARNINGS.md`](../LEARNINGS.md)).
 
 Suggested shape:
 

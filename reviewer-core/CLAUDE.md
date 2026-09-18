@@ -64,7 +64,7 @@ filesystem. The only side effect is an LLM call through an **injected**
 
 ## Read when
 
-- Read [`INSIGHTS.md`](INSIGHTS.md) first for what was already tried here, and run
+- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and run
   the `engineering-insights` skill at the end of the task to add to it.
 - Read [`README.md`](README.md) for the pipeline diagram and the full public API.
 - Read [`docs/`](docs/README.md) before changing prompt assembly or the grounding

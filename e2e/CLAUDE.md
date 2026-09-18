@@ -58,7 +58,7 @@ Hermetic ports are overridable: `E2E_PG_PORT`, `E2E_API_PORT`, `E2E_WEB_PORT`.
 
 ## Read when
 
-- Read [`INSIGHTS.md`](INSIGHTS.md) first for what was already tried here, and run
+- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and run
   the `engineering-insights` skill at the end of the task to add to it.
 - Read [`README.md`](README.md) for the flow format and the full hermetic-runner
   walkthrough.
