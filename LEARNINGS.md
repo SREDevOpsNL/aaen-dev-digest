@@ -53,6 +53,18 @@ Module-local findings belong beside their subject —
   likewise formats a `GitHubReviewPayload` for a CI runner that is not in this
   tree. Evidence: `.gitignore:3-6`, `reviewer-core/package.json` description.
 
+- **2026-09-18** — This repository is a public fork of the course repo
+  `ai-agentic-engineering-neo/dev-digest`, and no `gh` default repository is
+  set. Do not rely on `gh` to choose the base repo: pass
+  `--repo SREDevOpsNL/aaen-dev-digest` to every `gh pr` and `gh issue`
+  command so nothing lands on the course repo, whose `main` was reverted
+  because "homework belongs in forks". Everything pushed here is public.
+  Evidence:
+  `gh repo view SREDevOpsNL/aaen-dev-digest --json isFork,parent,visibility`
+  → fork of `ai-agentic-engineering-neo/dev-digest`, `PUBLIC`;
+  `gh repo set-default --view` → "No default remote repository has been
+  set"; commit `c6af1e4`.
+
 ## Decisions
 
 ## Recurring Errors & Fixes
