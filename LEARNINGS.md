@@ -109,6 +109,17 @@ Module-local findings belong beside their subject —
 
 ## Recurring Errors & Fixes
 
+- **2026-09-19** — On Windows Insider build 26200, Docker Desktop can enter a
+  startup crash loop because its NTFS-backed AF_UNIX socket reparse points
+  (`dockerInference`, Secrets Engine, and `sailor-ingest.sock`) become
+  inaccessible; upgrading Desktop, disabling AI features, and rebooting did not
+  make clean stop/start cycles reliable. For WSL development, stop Docker
+  Desktop and install Docker Engine inside Ubuntu instead, where `systemd`
+  manages the daemon on the Linux filesystem. Evidence: Docker Desktop backend
+  error 1920 (`The file cannot be accessed by the system`) reproduced on
+  4.80.0 and 4.91.0; `docker/desktop-feedback#527` documents the same failure on
+  Windows build 26200; native Ubuntu Docker Engine 29.8.1 passed `hello-world`.
+
 ## Session Notes
 
 ## Open Questions
