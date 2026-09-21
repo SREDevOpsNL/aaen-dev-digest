@@ -18,9 +18,10 @@ from code.
 Read the module's `LEARNINGS.md` in full, and the root one for cross-package
 work. Then say `Read <file> — <up to 3 relevant points>` or `Read <file> —
 nothing relevant`. Treat applicable learnings as high-confidence guidance. Only
-current source makes an entry stale: if the code contradicts one, add a dated
-correction directly beneath it; if only a doc or spec disagrees, check the code
-before correcting anything.
+current source makes an entry stale: if the code contradicts one, append a new
+dated correction at the end of the matching heading and reference the prior
+entry without altering or repositioning it; if only a doc or spec disagrees,
+check the code before correcting anything.
 
 ## After finishing
 

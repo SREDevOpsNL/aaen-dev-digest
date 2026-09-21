@@ -37,6 +37,14 @@ Module-local findings belong beside their subject —
 
 ## Codebase Patterns & Tool / Library Notes
 
+- **2026-09-20** — Do not assume that URLs, screenshots, or other source
+  material supplied in a different ChatGPT or Codex chat is available to the
+  active Codex task. Each chat keeps its own transcript, ordinary ChatGPT chats
+  do not appear in the Codex sidebar, and request-specific files should be
+  attached directly (or added to shared project sources) before a workflow
+  depends on them. Evidence:
+  https://learn.chatgpt.com/docs/projects?surface=web.
+
 - **2026-09-17** — The starter ships scaffolding for lessons it has not built,
   well beyond empty tables: `client/messages/en/` carries 18 i18n namespaces
   (including `skills`, `conventions`, `eval`, `ci`, `memory`, `blast`, `brief`,
@@ -64,6 +72,27 @@ Module-local findings belong beside their subject —
   → fork of `ai-agentic-engineering-neo/dev-digest`, `PUBLIC`;
   `gh repo set-default --view` → "No default remote repository has been
   set"; commit `c6af1e4`.
+
+- **2026-09-20** — Correction to the earlier 2026-09-20 cross-chat context
+  entry: the supported operational rule is only that required context and files
+  from another ChatGPT or Codex chat must not be assumed available in the
+  active Codex task; provide them explicitly or verify their availability before
+  depending on them. Evidence:
+  https://learn.chatgpt.com/docs/projects?surface=web.
+
+- **2026-09-20** — The Run Cost Badge feature has two conflicting
+  specifications. The L01 lab deck (`L01-Lab-slides.pdf`, task 3) puts it on
+  two surfaces — a `COST` column in the PR list and a line in the PR-detail
+  verdict badge carrying cost plus token counts — and derives the number as
+  `tokens × price` from the OpenRouter `usage` field. The later product
+  instruction supersedes it: persist a USD cost per run in a new column and
+  never compute it from token pricing. Build the stored-USD version — the
+  engine already returns a `costUsd` taken straight from the OpenRouter
+  response, so no pricing table is needed, and a review points at exactly one
+  run, which makes “the latest review’s cost” that run’s cost rather than an
+  aggregate. Evidence: `reviewer-core/src/llm/openrouter.ts:107` (`costUsd`),
+  `server/src/db/schema/reviews.ts:19` (`runId`),
+  [product boundary](docs/ai-context/01_PRODUCT_BOUNDARY.md).
 
 ## Decisions
 
