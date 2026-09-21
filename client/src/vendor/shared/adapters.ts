@@ -68,6 +68,9 @@ export interface StructuredResult<T> {
   model: string;
   tokensIn: number;
   tokensOut: number;
+  /** Provider-supplied USD cost only; null when the provider did not report it. */
+  providerCostUsd: number | null;
+  /** Best available cost, which may be provider-reported or token-price estimated. */
   costUsd: number | null;
   raw: string;
   attempts: number;

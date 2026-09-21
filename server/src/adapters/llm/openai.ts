@@ -119,6 +119,7 @@ export class OpenAIProvider implements LLMProvider {
           model: req.model,
           tokensIn,
           tokensOut,
+          providerCostUsd: null,
           costUsd: estimateCost(req.model, tokensIn, tokensOut),
           raw: lastRaw,
           attempts: attempt,

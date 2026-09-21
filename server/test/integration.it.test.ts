@@ -36,6 +36,16 @@ d('Testcontainers: pg + pgvector', () => {
     expect(rows[0]!.count).toBeGreaterThanOrEqual(35);
   });
 
+  it('migrations create nullable authoritative cost on agent_runs', async () => {
+    const rows = await pg.handle.sql<{ is_nullable: string; data_type: string }[]>`
+      SELECT is_nullable, data_type
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'agent_runs'
+        AND column_name = 'cost_usd'`;
+    expect(rows).toEqual([{ is_nullable: 'YES', data_type: 'double precision' }]);
+  });
+
   it('pgvector extension is enabled', async () => {
     const rows = await pg.handle.sql<{ extname: string }[]>`
       SELECT extname FROM pg_extension WHERE extname = 'vector'`;

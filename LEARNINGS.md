@@ -94,6 +94,17 @@ Module-local findings belong beside their subject —
   `server/src/db/schema/reviews.ts:19` (`runId`),
   [product boundary](docs/ai-context/01_PRODUCT_BOUNDARY.md).
 
+- **2026-09-21** — Correction to the earlier 2026-09-20 Run Cost Badge entry:
+  `OpenRouterProvider.costUsd` is not always taken directly from OpenRouter. It
+  uses provider-reported `usage.cost` when present, but otherwise falls back to
+  the injected token-price estimator; `reviewPullRequest` then aggregates that
+  mixed-semantics field. Persisted authoritative Cost must therefore use a
+  separate provider-reported field and must not persist `costUsd`. Evidence:
+  `reviewer-core/src/llm/openrouter.ts:96-107`
+  (`OpenRouterProvider.completeStructured`),
+  `reviewer-core/src/review/run.ts:159-184` (`reviewPullRequest`),
+  `server/src/platform/container.ts:181-188` (`Container.buildLlm`).
+
 ## Decisions
 
 ## Recurring Errors & Fixes

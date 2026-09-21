@@ -14,7 +14,10 @@ import {
   RunTrace,
   Settings,
   Repo,
+  PrMeta,
   PrDetail,
+  ReviewRecord,
+  RunSummary,
 } from '@devdigest/shared';
 
 /**
@@ -166,6 +169,60 @@ describe('AI contracts parse fixtures', () => {
       log: [{ t: '00.00', kind: 'info', msg: 'started' }],
     });
     expect(trace.tool_calls).toHaveLength(1);
+    expect(trace.stats.cost_usd).toBeUndefined();
+  });
+
+  it('accepts authoritative run cost across PR, review, and run DTOs', () => {
+    const pr = PrMeta.parse({
+      number: 482,
+      title: 't',
+      author: 'a',
+      branch: 'b',
+      base: 'main',
+      head_sha: 'sha',
+      additions: 1,
+      deletions: 0,
+      files_count: 1,
+      status: 'reviewed',
+      cost_usd: 0.012,
+    });
+    const review = ReviewRecord.parse({
+      id: 'review-1',
+      pr_id: 'pr-1',
+      agent_id: 'agent-1',
+      run_id: 'run-1',
+      kind: 'review',
+      verdict: 'approve',
+      summary: 'ok',
+      score: 100,
+      cost_usd: 0.012,
+      model: 'openrouter/test',
+      created_at: '2026-09-21T00:00:00Z',
+      findings: [],
+    });
+    const run = RunSummary.parse({
+      run_id: 'run-1',
+      agent_id: 'agent-1',
+      agent_name: 'General Reviewer',
+      provider: 'openrouter',
+      model: 'openrouter/test',
+      status: 'done',
+      error: null,
+      duration_ms: 100,
+      tokens_in: 10,
+      tokens_out: 5,
+      cost_usd: null,
+      findings_count: 0,
+      grounding: '0/0 passed',
+      ran_at: '2026-09-21T00:00:00Z',
+      score: 100,
+      blockers: 0,
+    });
+
+    expect(pr.cost_usd).toBe(0.012);
+    expect(review.cost_usd).toBe(0.012);
+    expect(run.cost_usd).toBeNull();
+    expect(() => PrMeta.parse({ ...pr, cost_usd: -0.01 })).toThrow();
   });
 });
 

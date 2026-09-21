@@ -51,16 +51,18 @@ export interface MockLLMOptions {
    * by req.schemaName; falls back to `structured` when no entry matches.
    */
   structuredBySchema?: Record<string, unknown>;
+  /** Authoritative provider-reported cost for structured completions. */
+  providerCostUsd?: number | null;
   completionText?: string;
   embedding?: number[];
 }
 
 export class MockLLMProvider implements LLMProvider {
-  readonly id: 'openai' | 'anthropic';
+  readonly id: 'openai' | 'anthropic' | 'openrouter';
   public calls: { method: string; req: unknown }[] = [];
 
   constructor(
-    id: 'openai' | 'anthropic' = 'openai',
+    id: 'openai' | 'anthropic' | 'openrouter' = 'openai',
     private opts: MockLLMOptions = {},
   ) {
     this.id = id;
@@ -70,7 +72,7 @@ export class MockLLMProvider implements LLMProvider {
     this.calls.push({ method: 'listModels', req: null });
     return (
       this.opts.models ?? [
-        { id: 'gpt-4.1', provider: this.id === 'anthropic' ? 'anthropic' : 'openai' },
+        { id: 'gpt-4.1', provider: this.id },
       ]
     );
   }
@@ -98,6 +100,7 @@ export class MockLLMProvider implements LLMProvider {
       model: req.model,
       tokensIn: 100,
       tokensOut: 50,
+      providerCostUsd: this.opts.providerCostUsd ?? null,
       costUsd: 0.001,
       raw: JSON.stringify(fixture),
       attempts: 1,

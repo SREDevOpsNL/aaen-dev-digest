@@ -110,7 +110,11 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     await pg?.stop();
   });
 
-  function appWith(structured: unknown, provider: 'openai' | 'anthropic' = 'openai') {
+  function appWith(
+    structured: unknown,
+    provider: 'openai' | 'anthropic' | 'openrouter' = 'openai',
+    providerCostUsd: number | null = null,
+  ) {
     return buildApp({
       config: config(),
       db: pg.handle.db,
@@ -118,7 +122,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
         embedder: new MockEmbedder(),
         git: new MockGitClient({ diff: DIFF }),
         llm: {
-          [provider]: new MockLLMProvider(provider, { structured }),
+          [provider]: new MockLLMProvider(provider, { structured, providerCostUsd }),
         },
       },
     });
@@ -158,14 +162,14 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
   });
 
   it('runs a review: map-reduce + grounding drops the hallucinated finding, keeps the valid one', async () => {
-    const app = await appWith(REVIEW_FIXTURE);
+    const app = await appWith(REVIEW_FIXTURE, 'openrouter', 0.012);
     const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
 
     const agent = (
       await app.inject({
         method: 'POST',
         url: '/agents',
-        payload: { name: 'Sec', provider: 'openai', model: 'gpt-4.1', system_prompt: 'sec' },
+        payload: { name: 'Sec', provider: 'openrouter', model: 'gpt-4.1', system_prompt: 'sec' },
       })
     ).json();
 
@@ -191,6 +195,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     // Score is derived from the GROUNDED findings, not the model's self-reported
     // 42: grounding keeps one CRITICAL (line 11) ⇒ 100 − 35 = 65.
     expect(review.score).toBe(65);
+    expect(review.cost_usd).toBe(0.012);
     // grounding kept only the valid finding (line 11), dropped the line-999 one
     expect(review.findings).toHaveLength(1);
     expect(review.findings[0].file).toBe('src/config.ts');
@@ -201,6 +206,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     const trace = (await app.inject({ method: 'GET', url: `/runs/${runId}/trace` })).json();
     expect(trace.config.model).toBe('gpt-4.1');
     expect(trace.stats.grounding).toBe('1/2 passed');
+    expect(trace.stats.cost_usd).toBe(0.012);
     expect(trace.log.length).toBeGreaterThan(0);
 
     // agent_runs row populated for A5 to aggregate
@@ -208,6 +214,98 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(run!.status).toBe('done');
     expect(run!.findingsCount).toBe(1);
     expect(run!.grounding).toBe('1/2 passed');
+    expect(run!.costUsd).toBe(0.012);
+
+    const runHistory = (
+      await app.inject({ method: 'GET', url: `/pulls/${pr.id}/runs` })
+    ).json();
+    expect(runHistory[0].cost_usd).toBe(0.012);
+
+    await app.close();
+  });
+
+  it('does not persist an estimated cost when authoritative provider cost is unavailable', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Estimate Only', provider: 'openai', model: 'gpt-4.1', system_prompt: 's' },
+      })
+    ).json();
+
+    const body = (
+      await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } })
+    ).json();
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+
+    const [run] = await pg.handle.db
+      .select()
+      .from(t.agentRuns)
+      .where(eq(t.agentRuns.id, body.runs[0].run_id));
+    expect(run!.costUsd).toBeNull();
+
+    const reviews = (
+      await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })
+    ).json();
+    expect(reviews[0].cost_usd).toBeNull();
+
+    const trace = (
+      await app.inject({ method: 'GET', url: `/runs/${body.runs[0].run_id}/trace` })
+    ).json();
+    expect(trace.stats.cost_usd).toBeNull();
+
+    await app.close();
+  });
+
+  it('uses the run linked to the newest review for PR-list Cost without fallback', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const [olderRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'done', costUsd: 9 })
+      .returning();
+    const [newerRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'done', costUsd: null })
+      .returning();
+    await pg.handle.db.insert(t.reviews).values([
+      {
+        workspaceId,
+        prId: pr.id,
+        agentId: null,
+        runId: olderRun!.id,
+        kind: 'review',
+        score: 80,
+        createdAt: new Date('2026-09-20T10:00:00Z'),
+      },
+      {
+        workspaceId,
+        prId: pr.id,
+        agentId: null,
+        runId: newerRun!.id,
+        kind: 'review',
+        score: 90,
+        createdAt: new Date('2026-09-20T11:00:00Z'),
+      },
+    ]);
+
+    const listWithMissingLatest = (
+      await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })
+    ).json();
+    expect(listWithMissingLatest.find((item: { id: string }) => item.id === pr.id).cost_usd).toBeNull();
+
+    await pg.handle.db
+      .update(t.agentRuns)
+      .set({ costUsd: 0.025 })
+      .where(eq(t.agentRuns.id, newerRun!.id));
+    const listWithCost = (
+      await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })
+    ).json();
+    const listed = listWithCost.find((item: { id: string }) => item.id === pr.id);
+    expect(listed.score).toBe(90);
+    expect(listed.cost_usd).toBe(0.025);
 
     await app.close();
   });

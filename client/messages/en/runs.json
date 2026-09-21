@@ -1,5 +1,8 @@
 {
   "viewTrace": "View trace",
+  "review": {
+    "cost": "Cost"
+  },
   "finding": {
     "trifecta": "trifecta"
   },
@@ -39,7 +42,8 @@
     "stat": {
       "duration": "DURATION",
       "tokens": "TOKENS",
-      "findings": "FINDINGS"
+      "findings": "FINDINGS",
+      "cost": "COST"
     },
     "prompt": {
       "system": "System",

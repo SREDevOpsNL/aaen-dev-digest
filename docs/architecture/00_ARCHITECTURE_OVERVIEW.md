@@ -322,10 +322,13 @@ shared `Review` schema. Providers expose a common `LLMProvider` interface; the
 container supplies OpenAI, Anthropic, or OpenRouter implementations according
 to the agent configuration.
 
-The engine accumulates provider token counts and estimated cost across chunks.
-Cost estimation can use live OpenRouter pricing with a static fallback. The
-current studio persists token counts but does not persist the engine's
-`costUsd` result or expose a run-cost badge.
+The engine accumulates provider token counts and two deliberately distinct cost
+signals across chunks. `providerCostUsd` is authoritative only when every model
+response supplies a finite, non-negative provider-reported USD cost; otherwise
+it is `null`. The existing `costUsd` remains a best-available operational value
+and can fall back to token/pricing estimation. The studio persists only
+`providerCostUsd` as the run's cost, so an estimate can never silently become
+authoritative persisted data.
 
 ### Reduce, grounding, and score
 
@@ -363,7 +366,8 @@ For each successful agent run, the server persists:
 
 - one `reviews` row;
 - zero or more grounded `findings` rows;
-- completion state and metrics on `agent_runs`;
+- completion state, token metrics, and nullable authoritative provider-reported
+  USD cost on `agent_runs`;
 - one `run_traces` document containing configuration, statistics, assembled
   prompt, tool-call/chunk summary, raw model output, and the event log;
 - the reviewed head SHA on the PR.
@@ -376,6 +380,8 @@ complete copy of every exact per-file message sent to the model.
 Failures and cancellations update the run status and persist a trace containing
 the event log and error information available at that point. On server startup,
 runs left in `running` state by a dead process are reaped rather than resumed.
+Historical runs and runs whose provider did not report a complete cost retain a
+`null` cost. They are displayed as unavailable, never as `$0.00`.
 
 ### Live events
 
@@ -406,6 +412,13 @@ The primary tabs are:
 | Overview | PR description and high-level metadata. |
 | Findings | Review summaries, grounded findings, local accept/dismiss actions, live status, history, and trace access. |
 | Files changed | Patch rendering plus live GitHub review-comment threads and comment composer. |
+
+Run cost is shown on the PR list for the run linked to that PR's latest
+applicable review, inline beside each reviewer-run timestamp, and in the General
+Reviewer trace drawer beside Duration, Tokens, and Findings. The PR lookup uses
+the same newest review selection as the existing score/status path and does not
+fall back to an older priced run when the newest applicable run has no
+authoritative cost.
 
 Finding disposition and GitHub publication are deliberately separate paths.
 Accept/dismiss writes local finding state. Posting through the inline composer

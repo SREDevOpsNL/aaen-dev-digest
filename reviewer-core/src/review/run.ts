@@ -107,6 +107,9 @@ export interface ReviewOutcome {
   chunks: { label: string }[];
   tokensIn: number;
   tokensOut: number;
+  /** Provider-supplied USD cost only; null when any constituent call omitted it. */
+  providerCostUsd: number | null;
+  /** Best available cost, retained for existing estimated-cost consumers. */
   costUsd: number | null;
   /** Joined raw model outputs (for the run trace). */
   raw: string;
@@ -156,6 +159,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
   const partials: Review[] = [];
   let tokensIn = 0;
   let tokensOut = 0;
+  let providerCostUsd: number | null = 0;
   let costUsd: number | null = 0;
   const raws: string[] = [];
 
@@ -181,6 +185,10 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     });
     tokensIn += res.tokensIn;
     tokensOut += res.tokensOut;
+    providerCostUsd =
+      providerCostUsd == null || res.providerCostUsd == null
+        ? null
+        : providerCostUsd + res.providerCostUsd;
     costUsd = costUsd == null || res.costUsd == null ? null : costUsd + res.costUsd;
     raws.push(res.raw);
     partials.push(res.data);
@@ -213,6 +221,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     chunks: chunks.map((c) => ({ label: c.label })),
     tokensIn,
     tokensOut,
+    providerCostUsd,
     costUsd,
     raw: raws.join('\n---\n'),
   };

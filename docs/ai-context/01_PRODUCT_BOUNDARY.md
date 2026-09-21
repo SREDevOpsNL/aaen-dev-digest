@@ -44,7 +44,7 @@ flow, read
 | Live run progress | Operational | Run events are streamed through SSE from an in-process event bus. |
 | Run history and trace | Operational | Run status, metrics, logs, prompt assembly, raw model output, and findings are persisted. Failure and cancellation traces are also retained. |
 | Map-reduce prompt trace | Partial | A map-reduce trace stores chunk labels, joined raw outputs, and a whole-diff prompt-assembly representation; it does not persist every exact per-file message sent to the model. |
-| Run cost attribution | Partial | The engine accumulates `costUsd`, but the studio executor does not persist it or expose a run-cost badge; it persists token counts only. |
+| Run cost attribution | Partial | Authoritative provider-reported USD cost is implemented across the engine, generated migration, persistence path, APIs, and three UI surfaces. Missing provider cost remains `null`, and the engine's best-available estimated `costUsd` stays separate. Database-backed migration/persistence tests and the hermetic end-to-end regression gate have not passed yet, so the capability must not be promoted to Operational. |
 | Run cancellation | Partial | Cancellation is checked before model chunks. It cannot interrupt a model request already in flight, and a single-pass review has no later chunk checkpoint. |
 | Finding disposition | Operational | Findings can be accepted or dismissed locally. |
 | Inline GitHub comments | Operational | Comments authored in the Files view are read from and posted directly to GitHub; they are not a local comment mirror. |

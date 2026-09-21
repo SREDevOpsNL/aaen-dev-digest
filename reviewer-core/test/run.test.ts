@@ -115,6 +115,7 @@ describe('reviewPullRequest (engine)', () => {
           model: req.model,
           tokensIn: 0,
           tokensOut: 0,
+          providerCostUsd: 0,
           costUsd: 0,
           raw: '',
           attempts: 1,
@@ -134,5 +135,60 @@ describe('reviewPullRequest (engine)', () => {
     await reviewPullRequest({ systemPrompt: 's', model: 'm', diff, llm: recorder, sessionId: 'sess-abc' });
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((s) => s === 'sess-abc')).toBe(true);
+  });
+
+  it('aggregates provider cost only when every map-reduce call reports it', async () => {
+    const diff = await new MockGitClient({
+      diff: `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -0,0 +1 @@
++export const a = 1;
+diff --git a/b.ts b/b.ts
+--- a/b.ts
++++ b/b.ts
+@@ -0,0 +1 @@
++export const b = 2;`,
+    }).diff();
+    const costs: Array<number | null> = [0.01, 0.02];
+    const provider: LLMProvider = {
+      id: 'openrouter',
+      async completeStructured<T>(req): Promise<StructuredResult<T>> {
+        const providerCostUsd = costs.shift() ?? null;
+        return {
+          data: { verdict: 'approve', summary: 'clean', score: 100, findings: [] } as T,
+          model: req.model,
+          tokensIn: 10,
+          tokensOut: 5,
+          providerCostUsd,
+          costUsd: providerCostUsd ?? 0.5,
+          raw: '{}',
+          attempts: 1,
+        };
+      },
+      async listModels() { return []; },
+      async complete() { throw new Error('not used'); },
+      async embed() { return []; },
+    };
+
+    const complete = await reviewPullRequest({
+      systemPrompt: 's',
+      model: 'm',
+      diff,
+      llm: provider,
+      strategy: 'map-reduce',
+    });
+    expect(complete.providerCostUsd).toBeCloseTo(0.03);
+
+    costs.push(0.01, null);
+    const partial = await reviewPullRequest({
+      systemPrompt: 's',
+      model: 'm',
+      diff,
+      llm: provider,
+      strategy: 'map-reduce',
+    });
+    expect(partial.providerCostUsd).toBeNull();
+    expect(partial.costUsd).toBeCloseTo(0.51);
   });
 });
