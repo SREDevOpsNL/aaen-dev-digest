@@ -55,6 +55,14 @@ correction. Repo-intel remains server-scoped;
   evaluated to `false` on Windows while explicit imports applied migrations and
   seed data.
 
+- **2026-09-21** — Scope correction to the preceding Windows CLI-entrypoint
+  entry: Windows is not a supported project-development environment for this
+  checkout. Run database scripts and all other project tooling in Ubuntu 24.04
+  WSL2; do not install Node or related development tools on the Windows host.
+  Evidence: `pnpm db:migrate` and `pnpm db:seed` both executed their CLI paths
+  successfully during `npm run e2e:hermetic` in WSL, followed by 7/7 passing
+  browser flows.
+
 ## Session Notes
 
 ## Open Questions
