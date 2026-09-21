@@ -2,8 +2,8 @@
 
 > **Document role:** Canonical curated explanation of how the current DevDigest
 > system works.
-> **Last verified:** 2026-09-17 against `main` at
-> `c6af1e452969dcad9f451e29c0a4e461a41405ae`.
+> **Last verified:** 2026-09-21 against `main` at
+> `b1869799f3ba240a457f37e43cf8d42e290819aa`.
 > Product identity is owned by
 > [`docs/ai-context/00_PRODUCT_IDENTITY.md`](../ai-context/00_PRODUCT_IDENTITY.md),
 > and capability status by

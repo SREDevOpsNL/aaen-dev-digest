@@ -2,8 +2,8 @@
 
 > **Document role:** Canonical statement of what is operational, partially wired,
 > or scaffolded in the current product.
-> **Last verified:** 2026-09-17 against `main` at
-> `c6af1e452969dcad9f451e29c0a4e461a41405ae`.
+> **Last verified:** 2026-09-21 against `main` at
+> `b1869799f3ba240a457f37e43cf8d42e290819aa`.
 
 This document prevents future-facing schemas, contracts, prompts, and UI mounts
 from being mistaken for shipped capabilities. For the stable product definition,
