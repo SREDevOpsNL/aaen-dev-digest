@@ -44,6 +44,17 @@ correction. Repo-intel remains server-scoped;
 
 ## Recurring Errors & Fixes
 
+- **2026-09-21** — On Windows, `tsx src/db/migrate.ts` and
+  `tsx src/db/seed.ts` can exit successfully without running because their CLI
+  guards compare the canonical `import.meta.url` (`file:///D:/...`) with a
+  non-canonical `file://${process.argv[1]}` value (`file://D:\\...`). Normalize
+  `process.argv[1]` with `pathToFileURL(resolve(...)).href` before relying on
+  these scripts on Windows; until then, invoke the exported functions
+  explicitly. Evidence: `server/src/db/migrate.ts:37` and
+  `server/src/db/seed.ts:227` (CLI entrypoint guards); the same path comparison
+  evaluated to `false` on Windows while explicit imports applied migrations and
+  seed data.
+
 ## Session Notes
 
 ## Open Questions
