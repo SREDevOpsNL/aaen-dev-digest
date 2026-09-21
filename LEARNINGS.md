@@ -35,6 +35,15 @@ Module-local findings belong beside their subject —
   the skills from Cursor. Evidence: `ls .cursor` → no such directory;
   `.claude/skills/README.md` now says so rather than asserting the link exists.
 
+- **2026-09-21** — Do not treat the presence of active workflow files as proof
+  that CI ran in this public fork. After the sanitized Run Cost push, GitHub
+  reported Actions enabled and all five workflows active, but registered zero
+  workflow runs and zero check runs for `7225418`. Verify the Actions run API
+  after each push and retain complete local validation evidence when it remains
+  empty. Evidence: `gh api repos/SREDevOpsNL/aaen-dev-digest/actions/permissions`,
+  `gh api repos/SREDevOpsNL/aaen-dev-digest/actions/workflows`, and
+  `gh api repos/SREDevOpsNL/aaen-dev-digest/commits/7225418/check-runs`.
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source
