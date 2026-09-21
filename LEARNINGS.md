@@ -116,6 +116,15 @@ Module-local findings belong beside their subject —
 
 ## Decisions
 
+- **2026-09-21** — Use the Ubuntu 24.04 WSL2 checkout at
+  `/home/dmitri/projects/aaen-dev-digest` as this project's authoritative
+  development environment, and keep Node, package-manager, browser, and Docker
+  tooling inside WSL. Treat `\\wsl.localhost` as Windows host access only;
+  reject implementation or validation from the separate `D:\Codex` checkout.
+  Evidence: user environment correction; WSL Node `v22.23.2` from `~/.nvm`,
+  native Docker Engine `29.8.1`, and `npm run e2e:hermetic` passing all 7 flows
+  in an isolated WSL worktree.
+
 ## Recurring Errors & Fixes
 
 - **2026-09-19** — On Windows Insider build 26200, Docker Desktop can enter a
