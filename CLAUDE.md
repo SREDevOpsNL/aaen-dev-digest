@@ -70,6 +70,15 @@ When two sources disagree, the higher one wins:
 Node ≥22 · pnpm ≥10 · TypeScript · Fastify 5 · Next.js 15 / React 19 ·
 Drizzle ORM + Postgres (pgvector) · Zod · Vitest · agent-browser (e2e)
 
+## Authoritative development environment
+
+All project development, dependency installation, builds, tests, browser
+automation, and Docker work must run in Ubuntu 24.04 WSL2 from
+`/home/dmitri/projects/aaen-dev-digest` or one of its WSL-native worktrees.
+Windows may access the checkout through `\\wsl.localhost` as a host view only.
+Do not install or run project development tooling on Windows, and do not use a
+separate Windows checkout such as `D:\Codex\aaen-dev-digest` for delivery.
+
 ## Commands
 
 | Task            | Command                                                |

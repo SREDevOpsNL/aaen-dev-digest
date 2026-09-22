@@ -5,12 +5,18 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Toggle, EmptyState } from "@devdigest/ui";
-import type { FindingRecord } from "@devdigest/shared";
+import type { FindingRecord, Severity } from "@devdigest/shared";
 import { FindingCard } from "../FindingCard";
 import { useFindingAction } from "../../../../../../../lib/hooks/reviews";
-import { KEY_TO_ACTION } from "./constants";
-import { visibleFindings } from "./helpers";
+import { FILTER_SEVERITIES, KEY_TO_ACTION } from "./constants";
+import { countFindingsBySeverity, visibleFindings } from "./helpers";
 import { s } from "./styles";
+
+const SEVERITY_COLORS: Record<Severity, { color: string; background: string }> = {
+  CRITICAL: { color: "var(--crit)", background: "var(--crit-bg)" },
+  WARNING: { color: "var(--warn)", background: "var(--warn-bg)" },
+  SUGGESTION: { color: "var(--sugg)", background: "var(--sugg-bg)" },
+};
 
 export function FindingsPanel({
   findings,
@@ -26,9 +32,21 @@ export function FindingsPanel({
   const t = useTranslations("prReview");
   const action = useFindingAction();
   const [hideLow, setHideLow] = React.useState(false);
+  const [activeSeverity, setActiveSeverity] = React.useState<Severity | null>(null);
   const [focusIdx, setFocusIdx] = React.useState(0);
 
-  const shown = React.useMemo(() => visibleFindings(findings, hideLow), [findings, hideLow]);
+  const severityCounts = countFindingsBySeverity(findings);
+  const shown = visibleFindings(findings, hideLow, activeSeverity);
+
+  const selectSeverity = (severity: Severity) => {
+    setActiveSeverity((current) => (current === severity ? null : severity));
+    setFocusIdx(0);
+  };
+
+  const changeHideLow = (on: boolean) => {
+    setHideLow(on);
+    setFocusIdx(0);
+  };
 
   // j/k navigation + a/d shortcuts on the focused finding (keyboard).
   React.useEffect(() => {
@@ -48,9 +66,41 @@ export function FindingsPanel({
   return (
     <div>
       <div style={s.toolbar}>
+        <div role="group" style={s.severityFilters} aria-label={t("panel.severityFilters")}>
+          {FILTER_SEVERITIES.flatMap((severity, index) => {
+            const count = severityCounts[severity];
+            if (count === 0) return [];
+            const colors = SEVERITY_COLORS[severity];
+            const filter = (
+              <button
+                key={severity}
+                type="button"
+                aria-pressed={activeSeverity === severity}
+                onClick={() => selectSeverity(severity)}
+                style={s.severityButton(colors.color, colors.background, activeSeverity === severity)}
+              >
+                {t("panel.severityCounter", {
+                  count,
+                  severity: t(`panel.severity.${severity.toLowerCase()}`),
+                })}
+              </button>
+            );
+            const hasEarlierCounter = FILTER_SEVERITIES.slice(0, index).some(
+              (candidate) => severityCounts[candidate] > 0,
+            );
+            return hasEarlierCounter
+              ? [
+                  <span key={`${severity}-separator`} aria-hidden="true" style={s.separator}>
+                    ·
+                  </span>,
+                  filter,
+                ]
+              : [filter];
+          })}
+        </div>
         <div style={s.toggleGroup}>
           {t("panel.hideLowConfidence")}
-          <Toggle on={hideLow} onChange={setHideLow} size={16} />
+          <Toggle on={hideLow} onChange={changeHideLow} size={16} />
         </div>
       </div>
 

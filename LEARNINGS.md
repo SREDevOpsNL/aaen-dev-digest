@@ -116,6 +116,15 @@ Module-local findings belong beside their subject —
 
 ## Decisions
 
+- **2026-09-21** — Use the Ubuntu 24.04 WSL2 checkout at
+  `/home/dmitri/projects/aaen-dev-digest` as this project's authoritative
+  development environment, and keep Node, package-manager, browser, and Docker
+  tooling inside WSL. Treat `\\wsl.localhost` as Windows host access only;
+  reject implementation or validation from the separate `D:\Codex` checkout.
+  Evidence: user environment correction; WSL Node `v22.23.2` from `~/.nvm`,
+  native Docker Engine `29.8.1`, and `npm run e2e:hermetic` passing all 7 flows
+  in an isolated WSL worktree.
+
 ## Recurring Errors & Fixes
 
 - **2026-09-19** — On Windows Insider build 26200, Docker Desktop can enter a
@@ -128,6 +137,14 @@ Module-local findings belong beside their subject —
   error 1920 (`The file cannot be accessed by the system`) reproduced on
   4.80.0 and 4.91.0; `docker/desktop-feedback#527` documents the same failure on
   Windows build 26200; native Ubuntu Docker Engine 29.8.1 passed `hello-world`.
+
+- **2026-09-22** — When Codex drives native WSL Docker through separate, short
+  `wsl.exe` invocations, a healthy container can exit cleanly before the next
+  invocation if no long-lived Linux process keeps the distro active. Start the
+  database, migrations, seed, and API in one continuous WSL session for
+  multi-step experiments. Evidence: `devdigest-final-review-db` was healthy,
+  then exited with code 0 before the next migration command; the same sequence
+  completed when kept in one session (`migrate` → `seed` → API → two reviews).
 
 ## Session Notes
 

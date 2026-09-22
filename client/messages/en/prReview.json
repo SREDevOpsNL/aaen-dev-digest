@@ -27,6 +27,13 @@
     "prScore": "PR SCORE"
   },
   "panel": {
+    "severityFilters": "Filter findings by severity",
+    "severityCounter": "{count} {severity}",
+    "severity": {
+      "critical": "CRITICAL",
+      "warning": "WARNING",
+      "suggestion": "SUGGESTION"
+    },
     "hideLowConfidence": "Hide low confidence",
     "noMatchTitle": "No findings match",
     "noMatchBody": "Adjust the filters above, or run a review to generate findings."
