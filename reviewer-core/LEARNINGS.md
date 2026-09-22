@@ -12,6 +12,17 @@ correction. Genuinely cross-package findings belong in
 
 ## What Doesn't Work
 
+- **2026-09-22** — Do not judge a prompt revision by fewer findings, lower cost,
+  or citation grounding alone. On the same PR, General Reviewer version 2 cut
+  findings from 8 to 4 and output tokens from 2,064 to 1,264, but lost three
+  valid issues and introduced a false “missing await” finding; returning a
+  promise from an `async` function already adopts its result and rejection.
+  Evaluate prompt changes against an expected-finding matrix that separately
+  scores false positives, false negatives, severity, duplication, latency,
+  tokens, and cost, preferably over repeated runs. Evidence: DevDigest runs
+  `fe0e6160-830a-4196-9f8c-0af6fcabbc49` (prompt v1) and
+  `0be27a60-2c8a-41a3-9f78-d75b8c76e3e1` (prompt v2) on PR #3.
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-17** — A map-reduce run records one `PromptAssembly` — the whole-diff

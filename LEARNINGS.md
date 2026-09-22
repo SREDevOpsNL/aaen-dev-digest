@@ -138,6 +138,14 @@ Module-local findings belong beside their subject —
   4.80.0 and 4.91.0; `docker/desktop-feedback#527` documents the same failure on
   Windows build 26200; native Ubuntu Docker Engine 29.8.1 passed `hello-world`.
 
+- **2026-09-22** — When Codex drives native WSL Docker through separate, short
+  `wsl.exe` invocations, a healthy container can exit cleanly before the next
+  invocation if no long-lived Linux process keeps the distro active. Start the
+  database, migrations, seed, and API in one continuous WSL session for
+  multi-step experiments. Evidence: `devdigest-final-review-db` was healthy,
+  then exited with code 0 before the next migration command; the same sequence
+  completed when kept in one session (`migrate` → `seed` → API → two reviews).
+
 ## Session Notes
 
 ## Open Questions
