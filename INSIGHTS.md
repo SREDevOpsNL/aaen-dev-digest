@@ -36,6 +36,11 @@ files linked from it.
   a promise from an `async` function already propagates its result and rejection.
   The experiment improved concision and cost, not overall review quality.
 
+  Version 2 also took 188.8 seconds versus 67.5 seconds for version 1—about
+  2.8 times slower despite costing 37.6% less. This reinforces that latency,
+  quality, and cost must be evaluated independently rather than treating any
+  single metric as a proxy for prompt quality.
+
   Engineering Insights worked well as a durable correction and evidence loop:
   it turned the WSL2-only requirement into both operational instructions and a
   retained historical record, and captured the container-lifecycle and prompt-
