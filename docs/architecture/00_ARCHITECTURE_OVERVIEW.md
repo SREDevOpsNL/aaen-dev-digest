@@ -2,8 +2,8 @@
 
 > **Document role:** Canonical curated explanation of how the current DevDigest
 > system works.
-> **Last reviewed:** 2026-09-23 against the L02 Skills working tree. See the
-> product boundary for the remaining Docker-backed verification gate.
+> **Last verified:** 2026-09-25 against L02 commit `accd9c8`; Docker-backed
+> persistence tests and hermetic browser flows passed in GitHub Actions.
 > Product identity is owned by
 > [`docs/ai-context/00_PRODUCT_IDENTITY.md`](../ai-context/00_PRODUCT_IDENTITY.md),
 > and capability status by

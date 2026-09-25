@@ -1,6 +1,6 @@
 # Skills for Review Agents
 
-**Status:** implemented; Docker-backed verification pending (2026-09-23)
+**Status:** implemented and verified (2026-09-25)
 **Packages touched:** server, client, reviewer-core integration, seed data, docs
 **Design reference:** attached `DevDigest Design (design with Skills).html`, Skills rail/editor and Agent editor Skills tab
 
@@ -216,8 +216,8 @@ The reviewer is a normal enabled independent reviewer, not a composed/multi-agen
 | 5 | Idempotent reviewer + four-skill seed and prompt doc | Implemented |
 | 6 | Skills rail, editor tabs, local text import, hooks/i18n | Implemented |
 | 7 | Agent Skills tab with attach/detach/reorder/max-four UI | Implemented |
-| 8 | Server, reviewer-core, client, and browser verification | Typechecks/unit green; Docker-backed suites pending |
-| 9 | Product-boundary and architecture-doc update | Updated with explicit Partial status pending Docker evidence |
+| 8 | Server, reviewer-core, client, and browser verification | Complete; all GitHub checks passed on PR #4 |
+| 9 | Product-boundary and architecture-doc update | Complete; operational boundary recorded |
 
 Backend and frontend work can proceed in parallel after contracts are stable. Prompt wiring depends on the repository/service API; UI depends on the mirrored client contracts.
 

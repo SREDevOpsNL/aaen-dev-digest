@@ -1,6 +1,6 @@
 # Conventions Extractor
 
-**Status:** in progress; runtime verification pending (2026-09-25)  
+**Status:** implemented and verified (2026-09-25)  
 **Packages touched:** server, client, shared contracts, seed-aware browser coverage  
 **Related:** [Skills for Review Agents](01-skills-for-review-agents.md)
 
