@@ -41,4 +41,5 @@ real spec shows what is actually missing from this one.
 
 ## Index
 
-No cross-package specs yet.
+- [`01-skills-for-review-agents.md`](01-skills-for-review-agents.md) - **implemented; Docker verification pending**: reusable text-only skills, agent attachment, prompt wiring, and the updated Skills editor design.
+- [`02-conventions-extractor.md`](02-conventions-extractor.md) - **in progress; runtime verification pending**: bounded repository sampling, grounded convention candidates, human triage, and conversion of accepted rules into a Skill draft.

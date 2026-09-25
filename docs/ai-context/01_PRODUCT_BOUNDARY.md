@@ -2,8 +2,9 @@
 
 > **Document role:** Canonical statement of what is operational, partially wired,
 > or scaffolded in the current product.
-> **Last verified:** 2026-09-21 against `main` at
-> `4cdbd57db1345c0d80dcc0ef82d6831fc400797b`.
+> **Last reviewed:** 2026-09-23 against the L02 Skills working tree. Package
+> typechecks and hermetic unit suites pass; Docker-backed persistence and browser
+> gates remain pending because the local Docker daemon could not start.
 
 This document prevents future-facing schemas, contracts, prompts, and UI mounts
 from being mistaken for shipped capabilities. For the stable product definition,
@@ -54,7 +55,7 @@ flow, read
 
 | Capability | Verified implementation state | Boundary conclusion |
 | --- | --- | --- |
-| Skills | Tables, agent-skill link routes, contracts, and a review-engine prompt slot exist. There is no registered skills module or primary skills management UI, and the studio run executor does not resolve and pass skill bodies into reviews. | Scaffolded, not an operational review input. |
+| Skills | The registered module implements workspace-scoped text CRUD, immutable body versions, usage counts, and ordered agent links. `/skills` provides config, preview, version history, local-text import, and honest Evals/Stats placeholders; the Agent editor attaches/reorders skills. The studio executor resolves globally enabled linked bodies in order and reviewer-core fences them as untrusted criteria in the persisted prompt trace. Typechecks and unit tests pass, while the new DB-backed and browser flows are written but could not run because the local Docker daemon failed to start. | Implemented end to end in source, but release verification is incomplete; keep the capability **Partial** until the Docker-backed API/prompt tests and hermetic browser flow pass. URL/community import, skill Evals/Stats, and CI skill execution remain non-operational. |
 | Persistent memory / RAG | Tables, vector-oriented schema, embedder wiring, trace fields, and a prompt slot exist. The studio executor does not retrieve memory or pass it to `reviewer-core`. | Not operational. `EMBEDDINGS_ENABLED=true` alone does not make it operational. |
 | Project context / specs | Tables, contracts, client hooks, and prompt slots exist, but no context module is registered and the studio executor supplies no specs. | Scaffolded. |
 | Intent and PR brief | Schema/contracts exist, but no registered intent or brief module participates in the current review flow. | Scaffolded. |
@@ -95,8 +96,8 @@ flow, read
 - Local: database, repository clone, settings, run history, findings, and secret
   file.
 - GitHub-bound: repository/PR reads, clone authentication, and inline comments.
-- LLM-bound during review: diff, PR description, agent prompt, and enabled
-  repository-derived context.
+- LLM-bound during review: diff, PR description, agent prompt, enabled linked
+  skill text, and enabled repository-derived context.
 
 ### Runtime topology
 

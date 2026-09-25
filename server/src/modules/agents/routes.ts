@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
+import { AgentSkillDetail, CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
@@ -59,12 +59,21 @@ const UpdateAgentBody = z.object({
 /** Either set the whole ordered set (`skill_ids`) or link one (`skill_id`). */
 const SetSkillsBody = z
   .object({
-    skill_ids: z.array(z.string().uuid()).optional(),
+    skill_ids: z
+      .array(z.string().uuid())
+      .max(100)
+      .refine((ids) => new Set(ids).size === ids.length, {
+        message: 'skill_ids must not contain duplicates',
+      })
+      .optional(),
     skill_id: z.string().uuid().optional(),
-    order: z.number().int().optional(),
+    order: z.number().int().nonnegative().optional(),
   })
-  .refine((b) => b.skill_ids !== undefined || b.skill_id !== undefined, {
-    message: 'Provide skill_ids (set/reorder) or skill_id (link one)',
+  .refine((body) => (body.skill_ids !== undefined) !== (body.skill_id !== undefined), {
+    message: 'Provide exactly one of skill_ids (set/reorder) or skill_id (link one)',
+  })
+  .refine((body) => body.skill_id !== undefined || body.order === undefined, {
+    message: 'order is only valid with skill_id',
   });
 
 export default async function agentsRoutes(appBase: FastifyInstance) {
@@ -142,16 +151,26 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
     },
   );
 
-  app.get('/agents/:id/skills', { schema: { params: IdParams } }, async (req) => {
+  app.get(
+    '/agents/:id/skills',
+    { schema: { params: IdParams, response: { 200: z.array(AgentSkillDetail) } } },
+    async (req) => {
     const { workspaceId } = await getContext(app.container, req);
     const agent = await service.get(workspaceId, req.params.id);
     if (!agent) throw new NotFoundError('Agent not found');
     return service.skillLinks(req.params.id);
-  });
+    },
+  );
 
   app.post(
     '/agents/:id/skills',
-    { schema: { params: IdParams, body: SetSkillsBody } },
+    {
+      schema: {
+        params: IdParams,
+        body: SetSkillsBody,
+        response: { 200: z.array(AgentSkillDetail) },
+      },
+    },
     async (req) => {
       const { workspaceId } = await getContext(app.container, req);
       const body = req.body;

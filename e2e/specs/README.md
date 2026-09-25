@@ -21,6 +21,8 @@ is how the suite works **today**.
 | `05-pr-diff.flow.json`           | PR detail Files changed tab renders the seeded diff            |
 | `06-onboarding.flow.json`        | Onboarding add-repository screen renders                       |
 | `07-settings.flow.json`          | Settings renders the API Keys and Feature Models sections      |
+| `08-skills.flow.json`            | Skills library and Test Quality Reviewer render from seed      |
+| `09-conventions.flow.json`       | Conventions Extractor opens for the seeded repository           |
 
 Flows `01`, `02`, `04` and `05` enter at `{BASE}/` and follow the home redirect to
 the **first** repo, so they assume the seeded demo repo is the only one.
