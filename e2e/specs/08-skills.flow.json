@@ -1,0 +1,14 @@
+{
+  "name": "Skills library and Test Quality Reviewer render from seeded data",
+  "description": "Loads the Skills library and Agents list, proving the text-only Skills API, seeded four-skill catalog, navigation route, and seeded Test Quality Reviewer are visible without triggering a model call or write.",
+  "steps": [
+    { "cmd": ["open", "{BASE}/skills"], "label": "load the Skills library" },
+    { "cmd": ["wait", "--url", "/skills"], "label": "skills route reached" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "skills fetch settles" },
+    { "cmd": ["wait", "--text", "Behavioral Coverage"], "label": "seeded behavioral skill is visible" },
+    { "cmd": ["wait", "--text", "Test Isolation and Determinism"], "label": "seeded isolation skill is visible" },
+    { "cmd": ["open", "{BASE}/agents"], "label": "load the Agents list" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "agents fetch settles" },
+    { "cmd": ["wait", "--text", "Test Quality Reviewer"], "label": "seeded reviewer is visible" }
+  ]
+}

@@ -9,6 +9,11 @@ import type { FindingRow, PullRow, ReviewRow } from './repository.js';
 // shared with the CI runner); re-exported here for backward-compatible imports.
 export { reduceReviews, sliceDiff } from '@devdigest/reviewer-core';
 
+/** Render resolved skill config; reviewer-core applies the untrusted delimiter. */
+export function toSkillPromptBlock(skill: { name: string; body: string }): string {
+  return `### ${skill.name}\n${skill.body.trim()}`;
+}
+
 export interface ReviewDtoFinding extends Finding {
   review_id: string;
   accepted_at: string | null;
