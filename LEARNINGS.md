@@ -114,6 +114,14 @@ Module-local findings belong beside their subject —
   `reviewer-core/src/review/run.ts:159-184` (`reviewPullRequest`),
   `server/src/platform/container.ts:181-188` (`Container.buildLlm`).
 
+- **2026-09-25** — The reverted history contains a complete Conventions
+  Extractor specification, implementation, and tests in commit `641b637`, but
+  that commit also bundles an older Skills implementation and migrations
+  `0011`-`0015`. Use it as a porting reference against the current L02 Skills
+  contracts and generate a new migration from the current schema; do not
+  cherry-pick it wholesale. Evidence: `git show
+  641b637:docs/specs/conventions.md`; `git show --stat 641b637`.
+
 ## Decisions
 
 ## Recurring Errors & Fixes

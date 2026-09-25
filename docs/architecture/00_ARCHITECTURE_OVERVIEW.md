@@ -2,8 +2,8 @@
 
 > **Document role:** Canonical curated explanation of how the current DevDigest
 > system works.
-> **Last verified:** 2026-09-21 against `main` at
-> `4cdbd57db1345c0d80dcc0ef82d6831fc400797b`.
+> **Last verified:** 2026-09-25 against L02 commit `accd9c8`; Docker-backed
+> persistence tests and hermetic browser flows passed in GitHub Actions.
 > Product identity is owned by
 > [`docs/ai-context/00_PRODUCT_IDENTITY.md`](../ai-context/00_PRODUCT_IDENTITY.md),
 > and capability status by
@@ -19,14 +19,15 @@ Its current operational capabilities centre on:
 - cloning and indexing repositories locally;
 - importing and browsing pull requests;
 - configuring specialised reviewer agents;
+- managing reusable text-only review skills and attaching them to agents;
 - executing one or all enabled AI reviewer configurations;
 - grounding findings against actual changed lines;
 - persisting reviews, findings, run status, and execution traces;
 - accepting or dismissing findings locally;
 - authoring inline review comments that are posted to GitHub.
 
-Weekly digests, evaluation, persistent memory, CI export, first-class skills,
-plugins, dashboards, onboarding, and related capabilities currently exist
+Weekly digests, evaluation, persistent memory, CI export, plugins, dashboards,
+onboarding, and related capabilities currently exist
 primarily as schema, contracts, prompt slots, or other scaffolding for later
 course stages. They are not part of the operational architecture unless listed
 as operational in the product-boundary document.
@@ -295,10 +296,12 @@ The guard tells the model that text inside those blocks is evidence to analyse,
 not instructions to follow. It specifically prevents claims such as “this is a
 test fixture” or “do not report this problem” from redefining the review task.
 
-The reusable engine has optional slots for skills, memory, and specs. Their
-existence is an extension point, not evidence that the studio resolves those
-inputs today. The current studio executor passes the diff, PR description,
-agent prompt, caller digest, repo map, and rank note.
+The reusable engine has optional slots for skills, memory, and specs. The studio
+now resolves an agent's globally enabled linked skills in deterministic order,
+passes each body as separately fenced untrusted review criteria, and persists the
+assembled skill block in the run trace. Memory and project specs remain extension
+points that the studio does not resolve today. The executor also passes the diff,
+PR description, agent prompt, caller digest, repo map, and rank note.
 
 ### Strategy selection
 

@@ -1,0 +1,12 @@
+{
+  "name": "Conventions Extractor opens for the seeded repository",
+  "description": "Navigates from the seeded repository shell to the read-only Conventions page and verifies its empty-state extraction affordance without triggering a model call.",
+  "steps": [
+    { "cmd": ["open", "{BASE}/"], "label": "load the seeded repository" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "repository shell settles" },
+    { "cmd": ["find", "text", "Conventions", "click"], "label": "open repository conventions" },
+    { "cmd": ["wait", "--url", "/conventions"], "label": "conventions route reached" },
+    { "cmd": ["wait", "--text", "No conventions extracted yet"], "label": "empty state renders" },
+    { "cmd": ["wait", "--text", "Run extraction"], "label": "extraction affordance is visible" }
+  ]
+}
