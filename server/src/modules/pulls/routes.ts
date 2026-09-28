@@ -117,7 +117,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
     const counts = new Map<string, { CRITICAL: number; WARNING: number; SUGGESTION: number }>();
     const previews = new Map<string, { severity: string; title: string; category: string; file: string; start_line: number; confidence: number; rationale: string }[]>();
     if (prIds.length > 0) {
-      const reviewRows = await container.db.select({ prId: t.reviews.prId, score: t.reviews.score, costUsd: t.agentRuns.costUsd }).from(t.reviews).leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId)).where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review'))).orderBy(desc(t.reviews.createdAt));
+      const reviewRows = await container.db.select({ prId: t.reviews.prId, score: t.reviews.score, costUsd: t.agentRuns.costUsd }).from(t.reviews).leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId)).where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review'), eq(t.agentRuns.status, 'done'))).orderBy(desc(t.reviews.createdAt));
       for (const rv of reviewRows) {
         const value = summaries.get(rv.prId) ?? { score: rv.score, cost: 0, missing: false };
         if (typeof rv.costUsd === 'number') value.cost += rv.costUsd; else value.missing = true;
