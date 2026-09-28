@@ -78,39 +78,51 @@ function renderWithIntl(ui: React.ReactElement) {
 }
 
 describe("FindingsPanel", () => {
-  it("shows severity counts and filters the findings when a counter is toggled", () => {
+  it("keeps the counter and separate filter button in sync when either is toggled", () => {
     renderWithIntl(<FindingsPanel findings={FINDINGS} prId="pr1" />);
 
     expect(
       screen.getAllByRole("group", { name: "Filter findings by severity" })[1],
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "CRITICAL" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
-    expect(screen.getByRole("button", { name: "WARNING" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "SUGGESTION" })).toBeInTheDocument();
+    const warningCounter = screen.getByRole("button", { name: "1 WARNING" });
+    const warningFilter = screen.getByRole("button", { name: /^WARNING$/ });
+    expect(warningCounter).toBeEnabled();
+    expect(warningCounter).toHaveAttribute("aria-pressed", "false");
+    expect(warningFilter).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "1 CRITICAL" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^CRITICAL$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^SUGGESTION$/ })).toBeInTheDocument();
     expect(screen.getByText("Hide low confidence")).toBeInTheDocument();
     expect(screen.getByText("Hardcoded secret")).toBeInTheDocument();
     expect(screen.getByText("N+1 query")).toBeInTheDocument();
     expect(screen.getByText("Extract helper")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "WARNING" }));
-
-    expect(screen.getByRole("button", { name: "WARNING" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    fireEvent.click(warningCounter);
+    expect(warningCounter).toHaveAttribute("aria-pressed", "true");
+    expect(warningFilter).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByText("Hardcoded secret")).not.toBeInTheDocument();
     expect(screen.getByText("N+1 query")).toBeInTheDocument();
     expect(screen.queryByText("Extract helper")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "WARNING" }));
-
+    fireEvent.click(warningFilter);
+    expect(warningCounter).toHaveAttribute("aria-pressed", "false");
+    expect(warningFilter).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByText("Hardcoded secret")).toBeInTheDocument();
     expect(screen.getByText("Extract helper")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "SUGGESTION" }));
+    fireEvent.click(warningFilter);
+    expect(warningCounter).toHaveAttribute("aria-pressed", "true");
+    expect(warningFilter).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Hardcoded secret")).not.toBeInTheDocument();
+    expect(screen.getByText("N+1 query")).toBeInTheDocument();
+
+    fireEvent.click(warningCounter);
+    expect(warningCounter).toHaveAttribute("aria-pressed", "false");
+    expect(warningFilter).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Hardcoded secret")).toBeInTheDocument();
+    expect(screen.getByText("Extract helper")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^SUGGESTION$/ }));
     fireEvent.click(screen.getByRole("switch"));
 
     expect(screen.getByText("No findings match")).toBeInTheDocument();

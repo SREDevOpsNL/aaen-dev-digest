@@ -75,9 +75,10 @@ export function FindingsPanel({
               <button
                 key={severity}
                 type="button"
-                disabled
+                aria-pressed={activeSeverity === severity}
+                onClick={() => selectSeverity(severity)}
                 aria-label={t("panel.severityCounter", { count, severity: t(`panel.severity.${severity.toLowerCase()}`) })}
-                style={s.severityButton(colors.color, colors.background, false)}
+                style={s.severityButton(colors.color, colors.background, activeSeverity === severity)}
               >
                 {t("panel.severityCounter", {
                   count,
