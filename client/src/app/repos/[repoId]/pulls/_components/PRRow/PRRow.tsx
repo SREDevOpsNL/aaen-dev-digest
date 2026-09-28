@@ -8,7 +8,7 @@ import { Icon, Avatar, Badge, CircularScore } from "@devdigest/ui";
 import type { PrMeta } from "@/lib/types";
 import { formatUsdCost } from "@/lib/format-cost";
 import { SIZE_COLOR, STATUS_META } from "../../constants";
-import { relativeTime, sizeOf } from "../../helpers";
+import { relativeTime, shortFindingDescription, sizeOf } from "../../helpers";
 import { s } from "../../styles";
 
 export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
@@ -56,7 +56,9 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
           <span style={s.muted}>—</span>
         )}
       </div>
-      <div className="mono" style={s.costCell}>{formatUsdCost(pr.cost_usd)}</div>
+      <div className="mono" data-testid="pr-list-cost" style={s.costCell}>
+        {pr.has_successful_review === false ? "" : formatUsdCost(pr.cost_usd)}
+      </div>
       <div style={{ position: "relative" }} onMouseEnter={() => setFindingsOpen(true)} onMouseLeave={() => setFindingsOpen(false)} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
           {Object.entries(pr.findings_by_severity ?? {}).filter(([, count]) => count > 0).map(([severity, count]) => <Badge key={severity} color={severity === "CRITICAL" ? "var(--crit)" : severity === "WARNING" ? "var(--warn)" : "var(--sugg)"} bg="transparent">{severity === "CRITICAL" ? "🛑" : severity === "WARNING" ? "⚠" : "💡"} {count}</Badge>)}
@@ -68,7 +70,7 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
             {previews.map((finding, index) => <div key={`${finding.file}:${finding.start_line}:${index}`} style={{ marginTop: 10, fontSize: 12 }}>
               <div><Badge color={finding.severity === "CRITICAL" ? "var(--crit)" : finding.severity === "WARNING" ? "var(--warn)" : "var(--sugg)"} bg="transparent">{finding.severity === "CRITICAL" ? "🛑" : finding.severity === "WARNING" ? "⚠" : "💡"} {finding.severity}</Badge> <strong>{finding.title}</strong> · {finding.category}</div>
               <div className="mono">{finding.file}:{finding.start_line} · {Math.round(finding.confidence * 100)}%</div>
-              <div>{finding.rationale}</div>
+              <div title={finding.rationale}>{shortFindingDescription(finding.rationale)}</div>
             </div>)}
           </div>
         )}

@@ -80,8 +80,8 @@ quick loop, use the hermetic subset.
 
 ## Read when
 
-- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and apply
-  the engineering-insights workflow from `../AGENTS.md` at the end of the task to add to it.
+- Read LEARNINGS.md and INSIGHTS.md first. At the end of the task, apply the engineering-insights
+  workflow from `../AGENTS.md`; it writes qualifying course-session entries to server/INSIGHTS.md and may retain companion context in LEARNINGS.md.
 - Read [`README.md`](README.md) for the API map and the request/DI flow diagram.
 - Read [`docs/`](docs/README.md) before changing the run lifecycle, the container,
   or the secrets path.

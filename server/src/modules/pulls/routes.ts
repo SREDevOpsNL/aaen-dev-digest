@@ -111,20 +111,23 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // The score stays newest-review based; cost and findings aggregate all review runs.
+    // Score and PR-list findings use the newest completed review; cost aggregates every completed review run.
     const prIds = rows.map((r) => r.id);
     const summaries = new Map<string, { score: number | null; cost: number; missing: boolean }>();
     const counts = new Map<string, { CRITICAL: number; WARNING: number; SUGGESTION: number }>();
+    const latestReviewIds = new Map<string, string>();
     const previews = new Map<string, { severity: string; title: string; category: string; file: string; start_line: number; confidence: number; rationale: string }[]>();
     if (prIds.length > 0) {
-      const reviewRows = await container.db.select({ prId: t.reviews.prId, score: t.reviews.score, costUsd: t.agentRuns.costUsd }).from(t.reviews).leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId)).where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review'), eq(t.agentRuns.status, 'done'))).orderBy(desc(t.reviews.createdAt));
+      const reviewRows = await container.db.select({ id: t.reviews.id, prId: t.reviews.prId, score: t.reviews.score, costUsd: t.agentRuns.costUsd }).from(t.reviews).leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId)).where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review'), eq(t.agentRuns.status, 'done'))).orderBy(desc(t.reviews.createdAt));
       for (const rv of reviewRows) {
         const value = summaries.get(rv.prId) ?? { score: rv.score, cost: 0, missing: false };
         if (typeof rv.costUsd === 'number') value.cost += rv.costUsd; else value.missing = true;
         summaries.set(rv.prId, value);
+        if (!latestReviewIds.has(rv.prId)) latestReviewIds.set(rv.prId, rv.id);
       }
-      const findingRows = await container.db.select({ prId: t.reviews.prId, severity: t.findings.severity, title: t.findings.title, category: t.findings.category, file: t.findings.file, startLine: t.findings.startLine, confidence: t.findings.confidence, rationale: t.findings.rationale }).from(t.findings).innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId)).where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')));
+      const findingRows = await container.db.select({ prId: t.reviews.prId, reviewId: t.findings.reviewId, severity: t.findings.severity, title: t.findings.title, category: t.findings.category, file: t.findings.file, startLine: t.findings.startLine, confidence: t.findings.confidence, rationale: t.findings.rationale }).from(t.findings).innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId)).where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')));
       for (const finding of findingRows) {
+        if (latestReviewIds.get(finding.prId) !== finding.reviewId) continue;
         const count = counts.get(finding.prId) ?? { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 };
         if (finding.severity in count) count[finding.severity as keyof typeof count] += 1;
         counts.set(finding.prId, count);
@@ -159,6 +162,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
         cost_usd: review && !review.missing ? review.cost : null,
+        has_successful_review: Boolean(review),
         findings_by_severity: counts.get(r.id) ?? null,
         finding_previews: previews.get(r.id) ?? [],
       };

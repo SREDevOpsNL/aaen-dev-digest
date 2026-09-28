@@ -172,6 +172,8 @@ export const PrMeta = z.object({
   score: z.number().int().nullish(),
   // Sum of provider-reported costs across successful review runs.
   cost_usd: z.number().nonnegative().nullish(),
+  // Distinguishes an absent successful review from a successful review with unavailable cost.
+  has_successful_review: z.boolean().optional(),
   findings_by_severity: z.object({ CRITICAL: z.number().int(), WARNING: z.number().int(), SUGGESTION: z.number().int() }).nullish(),
   finding_previews: z.array(z.object({ severity: z.string(), title: z.string(), category: z.string(), file: z.string(), start_line: z.number().int(), confidence: z.number(), rationale: z.string() })).nullish(),
 });

@@ -36,20 +36,21 @@ check the code before correcting anything.
 
 ## After finishing
 
-At the end of any task that involved a problem, fix, user correction, or
-non-obvious discovery, follow the engineering-insights workflow in
-[`.claude/skills/engineering-insights/SKILL.md`](.claude/skills/engineering-insights/SKILL.md):
-evaluate whether the task produced an engineering insight, and record each
-qualifying finding in the `LEARNINGS.md` where it applies, after checking that a
-similar entry is not already there. An agent with native skill support invokes
-`engineering-insights`; any other agent reads that `SKILL.md` and executes the
-workflow directly.
+For every task, without waiting for an explicit request, follow the
+engineering-insights workflow in
+[`.claude/skills/engineering-insights/SKILL.md`](.claude/skills/engineering-insights/SKILL.md).
+An agent with native skill support invokes `engineering-insights`; any other
+agent reads that `SKILL.md` and executes the workflow directly. The workflow
+evaluates whether a durable finding was made; it appends only significant,
+non-obvious, evidence-backed entries and skips duplicates or no-value work. For
+work in a package, the course-required session entry goes in that package
+INSIGHTS.md; LEARNINGS.md remains the durable companion log.
 
 Also capture a significant user correction, failed approach, or surprising
 discovery when it occurs rather than relying only on end-of-task invocation.
 
-Skip only the writing, and only when nothing non-obvious came up — a typo or a
-routine change is not an insight, and noise costs more than silence.
+Skip only the writing when nothing non-obvious came up; a typo or routine
+change is not an insight.
 
 ## Canonical product context
 
@@ -113,13 +114,12 @@ verification commands are in
 | Boot everything | `./scripts/dev.sh` (Postgres + API :3001 + web :3000)  |
 | Server          | `cd server && pnpm dev \| build \| typecheck \| test`  |
 | Migrations      | `cd server && pnpm db:generate` then `pnpm db:migrate` |
-| Client          | `cd client && pnpm dev \| build \| typecheck \| test`  |
+| Client          | `cd client && pnpm dev \| build \| typecheck \| lint \| test`  |
 | Engine          | `cd reviewer-core && npm test \| npm run typecheck`    |
 | E2E (hermetic)  | `cd e2e && npm run e2e:hermetic`                       |
 | Agent guidance  | `node scripts/verify-agent-instructions.mjs`           |
 
 Flags for `dev.sh`: `--no-seed` · `--no-client` · `--db-only` · `--help`.
-
 ## Repository map
 
 | Path                        | What                                                        | Local instructions                                 |
@@ -201,7 +201,7 @@ not restate what is here.
 
 | Changed area     | Required checks                                                     |
 | ---------------- | ------------------------------------------------------------------- |
-| `client/`        | `pnpm typecheck` and `pnpm test` in `client/`                        |
+| `client/`        | `pnpm typecheck`, `pnpm lint`, and `pnpm test` in `client/` |
 | `server/` logic  | `pnpm typecheck` + the hermetic unit subset (see server/AGENTS.md)  |
 | `server/` data   | also the DB-backed `*.it.test.ts` subset (needs Docker)              |
 | `reviewer-core/` | `npm run typecheck` and `npm test` in `reviewer-core/`               |

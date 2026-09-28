@@ -64,8 +64,8 @@ filesystem. The only side effect is an LLM call through an **injected**
 
 ## Read when
 
-- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and apply
-  the engineering-insights workflow from `../AGENTS.md` at the end of the task to add to it.
+- Read LEARNINGS.md and INSIGHTS.md first. At the end of the task, apply the engineering-insights
+  workflow from `../AGENTS.md`; it writes qualifying course-session entries to reviewer-core/INSIGHTS.md and may retain companion context in LEARNINGS.md.
 - Read [`README.md`](README.md) for the pipeline diagram and the full public API.
 - Read [`docs/`](docs/README.md) before changing prompt assembly or the grounding
   heuristics.

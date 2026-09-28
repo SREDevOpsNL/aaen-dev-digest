@@ -73,6 +73,7 @@
     "breadcrumb": "Pull Requests",
     "title": "Pull Requests",
     "summary": "{open} open · {needsReview} need review",
+    "findingsInRun": "{count} FINDINGS IN THIS RUN",
     "loading": "Loading pull requests…",
     "status": {
       "open": "Open",
