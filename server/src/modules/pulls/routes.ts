@@ -111,30 +111,32 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // Latest-review SCORE per PR for the list's score ring. Computed on read
-    // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
+    // The score stays newest-review based; cost and findings aggregate all review runs.
     const prIds = rows.map((r) => r.id);
-    const latestReviewByPr = new Map<string, { score: number | null; costUsd: number | null }>();
+    const summaries = new Map<string, { score: number | null; cost: number; missing: boolean }>();
+    const counts = new Map<string, { CRITICAL: number; WARNING: number; SUGGESTION: number }>();
+    const previews = new Map<string, { severity: string; title: string; category: string; file: string; start_line: number; confidence: number; rationale: string }[]>();
     if (prIds.length > 0) {
-      const reviewRows = await container.db
-        .select({ prId: t.reviews.prId, score: t.reviews.score, costUsd: t.agentRuns.costUsd })
-        .from(t.reviews)
-        .leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId))
-        .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')))
-        .orderBy(desc(t.reviews.createdAt));
-      // Rows are newest-first → first seen per PR is the latest review.
+      const reviewRows = await container.db.select({ prId: t.reviews.prId, score: t.reviews.score, costUsd: t.agentRuns.costUsd }).from(t.reviews).leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId)).where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review'))).orderBy(desc(t.reviews.createdAt));
       for (const rv of reviewRows) {
-        if (!latestReviewByPr.has(rv.prId)) {
-          latestReviewByPr.set(rv.prId, { score: rv.score, costUsd: rv.costUsd });
-        }
+        const value = summaries.get(rv.prId) ?? { score: rv.score, cost: 0, missing: false };
+        if (typeof rv.costUsd === 'number') value.cost += rv.costUsd; else value.missing = true;
+        summaries.set(rv.prId, value);
+      }
+      const findingRows = await container.db.select({ prId: t.reviews.prId, severity: t.findings.severity, title: t.findings.title, category: t.findings.category, file: t.findings.file, startLine: t.findings.startLine, confidence: t.findings.confidence, rationale: t.findings.rationale }).from(t.findings).innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId)).where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')));
+      for (const finding of findingRows) {
+        const count = counts.get(finding.prId) ?? { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 };
+        if (finding.severity in count) count[finding.severity as keyof typeof count] += 1;
+        counts.set(finding.prId, count);
+        const list = previews.get(finding.prId) ?? [];
+        list.push({ severity: finding.severity, title: finding.title, category: finding.category, file: finding.file, start_line: finding.startLine, confidence: finding.confidence, rationale: finding.rationale });
+        previews.set(finding.prId, list);
       }
     }
 
     const now = Date.now();
     return rows.map((r) => {
-      const review = latestReviewByPr.get(r.id);
+      const review = summaries.get(r.id);
       return {
         id: r.id,
         number: r.number,
@@ -156,7 +158,9 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
-        cost_usd: review ? review.costUsd : null,
+        cost_usd: review && !review.missing ? review.cost : null,
+        findings_by_severity: counts.get(r.id) ?? null,
+        finding_previews: previews.get(r.id) ?? [],
       };
     });
   });

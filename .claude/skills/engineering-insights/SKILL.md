@@ -13,14 +13,14 @@ description: >-
 
 1. Resolve the relevant file by the task or finding's subject, not by every
    package the task touches:
-   `client/**` -> `client/LEARNINGS.md`; `server/**`, including
-   `server/src/modules/repo-intel/**` -> `server/LEARNINGS.md`;
-   `reviewer-core/**` -> `reviewer-core/LEARNINGS.md`; `e2e/**` and
-   `scripts/e2e.sh` -> `e2e/LEARNINGS.md`. Root `LEARNINGS.md` takes CI,
+   `client/**` -> `client/INSIGHTS.md`; `server/**`, including
+   `server/src/modules/repo-intel/**` -> `server/INSIGHTS.md`;
+   `reviewer-core/**` -> `reviewer-core/INSIGHTS.md`; `e2e/**` and
+   `scripts/e2e.sh` -> `e2e/INSIGHTS.md`. Root `INSIGHTS.md` takes CI,
    repository tooling, `*/src/vendor/shared/**`, and findings that genuinely
    apply across packages. Split unrelated findings between their module files.
 2. Before starting work, read the resolved module file in full; also read root
-   `LEARNINGS.md` for cross-package work. Report `Read <file> - <up to 3
+   `INSIGHTS.md` for cross-package work. Report `Read <file> - <up to 3
    relevant points>` or `Read <file> - nothing relevant` so the read is
    observable. Apply existing entries unless current source contradicts them.
 3. Prioritize user corrections, but hold every entry to the same bar: record

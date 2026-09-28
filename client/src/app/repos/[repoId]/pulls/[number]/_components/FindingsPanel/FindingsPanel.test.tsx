@@ -82,22 +82,22 @@ describe("FindingsPanel", () => {
     renderWithIntl(<FindingsPanel findings={FINDINGS} prId="pr1" />);
 
     expect(
-      screen.getByRole("group", { name: "Filter findings by severity" }),
+      screen.getAllByRole("group", { name: "Filter findings by severity" })[1],
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "1 CRITICAL" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "CRITICAL" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
-    expect(screen.getByRole("button", { name: "1 WARNING" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "1 SUGGESTION" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "WARNING" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "SUGGESTION" })).toBeInTheDocument();
     expect(screen.getByText("Hide low confidence")).toBeInTheDocument();
     expect(screen.getByText("Hardcoded secret")).toBeInTheDocument();
     expect(screen.getByText("N+1 query")).toBeInTheDocument();
     expect(screen.getByText("Extract helper")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "1 WARNING" }));
+    fireEvent.click(screen.getByRole("button", { name: "WARNING" }));
 
-    expect(screen.getByRole("button", { name: "1 WARNING" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "WARNING" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -105,12 +105,12 @@ describe("FindingsPanel", () => {
     expect(screen.getByText("N+1 query")).toBeInTheDocument();
     expect(screen.queryByText("Extract helper")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "1 WARNING" }));
+    fireEvent.click(screen.getByRole("button", { name: "WARNING" }));
 
     expect(screen.getByText("Hardcoded secret")).toBeInTheDocument();
     expect(screen.getByText("Extract helper")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "1 SUGGESTION" }));
+    fireEvent.click(screen.getByRole("button", { name: "SUGGESTION" }));
     fireEvent.click(screen.getByRole("switch"));
 
     expect(screen.getByText("No findings match")).toBeInTheDocument();

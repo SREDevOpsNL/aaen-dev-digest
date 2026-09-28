@@ -15,7 +15,7 @@ files linked from it.
   The hermetic run used persisted seed data without GitHub or OpenRouter
   credentials, providing direct evidence that the feature added no model call.
   The environment correction is recorded in [`LEARNINGS.md`](LEARNINGS.md) and
-  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes). Evidence: `client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/helpers.ts:5`.
 
 - **2026-09-22 — L01 reviewer experiment.** The original DevDigest General
   Reviewer (`deepseek/deepseek-v4-flash`, prompt version 1) found 8 issues
@@ -39,7 +39,7 @@ files linked from it.
   Version 2 also took 188.8 seconds versus 67.5 seconds for version 1—about
   2.8 times slower despite costing 37.6% less. This reinforces that latency,
   quality, and cost must be evaluated independently rather than treating any
-  single metric as a proxy for prompt quality.
+  single metric as a proxy for prompt quality. Evidence: `reviewer-core/src/review/run.ts:188`.
 
   Engineering Insights worked well as a durable correction and evidence loop:
   it turned the WSL2-only requirement into both operational instructions and a

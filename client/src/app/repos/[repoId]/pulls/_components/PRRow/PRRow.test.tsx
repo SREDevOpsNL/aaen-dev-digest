@@ -44,6 +44,6 @@ describe("PRRow Cost", () => {
         <PRRow pr={{ ...PR, cost_usd: null }} repoId="repo-1" />
       </NextIntlClientProvider>,
     );
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 });

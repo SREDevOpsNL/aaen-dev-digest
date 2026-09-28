@@ -4,6 +4,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Icon, CircularScore, type IconName } from "@devdigest/ui";
 import type { RunSummary, PrCommit } from "@devdigest/shared";
+import { formatUsdCost } from "@/lib/format-cost";
 
 /**
  * PR timeline — every agent run interleaved with the PR's commits, newest-first
@@ -192,10 +193,12 @@ export function RunHistory({
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   {t("runStatus.findings", { count: r.findings_count ?? 0 })}
                   {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
+                  {r.severity_counts && Object.entries(r.severity_counts).filter(([, count]) => count > 0).map(([severity, count]) => <span key={severity} aria-label={`${count} ${severity}`} style={{ marginLeft: 6, display: "inline-flex", gap: 2, alignItems: "center" }}>{severity === "CRITICAL" ? <Icon.AlertOctagon size={12} /> : severity === "WARNING" ? <Icon.AlertTriangle size={12} /> : <Icon.Lightbulb size={12} />} {count}</span>)}
                 </div>
               )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
+              {settled && <span className="mono">{formatUsdCost(r.cost_usd)}</span>}
               {r.ran_at && <span>{new Date(r.ran_at).toLocaleTimeString()}</span>}
             </div>
             <button
