@@ -9,10 +9,11 @@ description: >-
 
 # Engineering Insights
 
-Run this skill automatically at the start and wrap-up of every task, without an
-explicit user request. Every invocation performs routing, reading, and
-deduplication evaluation. A task with no significant non-obvious finding ends
-with no write.
+The project-level UserPromptSubmit hook in .claude/settings.json injects this
+evaluation into every submitted task before the agent works. Run this skill at
+the start and wrap-up of every task, without an explicit user request. Every
+invocation performs routing, reading, and deduplication evaluation. A task with
+no significant non-obvious finding ends with no write.
 
 1. Resolve the relevant files by the task or finding subject, not by every
    package the task touches: client/** routes to client/INSIGHTS.md;
@@ -33,7 +34,9 @@ with no write.
 5. Append a dated bullet under a fixed heading in the relevant module
    INSIGHTS.md. LEARNINGS.md may retain companion durable context but does not
    replace the required INSIGHTS.md entry.
-6. Use only the seven fixed headings. Decisions must name the chosen option, rationale, and rejected alternative. Use Session Notes only for durable context that fits no other heading.
+6. Use only the seven fixed headings. Decisions must name the chosen option,
+   rationale, and rejected alternative. Use Session Notes only for durable
+   context that fits no other heading.
 7. Make each entry actionable: state what is true, why it matters, what to do,
    and dated file:line evidence when code is relevant.
 8. End by saying which insight file was updated, which duplicate was skipped,

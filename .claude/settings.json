@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["/.claude/hooks/engineering-insights-reminder.mjs"],
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

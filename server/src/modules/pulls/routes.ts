@@ -8,6 +8,15 @@ import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
 import { deriveReviewStatus } from './status.js';
+const FINDING_PREVIEW_MAX_LENGTH = 180;
+
+function toFindingPreview(rationale: string): string {
+  const compact = rationale.replace(/\s+/g, " ").trim();
+  return compact.length > FINDING_PREVIEW_MAX_LENGTH
+    ? compact.slice(0, FINDING_PREVIEW_MAX_LENGTH - 1) + "…"
+    : compact;
+}
+
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -132,7 +141,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         if (finding.severity in count) count[finding.severity as keyof typeof count] += 1;
         counts.set(finding.prId, count);
         const list = previews.get(finding.prId) ?? [];
-        list.push({ severity: finding.severity, title: finding.title, category: finding.category, file: finding.file, start_line: finding.startLine, confidence: finding.confidence, rationale: finding.rationale });
+        list.push({ severity: finding.severity, title: finding.title, category: finding.category, file: finding.file, start_line: finding.startLine, confidence: finding.confidence, rationale: toFindingPreview(finding.rationale) });
         previews.set(finding.prId, list);
       }
     }

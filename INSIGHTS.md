@@ -1,9 +1,10 @@
 # Engineering Insights
 
-This compatibility file exists for course material that still refers to
-`INSIGHTS.md`. DevDigest now keeps its authoritative engineering-insights log
-in [`LEARNINGS.md`](LEARNINGS.md) and the package-specific `LEARNINGS.md`
-files linked from it.
+This is the course-required Engineering Insights history for repository-level
+and cross-package work. Qualifying package findings are appended to the matching
+client/INSIGHTS.md, server/INSIGHTS.md, reviewer-core/INSIGHTS.md, or
+e2e/INSIGHTS.md. LEARNINGS.md and module LEARNINGS.md files remain companion
+durable history; they do not replace INSIGHTS.md.
 
 ## Session entries
 

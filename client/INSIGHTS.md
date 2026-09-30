@@ -4,6 +4,13 @@
 
 - **2026-09-28** — Run-scoped severity filters derive counts from already loaded findings and update only client state. Evidence: `client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/helpers.ts:5`.
 
+- **2026-09-30** — A visually truncated finding preview can still expose the
+full rationale through a title attribute. Keep the PR-list popup description
+bounded in the response and render it without a full-text tooltip; the stored
+finding rationale remains unchanged. Evidence:
+client/src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.tsx:73,
+client/src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.test.tsx:81.
+
 ## What Doesn't Work
 
 ## Codebase Patterns & Tool / Library Notes

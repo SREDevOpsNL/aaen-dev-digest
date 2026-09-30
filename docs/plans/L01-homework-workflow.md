@@ -2,20 +2,40 @@
 
 ## Initiation — completed
 
-The acceptance criteria and the target WSL worktree were identified before code changes.
+The Homework 01 acceptance table and the WSL-native delivery environment were
+identified before implementation. The environment boundary is recorded in
+[CLAUDE.md](../../CLAUDE.md#authoritative-development-environment), including
+the requirement to deliver from a WSL worktree.
 
 ## Planning — completed
 
-The implementation plan separated documentation, cost aggregation, run presentation, finding controls, and verification.
+The implementation separated persisted run-cost handling, PR-list presentation,
+run-scoped findings, Engineering Insights routing, and package documentation.
+The resulting repository contract is documented in
+[server/specs/01-pr-list-review-summary.md](../../server/specs/01-pr-list-review-summary.md)
+and the client behavior in
+[client/specs/01-severity-finding-filter.md](../../client/specs/01-severity-finding-filter.md).
 
 ## Implementation — completed
 
-The PR-list summary, Agent-runs presentation, findings preview, insight routing, and package documentation were implemented.
+The implementation is recorded in commits 546e76d, 1e58709, db29677, and
+ffdcaad. The executable evidence is the PR-list route
+[server/src/modules/pulls/routes.ts](../../server/src/modules/pulls/routes.ts),
+the Review-runs controls
+[client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx](../../client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx),
+and the PR-list popup
+[client/src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.tsx](../../client/src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.tsx).
 
 ## Validation — completed
 
-Client typecheck and tests plus server typecheck passed in the WSL worktree.
+The final WSL validation ran client lint, typecheck, and tests; server
+typecheck plus unit and database-backed tests; reviewer-core typecheck and
+tests; E2E typecheck; and canonical npm run e2e:hermetic. The browser suite
+completed all seven flows, including unchanged
+[e2e/specs/04-pr-findings.flow.json](../../e2e/specs/04-pr-findings.flow.json).
 
 ## Completion — completed
 
-The final Git diff was inspected and all acceptance artifacts are present.
+The final review included git diff --check, a clean worktree, and an
+acceptance audit against the 24 mandatory Homework 01 criteria. The submitted
+branch head at that point was ffdcaada348a92ba6b3ea3dfbcb46371d96393cb.

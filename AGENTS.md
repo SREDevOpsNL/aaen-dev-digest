@@ -107,6 +107,13 @@ The procedure, the editing fallback order for agents hosted on Windows, and the
 verification commands are in
 [Agent environment](docs/ai-context/02_AGENT_ENVIRONMENT.md).
 
+## Engineering Insights automation
+
+Claude Code runs the project-level UserPromptSubmit hook in .claude/settings.json.
+It requires an Engineering Insights evaluation for every task; only significant,
+non-obvious, evidence-backed and deduplicated findings are appended to the
+affected module INSIGHTS.md. LEARNINGS.md remains companion durable history.
+
 ## Commands
 
 | Task            | Command                                                |

@@ -79,6 +79,14 @@ Module-local findings belong beside their subject —
   `command -v node` empty in `bash -s`; nvm initialized only from
   `~/.bashrc`.
 
+- **2026-09-30** — Correction to the 2026-09-17 ESLint entry: client now has a
+real pnpm lint command that runs ESLint with core rules and TypeScript
+unused-variable checks; the client workflow runs the same command before
+typecheck and tests. Do not treat the earlier absence as current state.
+Evidence: client/eslint.config.mjs:15, client/package.json:10,
+.github/workflows/client.yml:42.
+
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source

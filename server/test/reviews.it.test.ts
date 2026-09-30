@@ -418,7 +418,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
     await pg.handle.db.insert(t.findings).values([
       { reviewId: olderReview!.id, severity: 'CRITICAL', category: 'security', title: 'Older critical', file: 'src/old.ts', startLine: 1, endLine: 1, rationale: 'Older run only.', confidence: 0.9 },
-      { reviewId: newerReview!.id, severity: 'WARNING', category: 'performance', title: 'Latest warning', file: 'src/new.ts', startLine: 2, endLine: 2, rationale: 'Newest run only.', confidence: 0.8 },
+      { reviewId: newerReview!.id, severity: 'WARNING', category: 'performance', title: 'Latest warning', file: 'src/new.ts', startLine: 2, endLine: 2, rationale: 'Newest ' + 'x'.repeat(220), confidence: 0.8 },
     ]);
 
     const listed = (await app.inject({ method: 'GET', url: '/repos/' + repo.id + '/pulls' })).json()
@@ -426,7 +426,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(listed.has_successful_review).toBe(true);
     expect(listed.findings_by_severity).toEqual({ CRITICAL: 0, WARNING: 1, SUGGESTION: 0 });
     expect(listed.finding_previews).toEqual([
-      expect.objectContaining({ title: 'Latest warning', severity: 'WARNING', file: 'src/new.ts', start_line: 2 }),
+      expect.objectContaining({ title: 'Latest warning', severity: 'WARNING', file: 'src/new.ts', start_line: 2, rationale: 'Newest ' + 'x'.repeat(172) + '…' }),
     ]);
     await app.close();
   });

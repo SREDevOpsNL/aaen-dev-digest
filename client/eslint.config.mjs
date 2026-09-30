@@ -13,6 +13,7 @@ export default [
     plugins: { "@typescript-eslint": tseslint, "react-hooks": reactHooks },
     rules: {
       "no-debugger": "error",
+      "@typescript-eslint/no-unused-vars": "error",
       "react-hooks/exhaustive-deps": "off",
       "no-duplicate-imports": "error",
       "no-fallthrough": "error",
