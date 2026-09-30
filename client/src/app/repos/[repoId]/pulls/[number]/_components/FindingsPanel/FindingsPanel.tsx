@@ -105,8 +105,26 @@ export function FindingsPanel({
         </div>
       </div>
 
-      <div role="group" aria-label={t("panel.severityFilters")} style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        {FILTER_SEVERITIES.map((severity) => <button key={severity} type="button" aria-pressed={activeSeverity === severity} onClick={() => selectSeverity(severity)} style={s.severityButton(SEVERITY_COLORS[severity].color, SEVERITY_COLORS[severity].background, activeSeverity === severity)}>{t(`panel.severity.${severity.toLowerCase()}`)}</button>)}
+      <div
+        role="group"
+        aria-label={t("panel.severityFilters")}
+        style={{ display: "flex", gap: 8, marginBottom: 12 }}
+      >
+        {FILTER_SEVERITIES.map((severity) => (
+          <button
+            key={severity}
+            type="button"
+            aria-pressed={activeSeverity === severity}
+            onClick={() => selectSeverity(severity)}
+            style={s.severityButton(
+              SEVERITY_COLORS[severity].color,
+              SEVERITY_COLORS[severity].background,
+              activeSeverity === severity,
+            )}
+          >
+            {t("panel.severity." + severity.toLowerCase())}
+          </button>
+        ))}
       </div>
 
       <div style={s.list}>
