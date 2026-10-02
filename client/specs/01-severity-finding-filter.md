@@ -27,6 +27,21 @@ call.
 - Severity and low-confidence filters combine when both are active.
 - If the combined filters match nothing, show the existing no-match state.
 
+## Timeline and PR-list preview
+
+The L01 lab design (`prdetail_runs.jsx` `RunFindings` + `FindingsTooltip`, and
+the same tooltip in `screen_dashboard.jsx`) also puts the counts on each
+settled Timeline run tile and on each PR-list row:
+
+- Show one severity-colored icon and count per non-zero severity in place of
+  the "N finding(s)" total, followed by the blocker count.
+- Hovering or focusing the counts opens a read-only "N FINDINGS IN THIS RUN"
+  preview: severity, title, category, `file:line`, confidence, and a short
+  description. It has no Accept/Reject controls.
+- The Timeline preview uses the findings of that run from the reviews already
+  loaded for Review runs; the PR list uses the newest completed review from
+  the list response. Neither adds a request or a model call.
+
 ## Copy
 
 Add severity-filter labels under `messages/en/prReview.json`.
@@ -37,4 +52,6 @@ Add severity-filter labels under `messages/en/prReview.json`.
 - Each counter is keyboard-accessible and exposes its selected state.
 - Clicking a counter filters the visible finding cards without a network or
   model call.
+- Timeline run tiles and PR-list rows show severity counts whose preview lists
+  exactly the findings counted.
 - Client type-checking, component tests, and the seeded browser journey pass.

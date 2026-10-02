@@ -71,10 +71,10 @@ describe("PRRow", () => {
       }],
     });
 
-    const trigger = screen.getByRole("group", { name: "Findings" });
+    const trigger = screen.getByRole("group", { name: "Findings: 1 WARNING" });
     fireEvent.mouseEnter(trigger);
     expect(screen.getByRole("tooltip")).toHaveTextContent("1 FINDINGS IN THIS RUN");
-    expect(screen.getByRole("tooltip")).toHaveTextContent("⚠ WARNING Current warning · performance");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("WARNING Current warning · performance");
     expect(screen.getByRole("tooltip")).toHaveTextContent("src/api.ts:42 · 87%");
     expect(screen.getByRole("tooltip")).toHaveTextContent("x".repeat(179) + "…");
     expect(screen.queryByRole("button", { name: /accept|reject/i })).not.toBeInTheDocument();
