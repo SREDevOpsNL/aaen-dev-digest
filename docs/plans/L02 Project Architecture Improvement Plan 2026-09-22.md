@@ -117,7 +117,7 @@ Exit gate: the engine remains source-consumable by server/CI, hermetic in tests,
 - Update the product boundary only after an end-to-end capability meets all five operational criteria.
 - Move durable implementation explanation from completed specs into canonical architecture/module docs.
 - Adopt the planned PR Self Review workflow only after its routing and critical-blocker policy have golden tests; do not install a blocking hook as a side effect of ordinary work.
-- Validate all `AGENTS.md`/`CLAUDE.md` links and symlink modes with `node scripts/verify-agent-instructions.mjs`.
+- Validate the canonical `AGENTS.md` hierarchy — Git file modes, relative links, and the absence of repository `CLAUDE.md` instruction files — with `node scripts/verify-agent-instructions.mjs`.
 
 ## Verification matrix
 
