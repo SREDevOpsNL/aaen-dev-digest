@@ -12,8 +12,9 @@ export const CONFIG_SAMPLE_PATHS = [
   '.editorconfig',
   'biome.json',
   'CONTRIBUTING.md',
-  'CLAUDE.md',
+  // Agent instructions: AGENTS.md is the portable format; CLAUDE.md is still common.
   'AGENTS.md',
+  'CLAUDE.md',
 ] as const;
 
 export const MAX_FILE_LINES = 220;

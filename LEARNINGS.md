@@ -79,6 +79,19 @@ Module-local findings belong beside their subject —
   `command -v node` empty in `bash -s`; nvm initialized only from
   `~/.bashrc`.
 
+- **2026-10-02** — `CLAUDE.md → AGENTS.md` compatibility symlinks failed
+  silently. During L02 development the five Git symlink blobs stored
+  `AGENTS.md\n`, so every native checkout pointed at a file named with a
+  trailing newline, and the verifier of that time accepted them by trimming the
+  target. They are not needed: Claude Code loads `AGENTS.md` itself when no
+  `CLAUDE.md` exists (verified 2026-10-07 under What Works). Keep `AGENTS.md` as
+  the only instruction file; `node scripts/verify-agent-instructions.mjs`
+  rejects symlinks and `CLAUDE.md`-style files. Evidence:
+  `git cat-file -p 1be590e:CLAUDE.md | od -c` → `A G E N T S . m d \n`, from the
+  original L02 branch. That commit is not part of the rewritten PR #4 history,
+  which never contains the symlinks, so the blob is reproducible only where
+  `1be590e` is still held (a local reflog or an older clone).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source
