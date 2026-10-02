@@ -18,8 +18,10 @@ and the client behavior in
 
 ## Implementation — completed
 
-The implementation is recorded in commits 546e76d, 1e58709, db29677, and
-ffdcaad. The executable evidence is the PR-list route
+The implementation through the review-hardening pass is recorded in commits
+546e76d, 1e58709, db29677, ffdcaad, 8b43084, and 1b5f0c5; the final hook
+correction and evidence refresh are recorded in this document's commit. The
+executable evidence is the PR-list route
 [server/src/modules/pulls/routes.ts](../../server/src/modules/pulls/routes.ts),
 the Review-runs controls
 [client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx](../../client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx),
@@ -37,5 +39,8 @@ completed all seven flows, including unchanged
 ## Completion — completed
 
 The final review included git diff --check, a clean worktree, and an
-acceptance audit against the 24 mandatory Homework 01 criteria. The submitted
-branch head at that point was ffdcaada348a92ba6b3ea3dfbcb46371d96393cb.
+acceptance audit against the 24 mandatory Homework 01 criteria. That audit
+covered ffdcaada348a92ba6b3ea3dfbcb46371d96393cb; subsequent review hardening
+continued through 1b5f0c582a44245e81e23bcb343e5a61b781cfb9 and this document's
+commit. Git history is authoritative for the current submitted head, avoiding a
+self-referential SHA that becomes stale whenever this evidence is corrected.

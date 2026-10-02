@@ -8,7 +8,7 @@
 full rationale through a title attribute. Keep the PR-list popup description
 bounded in the response and render it without a full-text tooltip; the stored
 finding rationale remains unchanged. Evidence:
-client/src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.tsx:73,
+client/src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.tsx:93,
 client/src/app/repos/[repoId]/pulls/_components/PRRow/PRRow.test.tsx:81.
 
 ## What Doesn't Work

@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["/.claude/hooks/engineering-insights-reminder.mjs"],
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/engineering-insights-reminder.mjs"],
             "timeout": 5
           }
         ]

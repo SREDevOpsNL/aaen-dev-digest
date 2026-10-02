@@ -47,3 +47,11 @@ durable history; they do not replace INSIGHTS.md.
   retained historical record, and captured the container-lifecycle and prompt-
   evaluation lessons. It does not validate model findings by itself; entries
   still require manual semantic review, deduplication, and evidence.
+
+- **2026-10-02 — Verify project hooks through the real launcher.** Claude Code
+  treats a failing `UserPromptSubmit` hook as non-blocking, so a valid hook
+  script does not prove that project settings can locate or execute it. Preserve
+  `${CLAUDE_PROJECT_DIR}` literally in the configured argument and verify the
+  result with a real `claude -p --include-hook-events` session; the successful
+  event must include both an exit code of zero and the expected injected
+  context. Evidence: `.claude/settings.json:9`,

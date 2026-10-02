@@ -84,7 +84,7 @@ real pnpm lint command that runs ESLint with core rules and TypeScript
 unused-variable checks; the client workflow runs the same command before
 typecheck and tests. Do not treat the earlier absence as current state.
 Evidence: client/eslint.config.mjs:15, client/package.json:10,
-.github/workflows/client.yml:42.
+.github/workflows/client.yml:47.
 
 
 ## Codebase Patterns & Tool / Library Notes
