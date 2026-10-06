@@ -6,9 +6,15 @@ the procedure behind them.
 
 ## Canonical execution environment
 
-Development happens in a **Linux-native checkout**: on Linux and in CI that is
-the checkout itself; on macOS it is the local checkout; on a Windows host it is
-a Git worktree on the Ubuntu 24.04 WSL2 filesystem (under `/home/...`).
+Development happens in a **native-filesystem checkout**:
+
+| Host | Canonical checkout |
+| --- | --- |
+| Linux (and CI) | The checkout on the native Linux filesystem |
+| macOS | The checkout on the native local filesystem |
+| Windows | A Git worktree on the Ubuntu 24.04 WSL2 Linux filesystem (under `/home/...`) |
+
+On a Windows host, the path forms mean:
 
 | Path form | Role |
 | --- | --- |
@@ -64,7 +70,7 @@ name by accident.
 
 ## Editing fallback order
 
-1. Edit the Linux-native worktree with the agent's normal file tools.
+1. Edit the native-filesystem worktree with the agent's normal file tools.
 2. If a Windows-hosted agent's patch tool cannot write the WSL file, execute
    the edit **inside WSL**, with an explicit working directory and the script on
    stdin (see the next section).
@@ -114,10 +120,22 @@ multi-line scripts in a single quoted `bash -c` argument. When the caller is Git
 Bash (MSYS), its argument path conversion rewrites a Linux path given to
 `--cd`; set `MSYS_NO_PATHCONV=1` for that call.
 
+A non-interactive `bash -s` shell may not initialize user-managed toolchains
+such as nvm, so Node, npm, or pnpm can be missing from its `PATH` even though an
+interactive terminal finds them. When the script needs them, initialize the
+toolchain explicitly in the script (for nvm: `. "$NVM_DIR/nvm.sh"`, with
+`NVM_DIR` defaulting to `$HOME/.nvm`) or call an executable path resolved
+beforehand. Always inspect each command's exit status: exit 127 means the
+command was not found and the intended check did not run.
+
 ## Verifying instruction discovery
 
 `node scripts/verify-agent-instructions.mjs` checks the repository side of the
-`AGENTS.md` contract on every pull request: five regular (non-symlink) files,
+`AGENTS.md` contract on every pull request. Its scope is the five canonical
+project/package instruction files — `AGENTS.md`, `client/AGENTS.md`,
+`server/AGENTS.md`, `reviewer-core/AGENTS.md`, `e2e/AGENTS.md` — not tool- or
+skill-local files such as `.claude/skills/zod/AGENTS.md`. It checks regular
+(non-symlink) files,
 resolvable relative links, each package file extending `../AGENTS.md`, the root
 map linking every package file, and no `CLAUDE.md`, `CLAUDE.local.md`, or
 `.claude/CLAUDE.md` in the instruction directories.

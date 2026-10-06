@@ -84,10 +84,12 @@ Drizzle ORM + Postgres (pgvector) · Zod · Vitest · agent-browser (e2e)
 ## Development environment
 
 - Run every development command — edits, Git, installs, builds, tests — from
-  the active **Linux-native checkout**. On a Windows host that means Ubuntu 24.04
-  under WSL2, in a worktree on the Linux filesystem. A `\\wsl.localhost\...` path
-  is a Windows view of those same files, not an agent's working path, and a
-  checkout under `/mnt/<drive>/` is not a substitute for the Linux worktree.
+  the active **native-filesystem checkout**: the local checkout on Linux and
+  macOS, and on a Windows host a worktree on the Ubuntu 24.04 WSL2 Linux
+  filesystem. A `\\wsl.localhost\...` path is a Windows view of those same
+  files, not an agent's working path; a checkout under `/mnt/<drive>/` is not a
+  substitute for the WSL worktree; and a separate clone on a Windows drive is
+  not a delivery source.
 - Several worktrees of this repository may be active at once. Before modifying
   files, establish the workspace from Git — path, branch, status, `HEAD`, and for
   delivery work the upstream branch and pull request — and confirm it is the

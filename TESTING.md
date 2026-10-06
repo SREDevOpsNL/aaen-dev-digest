@@ -93,7 +93,7 @@ cd e2e && npm install && npm test
   because the server type-checks against `../reviewer-core/src`).
 - **Agent instructions are checked on every change.**
   `agent-instructions.yml` runs `node scripts/verify-agent-instructions.mjs`
-  without a path filter or dependencies: five regular `AGENTS.md` files, an
+  without a path filter or dependencies: the five canonical project/package `AGENTS.md` files are regular files, an
   explicit hierarchy, resolvable links, and no shadowing `CLAUDE.md`-style file.
   It is a repository check, not a test suite.
 - **`server/clones/**` is runtime data** (git-ignored) and never collected by

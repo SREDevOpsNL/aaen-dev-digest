@@ -1,6 +1,8 @@
 # agent-instructions — the repository side of the AGENTS.md contract.
-# Five regular AGENTS.md files, resolvable links, an explicit hierarchy, and no
-# CLAUDE.md-style file that would shadow them. No dependencies: plain Node.
+# The five canonical project/package AGENTS.md files are regular files with
+# resolvable links and an explicit hierarchy, and no CLAUDE.md-style file
+# shadows them. Skill-local files such as .claude/skills/*/AGENTS.md are out of
+# scope. No dependencies: plain Node.
 #
 # Deliberately not path-filtered: a shadowing file or a renamed link target can
 # arrive in any change, and the check takes seconds.

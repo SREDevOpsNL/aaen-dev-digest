@@ -8,8 +8,10 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// AGENTS.md is the only repository instruction file. Each must be a regular,
-// non-empty file: a symlink can silently resolve to nothing on another checkout.
+// The five canonical project/package instruction files. Skill-local files such
+// as .claude/skills/zod/AGENTS.md are a different scope and are not checked.
+// Each must be a regular, non-empty file: a symlink can silently resolve to
+// nothing on another checkout.
 const rootInstructions = "AGENTS.md";
 const packageInstructions = ["client/AGENTS.md", "server/AGENTS.md", "reviewer-core/AGENTS.md", "e2e/AGENTS.md"];
 const instructionPaths = [rootInstructions, ...packageInstructions];
