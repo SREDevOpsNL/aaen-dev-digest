@@ -5,6 +5,17 @@ starter: it ships one workflow end to end (import a PR, run an agent review) and
 each lesson adds a feature back. Read the boundary document before claiming any
 capability is operational.
 
+## Instruction portability
+
+`AGENTS.md` is the canonical repository instruction format for every coding
+agent. This file holds the shared engineering contract; each package's own
+`AGENTS.md` adds module-local context. Keep tool-specific configuration in that
+tool's directory — `.claude/` for Claude Code skills, hooks, and settings,
+`.codex/` for Codex configuration. Do not add `CLAUDE.md`, `CLAUDE.local.md`,
+or `.claude/CLAUDE.md` to the repository: an agent that prefers those names
+would stop reading these instructions. `node scripts/verify-agent-instructions.mjs`
+enforces this, and CI runs it.
+
 ## Before answering
 
 Before answering a question or touching code, search the relevant module's
@@ -70,6 +81,25 @@ When two sources disagree, the higher one wins:
 Node ≥22 · pnpm ≥10 · TypeScript · Fastify 5 · Next.js 15 / React 19 ·
 Drizzle ORM + Postgres (pgvector) · Zod · Vitest · agent-browser (e2e)
 
+## Development environment
+
+- Run every development command — edits, Git, installs, builds, tests — from
+  the active **Linux-native checkout**. On a Windows host that means Ubuntu 24.04
+  under WSL2, in a worktree on the Linux filesystem. A `\\wsl.localhost\...` path
+  is a Windows view of those same files, not an agent's working path, and a
+  checkout under `/mnt/<drive>/` is not a substitute for the Linux worktree.
+- Several worktrees of this repository may be active at once. Before modifying
+  files, establish the workspace from Git — path, branch, status, `HEAD`, and for
+  delivery work the upstream branch and pull request — and confirm it is the
+  intended target. Never infer the target worktree or branch from the topic of
+  the conversation.
+- Patch or script files used to move an edit into the worktree are temporary
+  transport artifacts: never stage or commit them, and delete them after use.
+
+The procedure, the editing fallback order for agents hosted on Windows, and the
+verification commands are in
+[Agent environment](docs/ai-context/02_AGENT_ENVIRONMENT.md).
+
 ## Commands
 
 | Task            | Command                                                |
@@ -80,6 +110,7 @@ Drizzle ORM + Postgres (pgvector) · Zod · Vitest · agent-browser (e2e)
 | Client          | `cd client && pnpm dev \| build \| typecheck \| test`  |
 | Engine          | `cd reviewer-core && npm test \| npm run typecheck`    |
 | E2E (hermetic)  | `cd e2e && npm run e2e:hermetic`                       |
+| Agent guidance  | `node scripts/verify-agent-instructions.mjs`           |
 
 Flags for `dev.sh`: `--no-seed` · `--no-client` · `--db-only` · `--help`.
 
@@ -87,10 +118,10 @@ Flags for `dev.sh`: `--no-seed` · `--no-client` · `--db-only` · `--help`.
 
 | Path                        | What                                                        | Local instructions                                 |
 | --------------------------- | ----------------------------------------------------------- | -------------------------------------------------- |
-| `server/`                   | Fastify API + Drizzle. Indexer at `src/modules/repo-intel/` | [server/CLAUDE.md](server/CLAUDE.md)               |
-| `client/`                   | Next.js studio, App Router                                  | [client/CLAUDE.md](client/CLAUDE.md)               |
-| `reviewer-core/`            | Pure engine: diff + repo map → prompt → LLM → findings      | [reviewer-core/CLAUDE.md](reviewer-core/CLAUDE.md) |
-| `e2e/`                      | Deterministic browser flows, no LLM                         | [e2e/CLAUDE.md](e2e/CLAUDE.md)                     |
+| `server/`                   | Fastify API + Drizzle. Indexer at `src/modules/repo-intel/` | [server/AGENTS.md](server/AGENTS.md)               |
+| `client/`                   | Next.js studio, App Router                                  | [client/AGENTS.md](client/AGENTS.md)               |
+| `reviewer-core/`            | Pure engine: diff + repo map → prompt → LLM → findings      | [reviewer-core/AGENTS.md](reviewer-core/AGENTS.md) |
+| `e2e/`                      | Deterministic browser flows, no LLM                         | [e2e/AGENTS.md](e2e/AGENTS.md)                     |
 | `server/src/vendor/shared/` | `@devdigest/shared` — Zod contracts for every package       | owned by `server/`                                 |
 | `client/src/vendor/ui/`     | `@devdigest/ui` — vendored UI primitives                    | vendored, do not change                            |
 
@@ -155,13 +186,13 @@ not restate what is here.
 | Changed area     | Required checks                                                     |
 | ---------------- | ------------------------------------------------------------------- |
 | `client/`        | `pnpm typecheck` and `pnpm test` in `client/`                        |
-| `server/` logic  | `pnpm typecheck` + the hermetic unit subset (see server/CLAUDE.md)  |
+| `server/` logic  | `pnpm typecheck` + the hermetic unit subset (see server/AGENTS.md)  |
 | `server/` data   | also the DB-backed `*.it.test.ts` subset (needs Docker)              |
 | `reviewer-core/` | `npm run typecheck` and `npm test` in `reviewer-core/`               |
 | `e2e/`           | `npm run typecheck`, then `npm run e2e:hermetic`                     |
 | docs only        | check every relative link resolves; no code checks needed            |
 
-Exact commands live in each module's `CLAUDE.md`, because the package manager and
+Exact commands live in each module's `AGENTS.md`, because the package manager and
 the unit/integration split differ per package. Each package is also gated by its
 own GitHub Actions workflow with a path filter — see [TESTING.md](TESTING.md).
 
@@ -179,8 +210,10 @@ own GitHub Actions workflow with a path filter — see [TESTING.md](TESTING.md).
 
 ## Skills
 
-Reusable guidance lives in [`.claude/skills/`](.claude/skills/README.md). Load
-only what the task needs.
+Reusable guidance lives in [`.claude/skills/`](.claude/skills/README.md), one
+plain-Markdown `<name>/SKILL.md` per skill. Claude Code discovers them as
+skills; any other agent should open the named `SKILL.md` directly. Load only
+what the task needs.
 
 | Working on               | Skills                                                                      |
 | ------------------------ | --------------------------------------------------------------------------- |

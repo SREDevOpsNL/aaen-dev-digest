@@ -91,5 +91,10 @@ cd e2e && npm install && npm test
 - **CI is path-filtered per package.** Cross-package source aliases are encoded
   in each workflow's `paths:` (e.g. `reviewer-core/**` triggers `server-unit`
   because the server type-checks against `../reviewer-core/src`).
+- **Agent instructions are checked on every change.**
+  `agent-instructions.yml` runs `node scripts/verify-agent-instructions.mjs`
+  without a path filter or dependencies: five regular `AGENTS.md` files, an
+  explicit hierarchy, resolvable links, and no shadowing `CLAUDE.md`-style file.
+  It is a repository check, not a test suite.
 - **`server/clones/**` is runtime data** (git-ignored) and never collected by
   any suite.

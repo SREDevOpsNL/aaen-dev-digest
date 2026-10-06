@@ -44,6 +44,17 @@ Module-local findings belong beside their subject —
   `gh api repos/SREDevOpsNL/aaen-dev-digest/actions/workflows`, and
   `gh api repos/SREDevOpsNL/aaen-dev-digest/commits/7225418/check-runs`.
 
+- **2026-10-06** — A Windows-hosted agent must not let the WSL working
+  directory or script content depend on the Windows caller. A nested
+  `wsl.exe -- bash -lc '<script>'` call lost its loop variables and ran in the
+  caller's Windows checkout (`/mnt/d/Codex/aaen-dev-digest`) instead of each
+  WSL worktree, printing that stale clone's state four times; from Git Bash, a
+  Linux `--cd` path was rewritten into a Windows path and failed with
+  `Wsl/ERROR_PATH_NOT_FOUND`. What worked every time:
+  `wsl.exe -d Ubuntu-24.04 --cd <linux worktree> -- bash -s` with the script on
+  stdin, plus `MSYS_NO_PATHCONV=1` when the caller is Git Bash. The procedure is
+  in [Agent environment](docs/ai-context/02_AGENT_ENVIRONMENT.md).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source
