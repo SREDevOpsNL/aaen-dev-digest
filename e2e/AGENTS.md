@@ -1,6 +1,6 @@
 # e2e (`@devdigest/e2e`) — agent notes
 
-Extends [`../CLAUDE.md`](../CLAUDE.md). Read that first; this file holds only
+Extends [`../AGENTS.md`](../AGENTS.md). Read that first; this file holds only
 what is local to the browser suite.
 
 ## Scope

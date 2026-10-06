@@ -2,7 +2,7 @@
 
 Reference material describing how the system works **today**, across more than
 one package. Human-first prose and diagrams; agents read it on demand via the
-`Read when` pointers in [`../CLAUDE.md`](../CLAUDE.md).
+`Read when` pointers in [`../AGENTS.md`](../AGENTS.md).
 
 ## Canonical product context
 
@@ -20,6 +20,7 @@ source itself. Link to them; never copy them.
 | Path                                          | What                                                             |
 | --------------------------------------------- | ---------------------------------------------------------------- |
 | [`agent-prompts/`](agent-prompts/README.md)   | System prompts for the built-in reviewers + model-choice notes    |
+| [`ai-context/02_AGENT_ENVIRONMENT.md`](ai-context/02_AGENT_ENVIRONMENT.md) | Where coding agents execute, workspace identity, editing fallbacks |
 | [`course-data/course-notes.md`](course-data/course-notes.md) | Course framing; reference material, not a source of truth         |
 
 ## Module documentation
@@ -47,4 +48,4 @@ Intent lives in `specs/`, not here:
 - Do not put intent here — that is `specs/`. Do not put rejected approaches here
   — that is `LEARNINGS.md`.
 - If a doc goes stale, delete it. A wrong doc costs more than a missing one,
-  because `CLAUDE.md` points agents at it as curated truth.
+  because `AGENTS.md` points agents at it as curated truth.
