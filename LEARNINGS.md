@@ -11,6 +11,19 @@ Module-local findings belong beside their subject —
 
 ## What Works
 
+- **2026-10-07** — Root and nested `AGENTS.md` discovery is verified on the
+  Windows **Claude Code CLI 2.1.278** and **Codex CLI 0.155.1** against the WSL
+  repository opened through `\\wsl.localhost\Ubuntu-24.04\...`. Fresh sessions
+  with no history and no file access (Claude: `--tools ""`, no MCP servers;
+  Codex: read-only sandbox, event log showing no command execution) were asked
+  for temporary sentinel values placed only in the instruction files. Started at
+  the repository root, each reported the root `AGENTS.md` sentinel; started in
+  `client/`, each reported both the root and the `client/AGENTS.md` sentinels.
+  The sentinels were removed afterwards and never committed. Not verified: the
+  Claude Desktop Code-tab GUI, and either CLI running natively inside WSL
+  (neither is installed there). Method:
+  [Agent environment](docs/ai-context/02_AGENT_ENVIRONMENT.md#verifying-instruction-discovery).
+
 ## What Doesn't Work
 
 - **2026-09-17** — Editing `client/src/vendor/shared/` alone silently desyncs the
