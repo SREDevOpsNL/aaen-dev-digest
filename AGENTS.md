@@ -109,10 +109,13 @@ verification commands are in
 
 ## Engineering Insights automation
 
-Claude Code runs the project-level UserPromptSubmit hook in .claude/settings.json.
-It requires an Engineering Insights evaluation for every task; only significant,
-non-obvious, evidence-backed and deduplicated findings are appended to the
-affected module INSIGHTS.md. LEARNINGS.md remains companion durable history.
+Every coding agent evaluates every task with the engineering-insights workflow
+described under After finishing; only significant, non-obvious, evidence-backed
+and deduplicated findings are appended to the affected module INSIGHTS.md, and
+LEARNINGS.md remains companion durable history. In Claude Code, the
+project-level UserPromptSubmit hook in .claude/settings.json enforces this by
+requiring the evaluation for every task; agents without that hook apply the
+workflow directly.
 
 ## Commands
 
