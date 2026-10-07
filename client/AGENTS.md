@@ -66,8 +66,8 @@ content.
 
 ## Read when
 
-- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and run
-  the `engineering-insights` skill at the end of the task to add to it.
+- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and apply
+  the engineering-insights workflow from `../AGENTS.md` at the end of the task to add to it.
 - Read [`README.md`](README.md) for the UI route map and which endpoints each page
   leans on.
 - Read [`docs/`](docs/README.md) before restructuring state or the data layer.

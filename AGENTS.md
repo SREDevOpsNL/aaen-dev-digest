@@ -36,10 +36,14 @@ check the code before correcting anything.
 
 ## After finishing
 
-Run the `engineering-insights` skill at the end of any task that involved a
-problem, fix, user correction, or non-obvious discovery. It records each finding
-in the `LEARNINGS.md` where that finding applies, after checking that a similar
-entry is not already there.
+At the end of any task that involved a problem, fix, user correction, or
+non-obvious discovery, follow the engineering-insights workflow in
+[`.claude/skills/engineering-insights/SKILL.md`](.claude/skills/engineering-insights/SKILL.md):
+evaluate whether the task produced an engineering insight, and record each
+qualifying finding in the `LEARNINGS.md` where it applies, after checking that a
+similar entry is not already there. An agent with native skill support invokes
+`engineering-insights`; any other agent reads that `SKILL.md` and executes the
+workflow directly.
 
 Also capture a significant user correction, failed approach, or surprising
 discovery when it occurs rather than relying only on end-of-task invocation.
