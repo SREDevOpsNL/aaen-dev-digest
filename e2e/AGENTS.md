@@ -58,8 +58,8 @@ Hermetic ports are overridable: `E2E_PG_PORT`, `E2E_API_PORT`, `E2E_WEB_PORT`.
 
 ## Read when
 
-- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and run
-  the `engineering-insights` skill at the end of the task to add to it.
+- Read [`LEARNINGS.md`](LEARNINGS.md) first for what was already tried here, and apply
+  the engineering-insights workflow from `../AGENTS.md` at the end of the task to add to it.
 - Read [`README.md`](README.md) for the flow format and the full hermetic-runner
   walkthrough.
 - Read [`docs/`](docs/README.md) for how the suite works today, and
