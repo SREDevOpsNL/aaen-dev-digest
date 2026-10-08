@@ -9,11 +9,13 @@ description: >-
 
 # Engineering Insights
 
-The project-level UserPromptSubmit hook in .claude/settings.json injects this
-evaluation into every submitted task before the agent works. Run this skill at
-the start and wrap-up of every task, without an explicit user request. Every
-invocation performs routing, reading, and deduplication evaluation. A task with
-no significant non-obvious finding ends with no write.
+Every coding agent runs this workflow at the start and wrap-up of every task,
+without an explicit user request: an agent with native skill support invokes
+this skill, and any other agent reads this file and executes it directly. In
+Claude Code, the project-level UserPromptSubmit hook in .claude/settings.json
+also injects a reminder into every submitted task. Every invocation performs
+routing, reading, and deduplication evaluation. A task with no significant
+non-obvious finding ends with no write.
 
 1. Resolve the relevant files by the task or finding subject, not by every
    package the task touches: client/** routes to client/INSIGHTS.md;
