@@ -172,10 +172,12 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         if (!latestReviewIds.has(review.prId)) latestReviewIds.set(review.prId, review.id);
       }
 
-      const findingRows = await container.db
+      // Load findings only for each PR's newest completed review, so the query
+      // does not grow with review history.
+      const latestIds = [...latestReviewIds.values()];
+      const findingRows = latestIds.length === 0 ? [] : await container.db
         .select({
           prId: t.reviews.prId,
-          reviewId: t.findings.reviewId,
           severity: t.findings.severity,
           title: t.findings.title,
           category: t.findings.category,
@@ -186,11 +188,9 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         })
         .from(t.findings)
         .innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId))
-        .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')));
+        .where(inArray(t.findings.reviewId, latestIds));
 
       for (const finding of findingRows) {
-        if (latestReviewIds.get(finding.prId) !== finding.reviewId) continue;
-
         const count = counts.get(finding.prId) ?? {
           CRITICAL: 0,
           WARNING: 0,
