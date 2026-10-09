@@ -4,7 +4,7 @@
 
 The Homework 01 acceptance table and the WSL-native delivery environment were
 identified before implementation. The environment boundary is recorded in
-[CLAUDE.md](../../CLAUDE.md#authoritative-development-environment), including
+[Agent environment](../ai-context/02_AGENT_ENVIRONMENT.md#canonical-execution-environment), including
 the requirement to deliver from a WSL worktree.
 
 ## Planning — completed
