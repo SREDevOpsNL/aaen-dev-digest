@@ -3,8 +3,10 @@
 This is the course-required Engineering Insights history for repository-level
 and cross-package work. Qualifying package findings are appended to the matching
 client/INSIGHTS.md, server/INSIGHTS.md, reviewer-core/INSIGHTS.md, or
-e2e/INSIGHTS.md. LEARNINGS.md and module LEARNINGS.md files remain companion
-durable history; they do not replace INSIGHTS.md.
+e2e/INSIGHTS.md. Durable, reusable knowledge belongs in the matching
+LEARNINGS.md; the engineering-insights workflow in
+[`.claude/skills/engineering-insights/SKILL.md`](.claude/skills/engineering-insights/SKILL.md)
+says which file a finding goes in.
 
 ## Session entries
 
@@ -54,4 +56,5 @@ durable history; they do not replace INSIGHTS.md.
   `${CLAUDE_PROJECT_DIR}` literally in the configured argument and verify the
   result with a real `claude -p --include-hook-events` session; the successful
   event must include both an exit code of zero and the expected injected
-  context. Evidence: `.claude/settings.json:9`,
+  context. Evidence: `.claude/settings.json:9` (`args`),
+  `.claude/hooks/engineering-insights-reminder.mjs:13` (`hook_event_name`).
