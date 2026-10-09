@@ -430,4 +430,29 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ]);
     await app.close();
   });
+
+  it('reports no cost, score, or findings for a PR without a successful review run', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const [failedRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'failed', costUsd: 0.01 })
+      .returning();
+    const [failedReview] = await pg.handle.db
+      .insert(t.reviews)
+      .values({ workspaceId, prId: pr.id, agentId: null, runId: failedRun!.id, kind: 'review', score: 40 })
+      .returning();
+    await pg.handle.db.insert(t.findings).values({
+      reviewId: failedReview!.id, severity: 'CRITICAL', category: 'security', title: 'Failed-run finding', file: 'src/a.ts', startLine: 1, endLine: 1, rationale: 'From a failed run.', confidence: 0.9,
+    });
+
+    const listed = (await app.inject({ method: 'GET', url: '/repos/' + repo.id + '/pulls' })).json()
+      .find((item: { id: string }) => item.id === pr.id);
+    expect(listed.has_successful_review).toBe(false);
+    expect(listed.cost_usd).toBeNull();
+    expect(listed.score).toBeNull();
+    expect(listed.findings_by_severity).toBeNull();
+    expect(listed.finding_previews).toEqual([]);
+    await app.close();
+  });
 });
