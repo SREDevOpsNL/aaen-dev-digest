@@ -416,12 +416,15 @@ The primary tabs are:
 | Findings | Review summaries, grounded findings, local accept/dismiss actions, live status, history, and trace access. |
 | Files changed | Patch rendering plus live GitHub review-comment threads and comment composer. |
 
-Run cost is shown on the PR list for the run linked to that PR's latest
-applicable review, inline beside each reviewer-run timestamp, and in the General
-Reviewer trace drawer beside Duration, Tokens, and Findings. The PR lookup uses
-the same newest review selection as the existing score/status path and does not
-fall back to an older priced run when the newest applicable run has no
-authoritative cost.
+Run cost is shown on the PR list as the sum of provider-reported costs from
+all successful review runs for that PR; a PR with no successful review renders an
+empty Cost cell. It is also shown inline beside each reviewer-run timestamp and
+in the General Reviewer trace drawer beside Duration, Tokens, and Findings.
+Score and the PR-list Findings popup use the newest completed review: its
+severity indicators, popup count, and previews are all scoped to that one
+review. Preview rationales are normalized and bounded to 180 characters before
+the list response is returned, while the stored finding rationale remains
+unchanged.
 
 Finding disposition and GitHub publication are deliberately separate paths.
 Accept/dismiss writes local finding state. Posting through the inline composer

@@ -1,6 +1,6 @@
 {
   "name": "PR detail shows the seeded review run, verdict, and findings",
-  "description": "From PR #482, open the Agent runs tab and confirm the seeded review run renders (verdict 'request changes', 2 findings) in its accordion header. The newest run's accordion is open by default (FindingsTab passes defaultOpen to the first run), so the VerdictBanner and the seeded FindingCard ('Hardcoded Stripe secret key in commit') are revealed without an extra click. Exercises the refactored ReviewRunAccordion / VerdictBanner / FindingsPanel / FindingCard. Read-only seeded data (no model call). Assumes a freshly-seeded DB where acme/payments-api (PR #482) is the first repo — guaranteed by e2e-web.yml; run locally via the hermetic stack (see e2e/README.md).",
+  "description": "From PR #482, open the Agent runs tab and confirm the seeded review run renders (verdict 'request changes', 2 findings) in its accordion header. The newest run's accordion is open by default (FindingsTab passes defaultOpen to the first run), so its Critical and Warning counters are visible. Select Warning, verify the Critical card is removed while the Warning card remains, then clear the filter and verify the Critical card returns. Exercises the refactored ReviewRunAccordion / VerdictBanner / FindingsPanel / FindingCard. Read-only seeded data (no model call). Assumes a freshly-seeded DB where acme/payments-api (PR #482) is the first repo — guaranteed by e2e-web.yml; run locally via the hermetic stack (see e2e/README.md).",
   "steps": [
     { "cmd": ["open", "{BASE}/"], "label": "load the app root" },
     { "cmd": ["wait", "--url", "/pulls"], "label": "land on the PR list" },
@@ -11,6 +11,17 @@
     { "cmd": ["wait", "--url", "tab=findings"], "label": "findings tab is active in the URL" },
     { "cmd": ["wait", "--text", "request changes"], "label": "seeded run accordion shows its verdict" },
     { "cmd": ["wait", "--text", "2 findings"], "label": "accordion header shows the seeded finding count" },
-    { "cmd": ["wait", "--text", "Hardcoded Stripe secret key in commit"], "label": "seeded FindingCard is visible (newest run is open by default)" }
+    { "cmd": ["wait", "--text", "1 CRITICAL"], "label": "critical severity counter matches the seeded findings" },
+    { "cmd": ["wait", "--text", "1 WARNING"], "label": "warning severity counter matches the seeded findings" },
+    { "cmd": ["wait", "--text", "Hardcoded Stripe secret key in commit"], "label": "critical FindingCard is initially visible" },
+    { "cmd": ["find", "role", "button", "click", "--name", "1 WARNING"], "label": "filter the run to warning findings" },
+    { "cmd": ["wait", "--text", "N+1 query in user list endpoint"], "label": "warning FindingCard remains visible" },
+    {
+      "cmd": ["eval", "document.body.innerText.includes('Hardcoded Stripe secret key in commit')"],
+      "label": "critical FindingCard is hidden by the warning filter",
+      "assert": { "stdoutIncludes": "false" }
+    },
+    { "cmd": ["find", "role", "button", "click", "--name", "1 WARNING"], "label": "clear the active severity filter" },
+    { "cmd": ["wait", "--text", "Hardcoded Stripe secret key in commit"], "label": "critical FindingCard returns after clearing the filter" }
   ]
 }

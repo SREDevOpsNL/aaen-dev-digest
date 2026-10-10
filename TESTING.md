@@ -60,7 +60,7 @@ No `chat`, no model key.
 
 ```sh
 # per package
-cd client        && pnpm test           # + pnpm typecheck
+cd client        && pnpm test           # + pnpm typecheck, pnpm lint
 cd reviewer-core && npm test
 
 # server — the unit/integration split (see note below)
