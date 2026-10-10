@@ -9,6 +9,7 @@ describe("PR list columns", () => {
       "size",
       "score",
       "cost",
+      "findings",
       "status",
       "updated",
     ]);

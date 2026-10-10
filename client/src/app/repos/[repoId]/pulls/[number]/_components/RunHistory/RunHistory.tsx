@@ -3,7 +3,10 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Icon, CircularScore, type IconName } from "@devdigest/ui";
-import type { RunSummary, PrCommit } from "@devdigest/shared";
+import type { FindingRecord, RunSummary, PrCommit } from "@devdigest/shared";
+import { formatUsdCost } from "@/lib/format-cost";
+import { FindingsPreview } from "../../../_components/FindingsPreview";
+import { countFindingsBySeverity } from "../FindingsPanel/helpers";
 
 /**
  * PR timeline — every agent run interleaved with the PR's commits, newest-first
@@ -84,15 +87,35 @@ function tsOf(s: string | null | undefined): number {
   return Number.isNaN(n) ? 0 : n;
 }
 
+/**
+ * Severity counts for a run tile. The run's loaded findings win, so the counts
+ * always match the preview behind them; the server's per-run counts cover a run
+ * whose review has not loaded.
+ */
+function severityCountsOf(
+  run: RunSummary,
+  findingsByRun?: Record<string, FindingRecord[]>,
+): Partial<Record<string, number>> {
+  const findings = findingsByRun?.[run.run_id];
+  return findings ? countFindingsBySeverity(findings) : (run.severity_counts ?? {});
+}
+
+function hasSeverityCounts(run: RunSummary, findingsByRun?: Record<string, FindingRecord[]>) {
+  return Object.values(severityCountsOf(run, findingsByRun)).some((count) => (count ?? 0) > 0);
+}
+
 export function RunHistory({
   runs,
   commits = [],
+  findingsByRun,
   onOpenTrace,
   onGoToReview,
   onDelete,
 }: {
   runs: RunSummary[];
   commits?: PrCommit[];
+  /** Persisted findings per run id, for the severity counts and their hover preview. */
+  findingsByRun?: Record<string, FindingRecord[]>;
   /** Open the trace + log drawer for a run (the logs icon). */
   onOpenTrace: (runId: string) => void;
   /** Jump to this run's inline review accordion below (clicking the agent name). */
@@ -189,13 +212,21 @@ export function RunHistory({
                 </div>
               )}
               {settled && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {t("runStatus.findings", { count: r.findings_count ?? 0 })}
+                <div style={{ display: "flex", alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
+                  {hasSeverityCounts(r, findingsByRun) ? (
+                    <FindingsPreview
+                      counts={severityCountsOf(r, findingsByRun)}
+                      items={findingsByRun?.[r.run_id] ?? []}
+                    />
+                  ) : (
+                    t("runStatus.findings", { count: r.findings_count ?? 0 })
+                  )}
                   {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
                 </div>
               )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
+              <span className="mono">{formatUsdCost(r.cost_usd)}</span>
               {r.ran_at && <span>{new Date(r.ran_at).toLocaleTimeString()}</span>}
             </div>
             <button

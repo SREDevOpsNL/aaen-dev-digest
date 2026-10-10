@@ -259,7 +259,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     await app.close();
   });
 
-  it('uses the run linked to the newest review for PR-list Cost without fallback', async () => {
+  it('aggregates all successful review-run costs while preserving the newest review score', async () => {
     const app = await appWith(REVIEW_FIXTURE);
     const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
     const [olderRun] = await pg.handle.db
@@ -305,7 +305,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ).json();
     const listed = listWithCost.find((item: { id: string }) => item.id === pr.id);
     expect(listed.score).toBe(90);
-    expect(listed.cost_usd).toBe(0.025);
+    expect(listed.cost_usd).toBe(9.025);
 
     await app.close();
   });
@@ -395,6 +395,64 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ).json();
     // seed has 2 enabled agents; we may have created more above in this PR's ws.
     expect(body.runs.length).toBeGreaterThanOrEqual(2);
+    await app.close();
+  });
+  it('scopes PR-list findings to the newest completed review run', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const [olderRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'done', costUsd: 0.01 })
+      .returning();
+    const [newerRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'done', costUsd: 0.02 })
+      .returning();
+    const [olderReview, newerReview] = await pg.handle.db
+      .insert(t.reviews)
+      .values([
+        { workspaceId, prId: pr.id, agentId: null, runId: olderRun!.id, kind: 'review', score: 80, createdAt: new Date('2026-09-20T10:00:00Z') },
+        { workspaceId, prId: pr.id, agentId: null, runId: newerRun!.id, kind: 'review', score: 90, createdAt: new Date('2026-09-20T11:00:00Z') },
+      ])
+      .returning();
+
+    await pg.handle.db.insert(t.findings).values([
+      { reviewId: olderReview!.id, severity: 'CRITICAL', category: 'security', title: 'Older critical', file: 'src/old.ts', startLine: 1, endLine: 1, rationale: 'Older run only.', confidence: 0.9 },
+      { reviewId: newerReview!.id, severity: 'WARNING', category: 'performance', title: 'Latest warning', file: 'src/new.ts', startLine: 2, endLine: 2, rationale: 'Newest ' + 'x'.repeat(220), confidence: 0.8 },
+    ]);
+
+    const listed = (await app.inject({ method: 'GET', url: '/repos/' + repo.id + '/pulls' })).json()
+      .find((item: { id: string }) => item.id === pr.id);
+    expect(listed.has_successful_review).toBe(true);
+    expect(listed.findings_by_severity).toEqual({ CRITICAL: 0, WARNING: 1, SUGGESTION: 0 });
+    expect(listed.finding_previews).toEqual([
+      expect.objectContaining({ title: 'Latest warning', severity: 'WARNING', file: 'src/new.ts', start_line: 2, rationale: 'Newest ' + 'x'.repeat(172) + '…' }),
+    ]);
+    await app.close();
+  });
+
+  it('reports no cost, score, or findings for a PR without a successful review run', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const [failedRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'failed', costUsd: 0.01 })
+      .returning();
+    const [failedReview] = await pg.handle.db
+      .insert(t.reviews)
+      .values({ workspaceId, prId: pr.id, agentId: null, runId: failedRun!.id, kind: 'review', score: 40 })
+      .returning();
+    await pg.handle.db.insert(t.findings).values({
+      reviewId: failedReview!.id, severity: 'CRITICAL', category: 'security', title: 'Failed-run finding', file: 'src/a.ts', startLine: 1, endLine: 1, rationale: 'From a failed run.', confidence: 0.9,
+    });
+
+    const listed = (await app.inject({ method: 'GET', url: '/repos/' + repo.id + '/pulls' })).json()
+      .find((item: { id: string }) => item.id === pr.id);
+    expect(listed.has_successful_review).toBe(false);
+    expect(listed.cost_usd).toBeNull();
+    expect(listed.score).toBeNull();
+    expect(listed.findings_by_severity).toBeNull();
+    expect(listed.finding_previews).toEqual([]);
     await app.close();
   });
 });
