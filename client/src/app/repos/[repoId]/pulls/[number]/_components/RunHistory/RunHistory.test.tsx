@@ -5,9 +5,9 @@
  * and shows the review score ring.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
-import type { RunSummary } from "@devdigest/shared";
+import type { FindingRecord, RunSummary } from "@devdigest/shared";
 import messages from "../../../../../../../../messages/en/prReview.json";
 import { RunHistory } from "./RunHistory";
 
@@ -72,5 +72,72 @@ describe("RunHistory — outcome badge", () => {
   it("a running run reads 'running'", () => {
     renderRuns([run({ status: "running", score: null, blockers: null })]);
     expect(screen.getByText("running")).toBeInTheDocument();
+  });
+});
+
+function finding(o: Partial<FindingRecord>): FindingRecord {
+  return {
+    id: "f-1",
+    review_id: "review-1",
+    severity: "WARNING",
+    category: "bug",
+    title: "Inclusive date range",
+    file: "src/repo.ts",
+    start_line: 57,
+    end_line: 57,
+    rationale: "Upper bound is inclusive.",
+    confidence: 0.85,
+    kind: "finding",
+    accepted_at: null,
+    dismissed_at: null,
+    ...o,
+  } as FindingRecord;
+}
+
+describe("RunHistory — severity counts and findings preview", () => {
+  const findingsByRun = {
+    "run-1": [
+      finding({ id: "f-1", severity: "CRITICAL", title: "Unauthenticated endpoint", category: "security" }),
+      finding({ id: "f-2" }),
+      finding({ id: "f-3", title: "Untested service" }),
+    ],
+  };
+
+  function renderWithFindings(r: RunSummary) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
+        <RunHistory runs={[r]} findingsByRun={findingsByRun} onOpenTrace={() => {}} />
+      </NextIntlClientProvider>,
+    );
+  }
+
+  it("replaces the finding total with per-severity counts and keeps blockers", () => {
+    renderWithFindings(run({ findings_count: 3, blockers: 1, score: 17 }));
+    expect(screen.getByRole("group", { name: "Findings: 1 CRITICAL, 2 WARNING" })).toBeInTheDocument();
+    expect(screen.queryByText(/3 finding/)).not.toBeInTheDocument();
+    expect(screen.getByText(/1 blockers/)).toBeInTheDocument();
+  });
+
+  it("previews this run's findings on hover without an action control", () => {
+    renderWithFindings(run({ findings_count: 3, blockers: 1, score: 17 }));
+    fireEvent.mouseEnter(screen.getByRole("group", { name: /^Findings/ }));
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent("3 FINDINGS IN THIS RUN");
+    expect(tooltip).toHaveTextContent("CRITICAL Unauthenticated endpoint · security");
+    expect(tooltip).toHaveTextContent("Untested service");
+    expect(tooltip.querySelector("button")).toBeNull();
+  });
+
+  it("falls back to the server's per-run counts, without a preview, before reviews load", () => {
+    renderRuns([
+      run({
+        run_id: "run-2",
+        findings_count: 2,
+        severity_counts: { CRITICAL: 0, WARNING: 0, SUGGESTION: 2 },
+      }),
+    ]);
+    const group = screen.getByRole("group", { name: "Findings: 2 SUGGESTION" });
+    fireEvent.mouseEnter(group);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 });

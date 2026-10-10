@@ -32,4 +32,5 @@ missing ones** — an agent reads them as current intent.
 
 ## Index
 
-No client specs yet.
+- [`01-severity-finding-filter.md`](01-severity-finding-filter.md) — severity
+  counters and client-side filtering on PR review runs.
