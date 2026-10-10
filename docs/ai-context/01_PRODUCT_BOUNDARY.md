@@ -2,8 +2,8 @@
 
 > **Document role:** Canonical statement of what is operational, partially wired,
 > or scaffolded in the current product.
-> **Last verified:** 2026-09-21 against `main` at
-> `4cdbd57db1345c0d80dcc0ef82d6831fc400797b`.
+> **Last verified:** 2026-09-25 against L02 commit `accd9c8`. Package typechecks,
+> unit suites, Docker-backed Postgres tests, and hermetic browser flows passed.
 
 This document prevents future-facing schemas, contracts, prompts, and UI mounts
 from being mistaken for shipped capabilities. For the stable product definition,
@@ -32,6 +32,8 @@ flow, read
 | Pull-request import | Operational | PR lists and details are fetched from GitHub and persisted; cached data remains readable when GitHub is unavailable. |
 | PR browsing | Operational | The UI provides repository PR lists and PR overview, findings, and files-changed views. |
 | Agent management | Operational | Users can create, update, enable/disable, delete, and version reviewer configurations. |
+| Reusable review Skills | Operational | Users can create, edit, version, enable, delete, import local text, and reuse Skills across agents. Ordered globally enabled Skills are fenced as untrusted review criteria and persisted in prompt traces. URL/community import, Evals, Stats, and CI execution remain explicitly unavailable. |
+| Conventions Extractor | Operational | Users can scan a bounded code-selected repository sample, triage mechanically grounded house-rule candidates, and turn accepted rules into an editable disabled Skill with source evidence. Extraction requires a configured external model. |
 | One-agent review | Operational | A selected agent can review a PR even when that agent is disabled for “run all.” |
 | Run-all selection | Operational | All enabled agents receive run rows and execute with failure isolation. They currently execute sequentially, not in parallel. |
 | Structured model output | Operational | Review output is validated against the shared schema, with bounded repair/retry behavior. |
@@ -54,7 +56,6 @@ flow, read
 
 | Capability | Verified implementation state | Boundary conclusion |
 | --- | --- | --- |
-| Skills | Tables, agent-skill link routes, contracts, and a review-engine prompt slot exist. There is no registered skills module or primary skills management UI, and the studio run executor does not resolve and pass skill bodies into reviews. | Scaffolded, not an operational review input. |
 | Persistent memory / RAG | Tables, vector-oriented schema, embedder wiring, trace fields, and a prompt slot exist. The studio executor does not retrieve memory or pass it to `reviewer-core`. | Not operational. `EMBEDDINGS_ENABLED=true` alone does not make it operational. |
 | Project context / specs | Tables, contracts, client hooks, and prompt slots exist, but no context module is registered and the studio executor supplies no specs. | Scaffolded. |
 | Intent and PR brief | Schema/contracts exist, but no registered intent or brief module participates in the current review flow. | Scaffolded. |
@@ -68,7 +69,7 @@ flow, read
 | Plugins | Installed-plugin schema exists without registered plugin import/export modules or UI. | Scaffolded. |
 | Agent performance dashboard | Trace and run metrics provide raw inputs, but no performance dashboard route or primary UI is registered. | Not operational. |
 | Weekly digest | A `digests` table exists, but no scheduler, digest module, generator, delivery path, or primary UI is registered. | Not operational. |
-| Feature-model settings | Settings can store model choices for future system features. This does not make onboarding, intent, risk brief, conformance, or conventions operational. | Operational configuration surface for mostly scaffolded consumers. |
+| Feature-model settings | Settings can store model choices for system features. Conventions consumes its configured model; the presence of choices for onboarding, intent, risk brief, or conformance does not make those features operational. | Operational configuration surface for one operational and several scaffolded consumers. |
 
 ## Important boundaries and constraints
 
@@ -95,8 +96,8 @@ flow, read
 - Local: database, repository clone, settings, run history, findings, and secret
   file.
 - GitHub-bound: repository/PR reads, clone authentication, and inline comments.
-- LLM-bound during review: diff, PR description, agent prompt, and enabled
-  repository-derived context.
+- LLM-bound during review: diff, PR description, agent prompt, enabled linked
+  skill text, and enabled repository-derived context.
 
 ### Runtime topology
 
