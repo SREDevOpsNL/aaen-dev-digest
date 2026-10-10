@@ -2,4 +2,4 @@
 
 **Status:** shipped
 
-The seeded PR journey opens Agent runs, displays run-scoped severity counts, toggles and clears the Warning severity filter without an LLM call, and exposes the trace drawer's persisted findings and cost.
+The seeded PR journey opens Agent runs, displays run-scoped severity counts, and toggles and clears the Warning severity filter without an LLM call.
