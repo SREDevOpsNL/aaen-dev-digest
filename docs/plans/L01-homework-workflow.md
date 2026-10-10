@@ -32,7 +32,9 @@ commit IDs below are the ones in the pull request's history.
 | 9b01797, cf18e8f, 5708bf3 | Acceptance gaps closed and evidence hardened: cost sums successful review runs, the PR-list popup is scoped to the newest completed review, client ESLint with the `pnpm lint` CI step, and the Claude Code `UserPromptSubmit` reminder hook |
 | f94e24c | The reminder hook resolves its script through `${CLAUDE_PROJECT_DIR}` |
 | ace2337 | Shared `FindingsPreview` on Timeline run tiles and PR-list rows; PR-list popup no longer clipped by the list container |
-| 840a0ff, ed88f16, and later | Agent-neutral Engineering Insights wording, reconciled with the workflow on `main` |
+| 840a0ff, ed88f16, 55566bb, 69cf1d9 | Agent-neutral Engineering Insights wording, reconciled with the workflow on `main` |
+| 839eb1d | Bound the PR-list findings query to the newest completed review for each PR |
+| 0d16464 | Cover the no-successful-review PR-list response through the database-backed API test |
 
 The executable evidence is the PR-list route
 [server/src/modules/pulls/routes.ts](../../server/src/modules/pulls/routes.ts),
