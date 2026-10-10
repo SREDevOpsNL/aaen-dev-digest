@@ -19,3 +19,9 @@ export function relativeTime(iso: string | null | undefined): string {
   if (h < 24) return `${h}h`;
   return `${Math.round(h / 24)}d`;
 }
+
+/** One-line PR-list preview; the stored rationale remains unchanged. */
+export function shortFindingDescription(rationale: string, maxLength = 180): string {
+  const compact = rationale.replace(/\s+/g, " ").trim();
+  return compact.length > maxLength ? compact.slice(0, maxLength - 1) + "…" : compact;
+}

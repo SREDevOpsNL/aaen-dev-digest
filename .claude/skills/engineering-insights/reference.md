@@ -41,4 +41,5 @@ monthly and whenever a file approaches 200 entries or becomes hard to use:
    `specs/`, leaving links rather than copied guidance when useful.
 4. Prune first. Split into human-chosen domain files only if the curated file is
    still too large, then update every routing instruction and link.
-5. Review the maintenance diff and commit `LEARNINGS.md` with the repository.
+5. Review the maintenance diff and commit the maintained `LEARNINGS.md` and
+   `INSIGHTS.md` files with the repository.

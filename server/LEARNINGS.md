@@ -44,6 +44,25 @@ correction. Repo-intel remains server-scoped;
 
 ## Recurring Errors & Fixes
 
+- **2026-09-21** — On Windows, `tsx src/db/migrate.ts` and
+  `tsx src/db/seed.ts` can exit successfully without running because their CLI
+  guards compare the canonical `import.meta.url` (`file:///D:/...`) with a
+  non-canonical `file://${process.argv[1]}` value (`file://D:\\...`). Normalize
+  `process.argv[1]` with `pathToFileURL(resolve(...)).href` before relying on
+  these scripts on Windows; until then, invoke the exported functions
+  explicitly. Evidence: `server/src/db/migrate.ts:37` and
+  `server/src/db/seed.ts:227` (CLI entrypoint guards); the same path comparison
+  evaluated to `false` on Windows while explicit imports applied migrations and
+  seed data.
+
+- **2026-09-21** — Scope correction to the preceding Windows CLI-entrypoint
+  entry: Windows is not a supported project-development environment for this
+  checkout. Run database scripts and all other project tooling in Ubuntu 24.04
+  WSL2; do not install Node or related development tools on the Windows host.
+  Evidence: `pnpm db:migrate` and `pnpm db:seed` both executed their CLI paths
+  successfully during `npm run e2e:hermetic` in WSL, followed by 7/7 passing
+  browser flows.
+
 ## Session Notes
 
 ## Open Questions

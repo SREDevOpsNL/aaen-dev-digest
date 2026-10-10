@@ -71,6 +71,16 @@ export function FindingsTab({
     setTarget((p) => ({ runId, n: (p?.n ?? 0) + 1 }));
   }, []);
 
+  // The timeline previews each run's findings from the reviews already loaded
+  // for the Review runs list below — no extra request and no model call.
+  const findingsByRun = React.useMemo(() => {
+    const byRun: Record<string, FindingRecord[]> = {};
+    for (const review of runs) {
+      if (review.run_id) (byRun[review.run_id] ??= []).push(...review.findings);
+    }
+    return byRun;
+  }, [runs]);
+
   return (
     <section>
       {liveRunIds.length > 0 && (
@@ -131,6 +141,7 @@ export function FindingsTab({
           <RunHistory
             runs={prRuns ?? []}
             commits={prCommits}
+            findingsByRun={findingsByRun}
             onOpenTrace={handleOpenTrace}
             onGoToReview={handleGoToReview}
             onDelete={handleDelete}

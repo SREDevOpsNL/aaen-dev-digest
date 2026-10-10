@@ -5,6 +5,7 @@
     "suggestedFix": "Suggested fix",
     "accept": "Accept",
     "dismiss": "Dismiss",
+    "reject": "Reject",
     "learn": "Learn",
     "replyToAuthor": "Reply to author",
     "replyPlaceholder": "Reply to the author about this finding…",
@@ -27,6 +28,13 @@
     "prScore": "PR SCORE"
   },
   "panel": {
+    "severityFilters": "Filter findings by severity",
+    "severityCounter": "{count} {severity}",
+    "severity": {
+      "critical": "CRITICAL",
+      "warning": "WARNING",
+      "suggestion": "SUGGESTION"
+    },
     "hideLowConfidence": "Hide low confidence",
     "noMatchTitle": "No findings match",
     "noMatchBody": "Adjust the filters above, or run a review to generate findings."
@@ -56,6 +64,7 @@
     "boilerplateLabel": "Boilerplate",
     "largeTitle": "This PR is large ({lines} changed lines)",
     "largeBody": "Consider splitting it into smaller, focused PRs for easier review:",
+    "findingsInRun": "{count} FINDINGS IN THIS RUN",
     "filesCount": "{count} files",
     "findingLines": "{count} finding-lines",
     "groupedByRole": "Smart Diff · grouped by role"
@@ -64,6 +73,7 @@
     "breadcrumb": "Pull Requests",
     "title": "Pull Requests",
     "summary": "{open} open · {needsReview} need review",
+    "findingsInRun": "{count} FINDINGS IN THIS RUN",
     "loading": "Loading pull requests…",
     "status": {
       "open": "Open",
@@ -92,6 +102,7 @@
       "size": "Size",
       "score": "Score",
       "cost": "Cost",
+      "findings": "Findings",
       "status": "Status",
       "updated": "Updated"
     },

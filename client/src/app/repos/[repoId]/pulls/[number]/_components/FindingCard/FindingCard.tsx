@@ -107,7 +107,7 @@ export function FindingCard({
               active={dismissed}
               onClick={() => onAction?.("dismiss")}
             >
-              {t("finding.dismiss")}
+              {t("finding.reject")}
             </Button>
           </div>
         </div>
