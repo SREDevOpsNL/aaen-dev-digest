@@ -24,6 +24,21 @@ Module-local findings belong beside their subject —
   (neither is installed there). Method:
   [Agent environment](docs/ai-context/02_AGENT_ENVIRONMENT.md#verifying-instruction-discovery).
 
+- **2026-10-08** — Correction to the 2026-10-07 `AGENTS.md` discovery entry:
+  Claude Code was already installed inside WSL (npm global under nvm, 2.1.278),
+  and the earlier "not installed" reading came from a non-interactive `bash -s`
+  probe that had not loaded nvm. With nvm sourced, the WSL-native
+  **Claude Code CLI 2.1.278** passes the same test: a fresh `claude -p` session
+  with `--tools ""` and `--no-session-persistence`, whose `stream-json` log has
+  zero `tool_use` events, reported the root sentinel when started at
+  `/home/dmitri/projects/aaen-dev-digest` and both the root and
+  `client/AGENTS.md` sentinels when started in `client/`. The sentinels were
+  removed and `git diff` was empty afterwards. The WSL-native Codex CLI
+  (`@openai/codex@0.155.1`, npm global under nvm) is installed but not logged
+  in, so its discovery is still unverified. Evidence: `claude --version` and
+  `codex --version` after `. "$NVM_DIR/nvm.sh"`; `codex login status` →
+  `Not logged in`.
+
 ## What Doesn't Work
 
 - **2026-09-17** — Editing `client/src/vendor/shared/` alone silently desyncs the
@@ -86,6 +101,12 @@ typecheck and tests. Do not treat the earlier absence as current state.
 Evidence: client/eslint.config.mjs:15, client/package.json:10,
 .github/workflows/client.yml:47.
 
+- **2026-10-08** — A `claude -p` call inside a script fed to `bash -s` reads the
+  rest of the script from stdin: the first headless session received the
+  remaining lines as extra input, and the commands after it never ran, without
+  an error. Redirect stdin (`claude -p "…" </dev/null`) whenever a headless
+  agent runs inside a stdin-fed script. Evidence: a two-session sentinel test
+  printed only the first session's result until `</dev/null` was added.
 
 ## Codebase Patterns & Tool / Library Notes
 
