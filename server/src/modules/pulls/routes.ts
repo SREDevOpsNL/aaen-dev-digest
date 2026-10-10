@@ -8,6 +8,15 @@ import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
 import { deriveReviewStatus } from './status.js';
+const FINDING_PREVIEW_MAX_LENGTH = 180;
+
+function toFindingPreview(rationale: string): string {
+  const compact = rationale.replace(/\s+/g, " ").trim();
+  return compact.length > FINDING_PREVIEW_MAX_LENGTH
+    ? compact.slice(0, FINDING_PREVIEW_MAX_LENGTH - 1) + "…"
+    : compact;
+}
+
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -111,30 +120,104 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // Latest-review SCORE per PR for the list's score ring. Computed on read
-    // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
-    const prIds = rows.map((r) => r.id);
-    const latestReviewByPr = new Map<string, { score: number | null; costUsd: number | null }>();
+    // Score and PR-list findings use the newest completed review; cost aggregates every completed review run.
+    const prIds = rows.map((row) => row.id);
+    const summaries = new Map<string, { score: number | null; cost: number; missing: boolean }>();
+    const counts = new Map<string, { CRITICAL: number; WARNING: number; SUGGESTION: number }>();
+    const latestReviewIds = new Map<string, string>();
+    const previews = new Map<
+      string,
+      {
+        severity: string;
+        title: string;
+        category: string;
+        file: string;
+        start_line: number;
+        confidence: number;
+        rationale: string;
+      }[]
+    >();
+
     if (prIds.length > 0) {
       const reviewRows = await container.db
-        .select({ prId: t.reviews.prId, score: t.reviews.score, costUsd: t.agentRuns.costUsd })
+        .select({
+          id: t.reviews.id,
+          prId: t.reviews.prId,
+          score: t.reviews.score,
+          costUsd: t.agentRuns.costUsd,
+        })
         .from(t.reviews)
         .leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId))
-        .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')))
+        .where(
+          and(
+            inArray(t.reviews.prId, prIds),
+            eq(t.reviews.kind, 'review'),
+            eq(t.agentRuns.status, 'done'),
+          ),
+        )
         .orderBy(desc(t.reviews.createdAt));
-      // Rows are newest-first → first seen per PR is the latest review.
-      for (const rv of reviewRows) {
-        if (!latestReviewByPr.has(rv.prId)) {
-          latestReviewByPr.set(rv.prId, { score: rv.score, costUsd: rv.costUsd });
+
+      for (const review of reviewRows) {
+        const summary = summaries.get(review.prId) ?? {
+          score: review.score,
+          cost: 0,
+          missing: false,
+        };
+        if (typeof review.costUsd === 'number') {
+          summary.cost += review.costUsd;
+        } else {
+          summary.missing = true;
         }
+        summaries.set(review.prId, summary);
+        if (!latestReviewIds.has(review.prId)) latestReviewIds.set(review.prId, review.id);
+      }
+
+      // Load findings only for each PR's newest completed review, so the query
+      // does not grow with review history.
+      const latestIds = [...latestReviewIds.values()];
+      const findingRows = latestIds.length === 0 ? [] : await container.db
+        .select({
+          prId: t.reviews.prId,
+          severity: t.findings.severity,
+          title: t.findings.title,
+          category: t.findings.category,
+          file: t.findings.file,
+          startLine: t.findings.startLine,
+          confidence: t.findings.confidence,
+          rationale: t.findings.rationale,
+        })
+        .from(t.findings)
+        .innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId))
+        .where(inArray(t.findings.reviewId, latestIds));
+
+      for (const finding of findingRows) {
+        const count = counts.get(finding.prId) ?? {
+          CRITICAL: 0,
+          WARNING: 0,
+          SUGGESTION: 0,
+        };
+        if (finding.severity in count) {
+          count[finding.severity as keyof typeof count] += 1;
+        }
+        counts.set(finding.prId, count);
+
+        const list = previews.get(finding.prId) ?? [];
+        list.push({
+          severity: finding.severity,
+          title: finding.title,
+          category: finding.category,
+          file: finding.file,
+          start_line: finding.startLine,
+          confidence: finding.confidence,
+          rationale: toFindingPreview(finding.rationale),
+        });
+        previews.set(finding.prId, list);
       }
     }
 
     const now = Date.now();
     return rows.map((r) => {
-      const review = latestReviewByPr.get(r.id);
+      const review = summaries.get(r.id);
       return {
         id: r.id,
         number: r.number,
@@ -156,7 +239,10 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
-        cost_usd: review ? review.costUsd : null,
+        cost_usd: review && !review.missing ? review.cost : null,
+        has_successful_review: Boolean(review),
+        findings_by_severity: counts.get(r.id) ?? null,
+        finding_previews: previews.get(r.id) ?? [],
       };
     });
   });

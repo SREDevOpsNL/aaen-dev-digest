@@ -26,6 +26,14 @@ correction. Genuinely cross-package findings belong in
 
 ## Recurring Errors & Fixes
 
+- **2026-09-28** — L01 requires both clickable run-scoped severity count buttons
+  and a separate Critical/Warning/Suggestion filter row. Disabling the count
+  buttons in `546e76d` made Flow 04's `1 WARNING` click a no-op while the
+  separate filter still worked. Keep both controls on the same severity state
+  and toggle handler, and test their synchronized pressed states. Evidence:
+  `client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx:75`
+  (`FindingsPanel`), `e2e/specs/04-pr-findings.flow.json:17`.
+
 ## Session Notes
 
 ## Open Questions

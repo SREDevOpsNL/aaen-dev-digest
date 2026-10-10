@@ -10,11 +10,13 @@ import { formatUsdCost } from "@/lib/format-cost";
 import { SIZE_COLOR, STATUS_META } from "../../constants";
 import { relativeTime, sizeOf } from "../../helpers";
 import { s } from "../../styles";
+import { FindingsPreview } from "../FindingsPreview";
 
 export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
   const t = useTranslations("prReview");
   const router = useRouter();
   const [h, setH] = React.useState(false);
+  const previews = pr.finding_previews ?? [];
   const st = STATUS_META[pr.status] ?? STATUS_META.needs_review!;
   const { size, lines } = sizeOf(pr);
   const reviewed = pr.score != null; // null score ⇒ PR has never been reviewed
@@ -54,7 +56,16 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
           <span style={s.muted}>—</span>
         )}
       </div>
-      <div className="mono" style={s.costCell}>{formatUsdCost(pr.cost_usd)}</div>
+      <div className="mono" data-testid="pr-list-cost" style={s.costCell}>
+        {pr.has_successful_review === false ? "" : formatUsdCost(pr.cost_usd)}
+      </div>
+      <div>
+        {previews.length > 0 ? (
+          <FindingsPreview counts={pr.findings_by_severity ?? {}} items={previews} align="right" />
+        ) : (
+          <span style={s.muted}>—</span>
+        )}
+      </div>
       <div>
         <Badge dot color={st.c} bg="transparent">
           {t(`list.status.${st.labelKey}`)}

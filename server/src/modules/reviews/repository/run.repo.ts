@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
@@ -48,6 +48,17 @@ export async function listRunsForPull(
     .leftJoin(t.agents, eq(t.agents.id, t.agentRuns.agentId))
     .where(and(eq(t.agentRuns.workspaceId, workspaceId), eq(t.agentRuns.prId, prId)))
     .orderBy(desc(t.agentRuns.ranAt));
+  const runIds = rows.map(({ run }) => run.id);
+  const countsByRun = new Map<string, { CRITICAL: number; WARNING: number; SUGGESTION: number }>();
+  if (runIds.length) {
+    const findings = await db.select({ runId: t.reviews.runId, severity: t.findings.severity }).from(t.findings).innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId)).where(inArray(t.reviews.runId, runIds));
+    for (const finding of findings) {
+      if (!finding.runId) continue;
+      const counts = countsByRun.get(finding.runId) ?? { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 };
+      if (finding.severity in counts) counts[finding.severity as keyof typeof counts] += 1;
+      countsByRun.set(finding.runId, counts);
+    }
+  }
   return rows.map(({ run, agentName }) => ({
     run_id: run.id,
     agent_id: run.agentId,
@@ -61,6 +72,7 @@ export async function listRunsForPull(
     tokens_out: run.tokensOut,
     cost_usd: run.costUsd,
     findings_count: run.findingsCount,
+    severity_counts: countsByRun.get(run.id) ?? { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 },
     grounding: run.grounding,
     ran_at: run.ranAt ? run.ranAt.toISOString() : null,
     score: run.score,

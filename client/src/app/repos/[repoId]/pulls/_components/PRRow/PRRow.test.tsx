@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { PrMeta } from "@devdigest/shared";
 import messages from "../../../../../../../messages/en/prReview.json";
@@ -24,6 +24,7 @@ const PR: PrMeta = {
   updated_at: "2026-09-20T12:00:00Z",
   score: 90,
   cost_usd: 0.012,
+  has_successful_review: true,
 };
 
 function renderRow(pr: PrMeta) {
@@ -34,16 +35,52 @@ function renderRow(pr: PrMeta) {
   );
 }
 
-describe("PRRow Cost", () => {
-  it("renders provider-reported cost and preserves a missing cost as unknown", () => {
+describe("PRRow", () => {
+  it("renders provider-reported cost, preserves unknown cost, and leaves no-run cost empty", () => {
     const { rerender } = renderRow(PR);
     expect(screen.getByText("$0.012")).toBeInTheDocument();
 
     rerender(
       <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
-        <PRRow pr={{ ...PR, cost_usd: null }} repoId="repo-1" />
+        <PRRow pr={{ ...PR, cost_usd: null, has_successful_review: true }} repoId="repo-1" />
       </NextIntlClientProvider>,
     );
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByTestId("pr-list-cost")).toHaveTextContent("—");
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
+        <PRRow pr={{ ...PR, cost_usd: null, has_successful_review: false }} repoId="repo-1" />
+      </NextIntlClientProvider>,
+    );
+    expect(screen.getByTestId("pr-list-cost")).toHaveTextContent("");
+  });
+
+  it("shows a run-scoped, read-only tooltip with a bounded description", () => {
+    const rationale = "x".repeat(220);
+    renderRow({
+      ...PR,
+      findings_by_severity: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+      finding_previews: [{
+        severity: "WARNING",
+        title: "Current warning",
+        category: "performance",
+        file: "src/api.ts",
+        start_line: 42,
+        confidence: 0.87,
+        rationale,
+      }],
+    });
+
+    const trigger = screen.getByRole("group", { name: "Findings: 1 WARNING" });
+    fireEvent.mouseEnter(trigger);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("1 FINDINGS IN THIS RUN");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("WARNING Current warning · performance");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("src/api.ts:42 · 87%");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("x".repeat(179) + "…");
+    expect(screen.queryByRole("button", { name: /accept|reject/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("tooltip").querySelector("[title]")).toBeNull();
+    fireEvent.mouseLeave(trigger);
+    fireEvent.focus(trigger);
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
   });
 });
