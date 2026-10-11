@@ -1,0 +1,26 @@
+import type { CSSProperties } from "react";
+
+export const skillStyles = {
+  layout: { display: "flex", height: "calc(100vh - 52px)", minHeight: 0 } satisfies CSSProperties,
+  rail: { width: 310, flexShrink: 0, borderRight: "1px solid var(--border)", background: "var(--bg-surface)", display: "flex", flexDirection: "column" } satisfies CSSProperties,
+  railHeader: { padding: "16px 16px 12px" } satisfies CSSProperties,
+  titleRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 } satisfies CSSProperties,
+  search: { display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", background: "var(--bg-primary)", borderRadius: 7, padding: "7px 10px" } satisfies CSSProperties,
+  searchInput: { flex: 1, minWidth: 0, border: 0, outline: 0, background: "transparent", color: "var(--text-primary)", fontSize: 13 } satisfies CSSProperties,
+  railList: { flex: 1, overflow: "auto", padding: "0 10px 12px" } satisfies CSSProperties,
+  card: (active: boolean, enabled: boolean): CSSProperties => ({ padding: 12, marginBottom: 8, borderRadius: 8, border: `1px solid ${active ? "var(--border-strong)" : "var(--border)"}`, background: active ? "var(--bg-hover)" : "var(--bg-elevated)", opacity: enabled ? 1 : 0.6, cursor: "pointer" }),
+  detail: { flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" } satisfies CSSProperties,
+  detailHeader: { display: "flex", alignItems: "center", gap: 10, padding: "16px 28px 0" } satisfies CSSProperties,
+  tabBody: { flex: 1, minHeight: 0, overflow: "auto", padding: 28 } satisfies CSSProperties,
+  content: { maxWidth: 780 } satisfies CSSProperties,
+  sectionRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 18 } satisfies CSSProperties,
+  editorFrame: { border: "1px solid var(--border-strong)", borderRadius: 8, overflow: "hidden", background: "var(--bg-surface)" } satisfies CSSProperties,
+  editorBar: { display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1px solid var(--border)" } satisfies CSSProperties,
+  bodyInput: { width: "100%", minHeight: 330, resize: "vertical", border: 0, outline: 0, background: "transparent", color: "var(--text-primary)", padding: 14, lineHeight: 1.65, fontSize: 13 } satisfies CSSProperties,
+  actions: { display: "flex", alignItems: "center", gap: 8, marginTop: 14 } satisfies CSSProperties,
+  preview: { border: "1px solid var(--border)", background: "var(--bg-elevated)", borderRadius: 9, padding: 20 } satisfies CSSProperties,
+  muted: { color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 } satisfies CSSProperties,
+  versionRow: { border: "1px solid var(--border)", background: "var(--bg-elevated)", borderRadius: 8, padding: "12px 14px", marginBottom: 8 } satisfies CSSProperties,
+  row: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid var(--border)", background: "var(--bg-elevated)", borderRadius: 8 } satisfies CSSProperties,
+  iconButton: { border: "1px solid var(--border)", background: "var(--bg-surface)", color: "var(--text-secondary)", borderRadius: 6, padding: 6, display: "grid", placeItems: "center" } satisfies CSSProperties,
+} as const;
