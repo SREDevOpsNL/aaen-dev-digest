@@ -22,6 +22,8 @@ is how the suite works **today**.
 | `06-onboarding.flow.json`        | Onboarding add-repository screen renders                       |
 | `07-settings.flow.json`          | Settings renders the API Keys and Feature Models sections      |
 | `07a-findings-preview-scroll.flow.json` | Timeline findings preview stays open while its findings scroll |
+| `08-skills.flow.json`            | Skills library and Test Quality Reviewer render from seed      |
+| `09-conventions.flow.json`       | Conventions Extractor opens for the seeded repository           |
 
 Flows `01`, `02`, `04`, `05` and `07a` enter at `{BASE}/` and follow the home
 redirect to the **first** repo, so they assume the seeded demo repo is the only one.

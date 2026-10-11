@@ -53,6 +53,15 @@ correction. Repo-intel remains server-scoped;
   `server/test/reviews.it.test.ts` ("counts a run's cost once…"), which fails
   against the earlier per-row sum (0.09 instead of 0.05).
 
+- **2026-09-23** — Correction to the 2026-09-17 prompt-slot entry: the studio
+  executor now resolves an agent's enabled linked skills in link order and
+  passes them to `reviewer-core`; only memory and project specs remain unused
+  optional slots. Preserve the workspace/effective-enabled filter when changing
+  prompt inputs. Evidence: `server/src/modules/reviews/run-executor.ts:190`
+  (`ReviewRunExecutor.runOneAgent`),
+  `server/src/modules/agents/repository.ts:208`
+  (`AgentsRepository.enabledSkillsForPrompt`).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
@@ -75,6 +84,14 @@ correction. Repo-intel remains server-scoped;
   Evidence: `pnpm db:migrate` and `pnpm db:seed` both executed their CLI paths
   successfully during `npm run e2e:hermetic` in WSL, followed by 7/7 passing
   browser flows.
+
+- **2026-09-25** — When Drizzle replaces a boolean scaffold column with several
+  semantically related columns, its interactive rename inference can generate a
+  syntactically valid migration that drops the old value after adding defaults.
+  Choose “create column” for each new field, then add an explicit data-copy
+  statement before the generated drop; for conventions this preserves
+  `accepted = true` as `status = 'accepted'`. Evidence:
+  `server/src/db/migrations/0011_add_convention_evidence.sql:7` (status backfill).
 
 ## Session Notes
 
