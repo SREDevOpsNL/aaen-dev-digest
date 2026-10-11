@@ -2,8 +2,12 @@
 
 > **Document role:** Canonical statement of what is operational, partially wired,
 > or scaffolded in the current product.
-> **Last verified:** 2026-09-21 against `main` at
-> `4cdbd57db1345c0d80dcc0ef82d6831fc400797b`.
+> **Last verified:** 2026-10-11 against the integrated L01 (severity filters,
+> review cost, findings previews) and L02 (skills, conventions) implementation
+> on the L02 branch after `main` was merged into it. Package typechecks and
+> lint, unit and Docker-backed persistence tests, and hermetic browser flows
+> passed locally in WSL and in GitHub Actions; Git history identifies the exact
+> commit.
 
 This document prevents future-facing schemas, contracts, prompts, and UI mounts
 from being mistaken for shipped capabilities. For the stable product definition,
@@ -31,7 +35,11 @@ flow, read
 | Repository indexing | Operational | JS/TS-family source is indexed after clone and incrementally on refresh/resync. |
 | Pull-request import | Operational | PR lists and details are fetched from GitHub and persisted; cached data remains readable when GitHub is unavailable. |
 | PR browsing | Operational | The UI provides repository PR lists and PR overview, findings, and files-changed views. |
+| Run-scoped severity filters | Operational | Each review run shows Critical, Warning, and Suggestion counters that filter its persisted findings; selecting the active severity clears the filter. Filtering is client-side and never calls a model. |
+| PR-list review summary and findings previews | Operational | The PR list shows cost summed across successful review runs (empty when a PR has no successful review), plus severity counts and a read-only preview of the newest completed review's findings. Settled Timeline run tiles show the same counts and preview for their own run. |
 | Agent management | Operational | Users can create, update, enable/disable, delete, and version reviewer configurations. |
+| Reusable review Skills | Operational | Users can create, edit, version, enable, delete, import local text, and reuse Skills across agents. Ordered globally enabled Skills are fenced as untrusted review criteria and persisted in prompt traces. URL/community import, Evals, Stats, and CI execution remain explicitly unavailable. |
+| Conventions Extractor | Operational | Users can scan a bounded code-selected repository sample, triage mechanically grounded house-rule candidates, and turn accepted rules into an editable disabled Skill with source evidence. Extraction requires a configured external model. |
 | One-agent review | Operational | A selected agent can review a PR even when that agent is disabled for “run all.” |
 | Run-all selection | Operational | All enabled agents receive run rows and execute with failure isolation. They currently execute sequentially, not in parallel. |
 | Structured model output | Operational | Review output is validated against the shared schema, with bounded repair/retry behavior. |
@@ -44,7 +52,7 @@ flow, read
 | Live run progress | Operational | Run events are streamed through SSE from an in-process event bus. |
 | Run history and trace | Operational | Run status, metrics, logs, prompt assembly, raw model output, and findings are persisted. Failure and cancellation traces are also retained. |
 | Map-reduce prompt trace | Partial | A map-reduce trace stores chunk labels, joined raw outputs, and a whole-diff prompt-assembly representation; it does not persist every exact per-file message sent to the model. |
-| Run cost attribution | Operational | Authoritative provider-reported USD cost is persisted per run and exposed through the APIs and all three UI surfaces. Missing provider cost remains `null`, and the engine's best-available estimated `costUsd` stays separate. Database-backed migration/persistence tests and the hermetic end-to-end regression gate passed against the verified source revision above. |
+| Run cost attribution | Operational | Authoritative provider-reported USD cost is persisted per run and exposed through the APIs and all three UI surfaces. Missing provider cost remains `null`, and the engine's best-available estimated `costUsd` stays separate. Database-backed migration/persistence tests and the hermetic end-to-end regression gate passed against the verified implementation above. |
 | Run cancellation | Partial | Cancellation is checked before model chunks. It cannot interrupt a model request already in flight, and a single-pass review has no later chunk checkpoint. |
 | Finding disposition | Operational | Findings can be accepted or dismissed locally. |
 | Inline GitHub comments | Operational | Comments authored in the Files view are read from and posted directly to GitHub; they are not a local comment mirror. |
@@ -54,7 +62,6 @@ flow, read
 
 | Capability | Verified implementation state | Boundary conclusion |
 | --- | --- | --- |
-| Skills | Tables, agent-skill link routes, contracts, and a review-engine prompt slot exist. There is no registered skills module or primary skills management UI, and the studio run executor does not resolve and pass skill bodies into reviews. | Scaffolded, not an operational review input. |
 | Persistent memory / RAG | Tables, vector-oriented schema, embedder wiring, trace fields, and a prompt slot exist. The studio executor does not retrieve memory or pass it to `reviewer-core`. | Not operational. `EMBEDDINGS_ENABLED=true` alone does not make it operational. |
 | Project context / specs | Tables, contracts, client hooks, and prompt slots exist, but no context module is registered and the studio executor supplies no specs. | Scaffolded. |
 | Intent and PR brief | Schema/contracts exist, but no registered intent or brief module participates in the current review flow. | Scaffolded. |
@@ -68,7 +75,7 @@ flow, read
 | Plugins | Installed-plugin schema exists without registered plugin import/export modules or UI. | Scaffolded. |
 | Agent performance dashboard | Trace and run metrics provide raw inputs, but no performance dashboard route or primary UI is registered. | Not operational. |
 | Weekly digest | A `digests` table exists, but no scheduler, digest module, generator, delivery path, or primary UI is registered. | Not operational. |
-| Feature-model settings | Settings can store model choices for future system features. This does not make onboarding, intent, risk brief, conformance, or conventions operational. | Operational configuration surface for mostly scaffolded consumers. |
+| Feature-model settings | Settings can store model choices for system features. Conventions consumes its configured model; the presence of choices for onboarding, intent, risk brief, or conformance does not make those features operational. | Operational configuration surface for one operational and several scaffolded consumers. |
 
 ## Important boundaries and constraints
 
@@ -95,8 +102,8 @@ flow, read
 - Local: database, repository clone, settings, run history, findings, and secret
   file.
 - GitHub-bound: repository/PR reads, clone authentication, and inline comments.
-- LLM-bound during review: diff, PR description, agent prompt, and enabled
-  repository-derived context.
+- LLM-bound during review: diff, PR description, agent prompt, enabled linked
+  skill text, and enabled repository-derived context.
 
 ### Runtime topology
 
@@ -116,8 +123,7 @@ The database intentionally includes tables for later course stages. The
 following table families must not be cited as proof of operational product
 features without registered modules and an end-to-end path:
 
-- `skills`, `skill_versions`, `agent_skills`;
-- `memory`, `conventions`;
+- `memory`;
 - `code_chunks`, general `symbols`/`references`, `onboarding`;
 - `pr_intent`, `pr_brief`;
 - `eval_*`, `conformance_checks`, `composed_reviews`;

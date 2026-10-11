@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
@@ -47,6 +47,11 @@ export interface LinkedSkillRow {
   skill: typeof t.skills.$inferSelect;
   order: number;
 }
+
+export type SetSkillsResult =
+  | { kind: 'ok'; links: LinkedSkillRow[] }
+  | { kind: 'agent_not_found' }
+  | { kind: 'skills_not_found'; skillIds: string[] };
 
 export class AgentsRepository {
   constructor(private db: Db) {}
@@ -195,8 +200,26 @@ export class AgentsRepository {
       .from(t.agentSkills)
       .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
       .where(eq(t.agentSkills.agentId, agentId))
-      .orderBy(asc(t.agentSkills.order));
+      .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
     return rows.map((r) => ({ skill: r.skill, order: r.order }));
+  }
+
+  /** Enabled skill bodies used by the review prompt, in deterministic link order. */
+  async enabledSkillsForPrompt(agentId: string): Promise<LinkedSkillRow[]> {
+    const rows = await this.db
+      .select({ skill: t.skills, order: t.agentSkills.order })
+      .from(t.agentSkills)
+      .innerJoin(t.agents, eq(t.agentSkills.agentId, t.agents.id))
+      .innerJoin(
+        t.skills,
+        and(
+          eq(t.agentSkills.skillId, t.skills.id),
+          eq(t.skills.workspaceId, t.agents.workspaceId),
+        ),
+      )
+      .where(and(eq(t.agentSkills.agentId, agentId), eq(t.skills.enabled, true)))
+      .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
+    return rows.map((row) => ({ skill: row.skill, order: row.order }));
   }
 
   async skillIdsForAgent(agentId: string): Promise<string[]> {
@@ -204,33 +227,88 @@ export class AgentsRepository {
     return links.map((l) => l.skill.id);
   }
 
-  /** Link a skill to an agent at a given order (idempotent: upserts order). */
-  async linkSkill(agentId: string, skillId: string, order: number): Promise<void> {
-    await this.db
-      .insert(t.agentSkills)
-      .values({ agentId, skillId, order })
-      .onConflictDoUpdate({
-        target: [t.agentSkills.agentId, t.agentSkills.skillId],
-        set: { order },
-      });
-  }
-
-  async unlinkSkill(agentId: string, skillId: string): Promise<void> {
-    await this.db
-      .delete(t.agentSkills)
-      .where(and(eq(t.agentSkills.agentId, agentId), eq(t.agentSkills.skillId, skillId)));
-  }
-
   /**
    * Replace the full set of linked skills for an agent with `skillIds`, assigning
    * order = index. Used by the "Skills" editor tab (attach/reorder). Skills not in
    * the list are unlinked.
    */
-  async setSkills(agentId: string, skillIds: string[]): Promise<void> {
-    await this.db.delete(t.agentSkills).where(eq(t.agentSkills.agentId, agentId));
-    if (skillIds.length === 0) return;
-    await this.db
-      .insert(t.agentSkills)
-      .values(skillIds.map((skillId, i) => ({ agentId, skillId, order: i })));
+  async setSkills(
+    workspaceId: string,
+    agentId: string,
+    skillIds: string[],
+  ): Promise<SetSkillsResult> {
+    return this.db.transaction(async (tx) => {
+      const [agent] = await tx
+        .select()
+        .from(t.agents)
+        .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.id, agentId)))
+        .for('update');
+      if (!agent) return { kind: 'agent_not_found' };
+
+      const ownedSkills =
+        skillIds.length === 0
+          ? []
+          : await tx
+              .select({ id: t.skills.id })
+              .from(t.skills)
+              .where(
+                and(
+                  eq(t.skills.workspaceId, workspaceId),
+                  inArray(t.skills.id, skillIds),
+                ),
+              );
+      const ownedIds = new Set(ownedSkills.map((row) => row.id));
+      const missing = skillIds.filter((id) => !ownedIds.has(id));
+      if (missing.length > 0) return { kind: 'skills_not_found', skillIds: missing };
+
+      const previous = await tx
+        .select({ skillId: t.agentSkills.skillId })
+        .from(t.agentSkills)
+        .where(eq(t.agentSkills.agentId, agentId))
+        .orderBy(asc(t.agentSkills.order), asc(t.agentSkills.skillId));
+      const changed =
+        previous.length !== skillIds.length ||
+        previous.some((link, index) => link.skillId !== skillIds[index]);
+
+      if (changed) {
+        await tx.delete(t.agentSkills).where(eq(t.agentSkills.agentId, agentId));
+        if (skillIds.length > 0) {
+          await tx
+            .insert(t.agentSkills)
+            .values(skillIds.map((skillId, order) => ({ agentId, skillId, order })));
+        }
+
+        const nextVersion = agent.version + 1;
+        await tx
+          .update(t.agents)
+          .set({ version: nextVersion })
+          .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.id, agentId)));
+        await tx.insert(t.agentVersions).values({
+          agentId,
+          version: nextVersion,
+          configJson: {
+            provider: agent.provider,
+            model: agent.model,
+            system_prompt: agent.systemPrompt,
+            output_schema: agent.outputSchema,
+            strategy: agent.strategy,
+            ci_fail_on: agent.ciFailOn,
+            repo_intel: agent.repoIntel,
+            skills: skillIds,
+          },
+        });
+      }
+
+      const links = await tx
+        .select({ skill: t.skills, order: t.agentSkills.order })
+        .from(t.agentSkills)
+        .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
+        .where(eq(t.agentSkills.agentId, agentId))
+        .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
+      return {
+        kind: 'ok',
+        links: links.map((row) => ({ skill: row.skill, order: row.order })),
+      };
+    });
   }
 }

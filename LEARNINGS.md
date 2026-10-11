@@ -86,6 +86,18 @@ typecheck and tests. Do not treat the earlier absence as current state.
 Evidence: client/eslint.config.mjs:15, client/package.json:10,
 .github/workflows/client.yml:47.
 
+- **2026-10-02** — `CLAUDE.md → AGENTS.md` compatibility symlinks failed
+  silently. During L02 development the five Git symlink blobs stored
+  `AGENTS.md\n`, so every native checkout pointed at a file named with a
+  trailing newline, and the verifier of that time accepted them by trimming the
+  target. They are not needed: Claude Code loads `AGENTS.md` itself when no
+  `CLAUDE.md` exists (verified 2026-10-07 under What Works). Keep `AGENTS.md` as
+  the only instruction file; `node scripts/verify-agent-instructions.mjs`
+  rejects symlinks and `CLAUDE.md`-style files. Evidence:
+  `git cat-file -p 1be590e:CLAUDE.md | od -c` → `A G E N T S . m d \n`, from the
+  original L02 branch. That commit is not part of the rewritten PR #4 history,
+  which never contains the symlinks, so the blob is reproducible only where
+  `1be590e` is still held (a local reflog or an older clone).
 
 ## Codebase Patterns & Tool / Library Notes
 
@@ -156,6 +168,14 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   (`OpenRouterProvider.completeStructured`),
   `reviewer-core/src/review/run.ts:159-184` (`reviewPullRequest`),
   `server/src/platform/container.ts:181-188` (`Container.buildLlm`).
+
+- **2026-09-25** — The reverted history contains a complete Conventions
+  Extractor specification, implementation, and tests in commit `641b637`, but
+  that commit also bundles an older Skills implementation and migrations
+  `0011`-`0015`. Use it as a porting reference against the current L02 Skills
+  contracts and generate a new migration from the current schema; do not
+  cherry-pick it wholesale. Evidence: `git show
+  641b637:docs/specs/conventions.md`; `git show --stat 641b637`.
 
 ## Decisions
 
