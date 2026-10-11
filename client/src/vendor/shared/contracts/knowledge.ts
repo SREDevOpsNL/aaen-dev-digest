@@ -141,8 +141,10 @@ export type SkillSummary = z.infer<typeof SkillSummary>;
 export const SkillVersion = z.object({
   skill_id: z.string(),
   version: z.number().int().positive(),
-  message: z.string().nullable(),
   body: z.string(),
+  // The current scaffold has no message column; keep the contract forward-
+  // compatible while returning null until that storage is deliberately added.
+  message: z.string().nullable(),
   created_at: z.string(),
 });
 export type SkillVersion = z.infer<typeof SkillVersion>;
@@ -249,8 +251,9 @@ export const AgentSkillLink = z.object({
 });
 export type AgentSkillLink = z.infer<typeof AgentSkillLink>;
 
-/** Ordered agent-skill link with its resolved skill. */
+/** Ordered agent-skill link with the resolved workspace-owned skill. */
 export const AgentSkillDetail = AgentSkillLink.extend({
+  // `agent_skills` has no per-link switch. This mirrors `skill.enabled`.
   enabled: z.boolean(),
   skill: Skill,
 });

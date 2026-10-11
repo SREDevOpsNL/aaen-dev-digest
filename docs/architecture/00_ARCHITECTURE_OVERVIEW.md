@@ -2,8 +2,12 @@
 
 > **Document role:** Canonical curated explanation of how the current DevDigest
 > system works.
-> **Last verified:** 2026-09-25 against L02 commit `accd9c8`; Docker-backed
-> persistence tests and hermetic browser flows passed in GitHub Actions.
+> **Last verified:** 2026-10-11 against the integrated L01 (severity filters,
+> review cost, findings previews) and L02 (skills, conventions) implementation
+> on the L02 branch after `main` was merged into it. Package typechecks and
+> lint, unit and Docker-backed persistence tests, and hermetic browser flows
+> passed locally in WSL and in GitHub Actions; Git history identifies the exact
+> commit.
 > Product identity is owned by
 > [`docs/ai-context/00_PRODUCT_IDENTITY.md`](../ai-context/00_PRODUCT_IDENTITY.md),
 > and capability status by
@@ -20,6 +24,8 @@ Its current operational capabilities centre on:
 - importing and browsing pull requests;
 - configuring specialised reviewer agents;
 - managing reusable text-only review skills and attaching them to agents;
+- extracting grounded house-rule conventions from a repository sample and
+  turning accepted conventions into skills;
 - executing one or all enabled AI reviewer configurations;
 - grounding findings against actual changed lines;
 - persisting reviews, findings, run status, and execution traces;
@@ -424,7 +430,9 @@ Score and the PR-list Findings popup use the newest completed review: its
 severity indicators, popup count, and previews are all scoped to that one
 review. Preview rationales are normalized and bounded to 180 characters before
 the list response is returned, while the stored finding rationale remains
-unchanged.
+unchanged. Each settled Timeline run tile shows the same severity counts and
+read-only preview for its own run, using the findings the Findings tab already
+loaded.
 
 Finding disposition and GitHub publication are deliberately separate paths.
 Accept/dismiss writes local finding state. Posting through the inline composer
@@ -440,12 +448,14 @@ calls GitHub and does not persist a second local comment copy.
 | Pull requests | `GET /repos/:id/pulls`, `GET /pulls/:id`, `POST /repos/:id/poll` |
 | GitHub comments | `GET/POST /pulls/:id/comments` |
 | Repo intelligence | `GET /repos/:id/index-state`, `POST /repos/:id/resync` |
-| Agents | Agent CRUD, versions, model lists, and skill-link endpoints under `/agents` and `/providers` |
+| Agents | Agent CRUD, versions, model lists, and ordered skill links (`GET/POST /agents/:id/skills`) under `/agents` and `/providers` |
+| Skills | `GET/POST /skills`, `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions`, and `GET /skills/:id/agents` |
+| Conventions | `GET /repos/:id/conventions`, `POST /repos/:id/conventions/extract`, `POST /repos/:id/conventions/skill`, `PATCH/DELETE /conventions/:id` |
 | Reviews | `POST /pulls/:id/review`, review/finding reads and actions |
 | Runs | Active/history reads, cancel/delete, SSE events, and persisted trace |
 
-The agent skill-link endpoints are present, but their existence does not make
-skills an end-to-end review feature; see the product boundary.
+Skills and the Conventions Extractor are operational; their exact scope and
+limits are recorded in the product boundary.
 
 ## Data and storage
 
@@ -462,6 +472,7 @@ Operational table groups include:
 | Local identity/settings | `users`, `workspaces`, `workspace_members`, `settings` |
 | Repositories and PRs | `repos`, `pull_requests`, `pr_files`, `pr_commits` |
 | Agents | `agents`, `agent_versions` |
+| Skills and conventions | `skills`, `skill_versions`, `agent_skills`, `conventions` |
 | Reviews | `reviews`, `findings` |
 | Execution | `agent_runs`, `run_traces`, `jobs` |
 | Repo intelligence | `repo_index_state`, `file_edges`, `file_facts`, `file_rank`, `repo_map_cache`, plus indexed symbol/reference storage |

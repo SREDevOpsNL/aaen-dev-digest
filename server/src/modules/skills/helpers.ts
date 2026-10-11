@@ -46,4 +46,3 @@ export function isSkillConfigChange(
     (patch.body !== undefined && patch.body !== current.body)
   );
 }
-

@@ -54,4 +54,3 @@ describe('skill mappings and version rule', () => {
     });
   });
 });
-
