@@ -147,13 +147,17 @@ d('run lifecycle: cancellation and terminal states (Testcontainers pg)', () => {
     expect(app.container.runBus.isCancelled(runId)).toBe(false);
 
     llm.gate.resolve();
-    await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+    // The row is already 'cancelled' (cancelRun wrote it), so a status poll
+    // returns before the executor finishes. Its last step is saving the trace;
+    // wait for that so the assertions below cannot pass vacuously.
+    await vi.waitFor(async () => {
+      const [trace] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, runId));
+      expect(trace).toBeDefined();
+    });
 
     expect((await runRow(runId)).status).toBe('cancelled');
     expect(await reviewsForRun(runId)).toHaveLength(0);
     expect(await lastReviewedSha(pr.id)).toBeNull();
-    const [trace] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, runId));
-    expect(trace).toBeDefined();
     await app.close();
   });
 
