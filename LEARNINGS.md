@@ -231,6 +231,16 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   then exited with code 0 before the next migration command; the same sequence
   completed when kept in one session (`migrate` → `seed` → API → two reviews).
 
+- **2026-10-13** — In a fresh worktree, `server` `pnpm typecheck` fails with
+  `TS2322: Type 'unknown' is not assignable to type 'T'` in
+  `src/adapters/llm/anthropic.ts` and `openai.ts` even when the code is
+  unchanged, because the server compiles `reviewer-core` source through a path
+  alias and `reviewer-core/node_modules` is missing, so its Zod types do not
+  resolve. Run `npm ci` in `reviewer-core/` before typechecking `server/` in a
+  new worktree. Evidence: the same commit typechecked cleanly after
+  `npm ci` in `reviewer-core/`, with identical `typescript` and `zod`
+  versions in `server/`.
+
 ## Session Notes
 
 ## Open Questions
