@@ -49,6 +49,17 @@ correction. Repo-intel remains server-scoped;
   `server/src/modules/agents/repository.ts:208`
   (`AgentsRepository.enabledSkillsForPrompt`).
 
+- **2026-10-13** — `RunBus.isCancelled()` is not a reliable cancellation signal
+  after any await: `cancelRun` calls `runBus.complete()` right after
+  signalling, and `complete()` clears the flag. Check the durable
+  `agent_runs.status = 'cancelled'` instead, and keep terminal writes
+  compare-and-set from `running`. The persisted trace is built from the bus
+  buffer (`RunLogger.logFor`), so events published after `complete()` must
+  still be buffered even though they are no longer emitted. Evidence:
+  `server/src/platform/sse.ts` (`RunBus.complete`, `RunBus.publish`),
+  `server/src/platform/run-logger.ts:94` (`RunLogger.logFor`),
+  `server/test/run-lifecycle.it.test.ts`.
+
 ## Decisions
 
 ## Recurring Errors & Fixes
