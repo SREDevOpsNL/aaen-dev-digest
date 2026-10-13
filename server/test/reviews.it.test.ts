@@ -509,6 +509,20 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
       await app.close();
     });
 
+    it('GET /runs/:id/events streams an own-workspace run', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const own = await seedRun(workspaceId, 'done');
+      // Buffer one event and complete the run so the replay-then-end stream finishes.
+      app.container.runBus.publish(own.id, 'info', 'own workspace event');
+      app.container.runBus.complete(own.id);
+
+      const res = await app.inject({ method: 'GET', url: `/runs/${own.id}/events` });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/event-stream');
+      expect(res.body).toContain('own workspace event');
+      await app.close();
+    });
+
     it('POST /runs/:id/cancel returns 404 for another workspace and leaves the run untouched', async () => {
       const app = await appWith(REVIEW_FIXTURE);
       const foreign = await seedRun(await foreignWorkspace(), 'running');
