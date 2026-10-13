@@ -83,9 +83,12 @@ export class ReviewService {
    * server restart) where signalling alone would do nothing.
    */
   async cancelRun(runId: string): Promise<void> {
-    this.publish(runId, 'info', 'Cancellation requested — stopping…');
+    // Fast-path signal first, then the durable transition (the executor's
+    // authoritative check), then the event and stream completion — so a client
+    // that refetches on "done" already sees the cancelled row.
     this.container.runBus.cancel(runId);
     await this.repo.cancelRunIfRunning(runId);
+    this.publish(runId, 'info', 'Cancellation requested — stopping…');
     this.container.runBus.complete(runId);
   }
 

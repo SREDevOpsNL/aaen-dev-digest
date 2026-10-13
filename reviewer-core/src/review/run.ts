@@ -85,11 +85,13 @@ export interface ReviewInput {
   /** Progress sink. */
   onEvent?: (e: ReviewEvent) => void;
   /**
-   * Cancellation checkpoint, called before each (expensive) chunk LLM call.
-   * Supply a function that THROWS to abort mid-run (the caller owns the error
-   * type, e.g. the server's RunCancelledError); the engine stays agnostic.
+   * Cancellation checkpoint, awaited before each (expensive) chunk LLM call.
+   * Supply a function that THROWS (or returns a rejecting promise) to abort
+   * mid-run; the caller owns the error type (e.g. the server's
+   * RunCancelledError) and the engine stays agnostic. Synchronous checkpoints
+   * keep working unchanged: awaiting `void` only adds one microtask.
    */
-  checkCancelled?: () => void;
+  checkCancelled?: () => void | Promise<void>;
 }
 
 export interface ReviewOutcome {
@@ -165,7 +167,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
 
   for (const chunk of chunks) {
     // Cancellation checkpoint — stop before the next (expensive) LLM call.
-    input.checkCancelled?.();
+    await input.checkCancelled?.();
     // 'map:' prefix only for the map-reduce path (one call per file). In
     // single-pass there is exactly one chunk (the whole diff) — don't mislabel it.
     emit(
