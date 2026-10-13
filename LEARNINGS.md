@@ -199,6 +199,15 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   cherry-pick it wholesale. Evidence: `git show
   641b637:docs/specs/conventions.md`; `git show --stat 641b637`.
 
+- **2026-10-13** — In Claude Code 2.1.278, `claude agents` manages background
+  sessions and does not list custom subagent definitions. Verify a
+  `.claude/agents/<name>.md` subagent with a headless session instead:
+  `claude -p --agent <name> --output-format stream-json --verbose "…" </dev/null`.
+  Its `system/init` event reports the effective `tools` (the frontmatter
+  allowlist), the resolved `model`, and the discovered `agents`. Evidence:
+  both project subagents reported `tools: ["Read","Grep","Glob"]`, models
+  `claude-sonnet-5` / `claude-opus-5`, and answered that they had no write tool.
+
 ## Decisions
 
 - **2026-09-21** — Use the Ubuntu 24.04 WSL2 checkout at
