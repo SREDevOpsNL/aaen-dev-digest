@@ -723,4 +723,87 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
       });
     });
   });
+
+  describe('run-scoped routes are workspace-scoped', () => {
+    const TRACE = { log: [], raw_output: 'secret trace' };
+
+    async function seedRun(ws: string, status: string) {
+      const [run] = await pg.handle.db
+        .insert(t.agentRuns)
+        .values({ workspaceId: ws, status })
+        .returning();
+      await pg.handle.db.insert(t.runTraces).values({ runId: run!.id, trace: TRACE });
+      return run!;
+    }
+
+    async function foreignWorkspace() {
+      const [ws] = await pg.handle.db
+        .insert(t.workspaces)
+        .values({ name: `runs-other-${Date.now()}` })
+        .returning();
+      return ws!.id;
+    }
+
+    async function runStatus(runId: string) {
+      const [row] = await pg.handle.db
+        .select({ status: t.agentRuns.status })
+        .from(t.agentRuns)
+        .where(eq(t.agentRuns.id, runId));
+      return row?.status;
+    }
+
+    it('GET /runs/:id/trace returns 404 for another workspace and the trace for its own', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const foreign = await seedRun(await foreignWorkspace(), 'done');
+      const own = await seedRun(workspaceId, 'done');
+
+      const denied = await app.inject({ method: 'GET', url: `/runs/${foreign.id}/trace` });
+      expect(denied.statusCode).toBe(404);
+      expect(denied.body).not.toContain('secret trace');
+
+      const allowed = await app.inject({ method: 'GET', url: `/runs/${own.id}/trace` });
+      expect(allowed.statusCode).toBe(200);
+      expect(allowed.json()).toEqual(TRACE);
+      await app.close();
+    });
+
+    it('GET /runs/:id/events returns 404 for another workspace before streaming', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const foreign = await seedRun(await foreignWorkspace(), 'running');
+
+      const res = await app.inject({ method: 'GET', url: `/runs/${foreign.id}/events` });
+      expect(res.statusCode).toBe(404);
+      expect(res.headers['content-type']).not.toContain('text/event-stream');
+      await app.close();
+    });
+
+    it('GET /runs/:id/events streams an own-workspace run', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const own = await seedRun(workspaceId, 'done');
+      // Buffer one event and complete the run so the replay-then-end stream finishes.
+      app.container.runBus.publish(own.id, 'info', 'own workspace event');
+      app.container.runBus.complete(own.id);
+
+      const res = await app.inject({ method: 'GET', url: `/runs/${own.id}/events` });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/event-stream');
+      expect(res.body).toContain('own workspace event');
+      await app.close();
+    });
+
+    it('POST /runs/:id/cancel returns 404 for another workspace and leaves the run untouched', async () => {
+      const app = await appWith(REVIEW_FIXTURE);
+      const foreign = await seedRun(await foreignWorkspace(), 'running');
+      const own = await seedRun(workspaceId, 'running');
+
+      const denied = await app.inject({ method: 'POST', url: `/runs/${foreign.id}/cancel` });
+      expect(denied.statusCode).toBe(404);
+      expect(await runStatus(foreign.id)).toBe('running');
+
+      const allowed = await app.inject({ method: 'POST', url: `/runs/${own.id}/cancel` });
+      expect(allowed.statusCode).toBe(200);
+      expect(await runStatus(own.id)).toBe('cancelled');
+      await app.close();
+    });
+  });
 });
