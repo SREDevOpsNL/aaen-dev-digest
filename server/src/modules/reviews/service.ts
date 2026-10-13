@@ -82,14 +82,23 @@ export class ReviewService {
    * so cancel also works for ORPHANED runs (whose background process died on a
    * server restart) where signalling alone would do nothing.
    */
-  async cancelRun(runId: string): Promise<void> {
-    // Fast-path signal first, then the durable transition (the executor's
+  async cancelRun(workspaceId: string, runId: string): Promise<void> {
+    // Ownership first: a foreign run gets a 404 and no bus signal or event.
+    if (!(await this.repo.runInWorkspace(workspaceId, runId))) {
+      throw new NotFoundError('Run not found');
+    }
+    // Fast-path signal, then the durable transition (the executor's
     // authoritative check), then the event and stream completion — so a client
     // that refetches on "done" already sees the cancelled row.
     this.container.runBus.cancel(runId);
-    await this.repo.cancelRunIfRunning(runId);
+    await this.repo.cancelRunIfRunning(workspaceId, runId);
     this.publish(runId, 'info', 'Cancellation requested — stopping…');
     this.container.runBus.complete(runId);
+  }
+
+  /** Whether the run exists in this workspace (guards the SSE stream). */
+  runInWorkspace(workspaceId: string, runId: string): Promise<boolean> {
+    return this.repo.runInWorkspace(workspaceId, runId);
   }
 
   /** Reap runs left 'running' by a previous (now-dead) process. Called on boot. */
@@ -176,7 +185,7 @@ export class ReviewService {
     );
   }
 
-  async getRunTrace(runId: string): Promise<RunTrace | undefined> {
-    return this.repo.getRunTrace(runId);
+  async getRunTrace(workspaceId: string, runId: string): Promise<RunTrace | undefined> {
+    return this.repo.getRunTrace(workspaceId, runId);
   }
 }
