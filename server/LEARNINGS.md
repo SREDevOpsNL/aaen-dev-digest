@@ -91,6 +91,15 @@ correction. Repo-intel remains server-scoped;
   `accepted = true` as `status = 'accepted'`. Evidence:
   `server/src/db/migrations/0011_add_convention_evidence.sql:7` (status backfill).
 
+- **2026-10-14** — In tests, `waitForPrRuns` does not mean the executor has
+  finished for a run cancelled through the API: `cancelRun` writes `cancelled`
+  immediately, so the poll returns while the executor is still in its catch
+  path. Assertions such as "no review persisted" can then pass vacuously, and
+  trace assertions fail intermittently. Wait for the run's trace (the
+  executor's last step) with `vi.waitFor` before asserting. Evidence:
+  `server/test/run-lifecycle.it.test.ts` failed once (`expected undefined to
+  be defined` on the trace), then passed in 5 of 5 runs after the fix.
+
 ## Session Notes
 
 ## Open Questions
