@@ -23,6 +23,7 @@ import {
 import { ReviewService } from '../src/modules/reviews/service.js';
 import { IntentRepository } from '../src/modules/intent/repository.js';
 import { IntentService } from '../src/modules/intent/service.js';
+import { issueHash } from '../src/modules/intent/helpers.js';
 import * as t from '../src/db/schema.js';
 
 const hasDocker = await dockerAvailable();
@@ -74,6 +75,8 @@ class IntentLLM extends MockLLMProvider {
   callGates: ReturnType<typeof deferred>[] = [];
   /** Optional per-call fixture, so concurrent derivations are distinguishable. */
   fixtureFor: ((call: number) => IntentAnalysisRaw) | null = null;
+  /** The classifier input of each intent call, in call order. */
+  prompts: string[] = [];
 
   constructor() {
     super('openai', { structuredBySchema: { Review: REVIEW } });
@@ -86,6 +89,7 @@ class IntentLLM extends MockLLMProvider {
     }
     this.intentCalls += 1;
     const call = this.intentCalls;
+    this.prompts.push(req.messages.map((m) => m.content).join('\n'));
     const gate = this.callGates[call - 1] ?? this.gate;
     if (gate) await gate.promise;
     if (this.failIntent) throw new Error('classifier exploded');
@@ -112,6 +116,15 @@ class GatedGit extends MockGitClient {
   }
 }
 
+/** A GitHub client whose linked issue can be edited while a derivation is in flight. */
+class MutableIssueGitHub extends MockGitHubClient {
+  issueBody = 'ISSUE-V1: add the Stripe key';
+  override async getIssue(_repo: Parameters<MockGitHubClient['getIssue']>[0], n: number) {
+    return { number: n, title: `Issue #${n}`, body: this.issueBody, state: 'open' as const };
+  }
+}
+const ISSUE_V2 = 'ISSUE-V2: scope changed to key rotation';
+
 let seq = 0;
 
 d('Intent Layer (Testcontainers pg)', () => {
@@ -128,7 +141,9 @@ d('Intent Layer (Testcontainers pg)', () => {
     await pg?.stop();
   });
 
-  async function setup(opts: { body?: string; ws?: string; noKeys?: boolean; git?: MockGitClient } = {}) {
+  async function setup(
+    opts: { body?: string; ws?: string; noKeys?: boolean; git?: MockGitClient; github?: MockGitHubClient } = {},
+  ) {
     const llm = new IntentLLM();
     const app = await buildApp({
       config: config(),
@@ -136,7 +151,7 @@ d('Intent Layer (Testcontainers pg)', () => {
       overrides: {
         embedder: new MockEmbedder(),
         git: opts.git ?? new MockGitClient({ diff: DIFF }),
-        github: new MockGitHubClient(),
+        github: opts.github ?? new MockGitHubClient(),
         ...(opts.noKeys ? { llm: {}, secrets: new MockSecretsProvider({}) } : { llm: { openai: llm } }),
       },
     });
@@ -422,6 +437,74 @@ d('Intent Layer (Testcontainers pg)', () => {
       expect(traces[0]!.prompt_assembly.intent ?? null).toBeNull();
       const [row] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, runs[0]!.run_id));
       expect(row!.status).toBe('done'); // reviewed, just without intent
+      await app.close();
+    });
+
+    it('a Recompute after the linked issue is edited never joins the derivation that read the older issue', async () => {
+      const github = new MutableIssueGitHub();
+      const { app, llm, pr } = await setup({ body: 'Fixes #12', github });
+      llm.callGates = [deferred(), deferred()];
+      llm.fixtureFor = (call) => ({ ...INTENT_RAW, claimed_purpose: call === 1 ? 'from issue v1' : 'from issue v2' });
+
+      const older = app.inject({ method: 'POST', url: intentUrl(pr.id) }); // reads issue v1
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(1));
+      github.issueBody = ISSUE_V2; // same PR, head and description; only the issue changed
+      const newer = app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` });
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(2)); // its own call, not joined
+      expect(llm.prompts[0]).toContain('ISSUE-V1');
+      expect(llm.prompts[1]).toContain('ISSUE-V2');
+
+      llm.callGates[1]!.resolve();
+      await newer;
+      llm.callGates[0]!.resolve(); // the v1 derivation finishes last and is superseded
+      await older;
+
+      const view = (await app.inject({ method: 'GET', url: intentUrl(pr.id) })).json();
+      expect(view.analysis.claimed_purpose).toBe('from issue v2');
+      const [row] = await pg.handle.db.select().from(t.prIntent).where(eq(t.prIntent.prId, pr.id));
+      expect(row!.issueHash).toBe(issueHash({ number: 12, title: 'Issue #12', body: ISSUE_V2 }));
+      await app.close();
+    });
+
+    it('a review batch never joins a derivation that read an outdated linked issue', async () => {
+      const github = new MutableIssueGitHub();
+      const { app, llm, pr, run } = await reviewBatch(1, { body: 'Fixes #12', github });
+      llm.callGates = [deferred(), deferred()];
+      llm.fixtureFor = (call) => ({ ...INTENT_RAW, claimed_purpose: call === 1 ? 'from issue v1' : 'from issue v2' });
+
+      const recompute = app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` }); // issue v1
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(1));
+      github.issueBody = ISSUE_V2;
+      const batch = run(); // reads issue v2, so it needs its own derivation
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(2));
+      llm.callGates[1]!.resolve();
+
+      const { traces } = await batch;
+      expect(traces[0]!.intent).toMatchObject({ source: 'derived', status: 'used' });
+      expect(traces[0]!.intent!.analysis!.claimed_purpose).toBe('from issue v2');
+      llm.callGates[0]!.resolve();
+      await recompute;
+      await app.close();
+    });
+
+    it('a review batch never injects intent derived from an outdated linked issue', async () => {
+      const github = new MutableIssueGitHub();
+      const { app, llm, pr, run } = await reviewBatch(1, { body: 'Fixes #12', github });
+      llm.callGates = [deferred(), deferred()];
+      llm.fixtureFor = (call) => ({ ...INTENT_RAW, claimed_purpose: call === 1 ? 'from issue v1' : 'from issue v2' });
+
+      const batch = run(); // reads issue v1; its derivation is call 1
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(1));
+      github.issueBody = ISSUE_V2;
+      const recompute = app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` });
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(2));
+      llm.callGates[1]!.resolve();
+      await recompute; // the v2 derivation wins the cache
+      llm.callGates[0]!.resolve(); // the batch's v1 derivation is superseded
+
+      const { traces } = await batch;
+      expect(traces[0]!.intent).toMatchObject({ source: 'none', status: 'superseded', analysis: null });
+      expect(traces[0]!.prompt_assembly.intent ?? null).toBeNull();
       await app.close();
     });
 

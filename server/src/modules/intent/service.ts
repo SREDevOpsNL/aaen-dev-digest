@@ -3,7 +3,7 @@ import type { IntentAnalysis, IntentRunSnapshot, PrIntentView, UnifiedDiff } fro
 import { deriveIntent, INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
 import type { Container } from '../../platform/container.js';
 import { ConfigError, NotFoundError } from '../../platform/errors.js';
-import { withTimeout } from '../../platform/resilience.js';
+import { withAbortableTimeout } from '../../platform/resilience.js';
 import type * as schema from '../../db/schema.js';
 import { ReviewRepository, type PullRow } from '../reviews/repository.js';
 import { loadDiff } from '../reviews/diff-loader.js';
@@ -38,9 +38,10 @@ export type DerivationResult =
       ok: true;
       derivationId: string;
       analysis: IntentAnalysis;
-      /** The revision and context this result was derived for. */
+      /** The revision, context and linked-issue content this result was derived for. */
       headSha: string;
       contextHash: string;
+      issueHash: string;
       provider: string;
       model: string;
       tokensIn: number;
@@ -120,12 +121,17 @@ export class IntentService {
   ): Promise<IntentRunSnapshot> {
     try {
       const ctx = await this.contextFor(workspaceId, pull, repo);
+      // The batch reads the linked issue once and uses that content for the
+      // freshness check, the derivation and the injection check alike.
+      const issue = ctx.linked.status === 'identified' ? await this.fetchIssue(ctx, ctx.linked.number) : null;
+      if (ctx.linked.status === 'identified' && !issue) {
+        log?.info(`PR intent: linked issue #${ctx.linked.number} unavailable; freshness checked against local context only`);
+      }
+      // Unreadable issue: judge by local context only (as before).
+      const issueMatches = (stored: string | null) => !issue || issueHash(issue) === stored;
       const row = await this.intents.get(pull.id);
       if (row?.analysis && staleReasons(row, this.current(ctx)).length === 0) {
-        const issueChanged =
-          ctx.linked.status === 'identified' &&
-          (await this.linkedIssueChanged(ctx, ctx.linked.number, row.issueHash, log));
-        if (!issueChanged) {
+        if (issueMatches(row.issueHash)) {
           log?.info('PR intent: reusing the cached intent for this head');
           return snapshotFromRow(row);
         }
@@ -133,10 +139,10 @@ export class IntentService {
       } else {
         log?.info(row?.analysis ? 'PR intent: cached intent is stale — refreshing' : 'PR intent: deriving');
       }
-      const result = await this.derive(ctx, diff);
+      const result = await this.derive(ctx, diff, issue);
       if (result.ok) {
-        // Inject only an intent derived for exactly this revision and context.
-        if (result.headSha === pull.headSha && result.contextHash === ctx.contextHash) {
+        // Inject only an intent derived for exactly this revision, context and issue content.
+        if (result.headSha === pull.headSha && result.contextHash === ctx.contextHash && issueMatches(result.issueHash)) {
           return snapshotFromDerivation(result, INTENT_PROMPT_VERSION);
         }
         log?.warn('PR intent: derived for a different revision — reviewing without intent');
@@ -150,7 +156,8 @@ export class IntentService {
           latest?.analysis &&
           latest.headSha === pull.headSha &&
           latest.contextHash === ctx.contextHash &&
-          latest.promptVersion === INTENT_PROMPT_VERSION
+          latest.promptVersion === INTENT_PROMPT_VERSION &&
+          issueMatches(latest.issueHash)
         ) {
           log?.info('PR intent: a newer derivation for this revision is cached; using it');
           return snapshotFromRow(latest);
@@ -212,41 +219,40 @@ export class IntentService {
     }
   }
 
-  private async linkedIssueChanged(
-    ctx: PrContext,
-    n: number,
-    storedHash: string | null,
-    log?: IntentLog,
-  ): Promise<boolean> {
-    const issue = await this.fetchIssue(ctx, n);
-    if (!issue) {
-      log?.info(`PR intent: linked issue #${n} unavailable; freshness checked against local context only`);
-      return false;
-    }
-    return issueHash(issue) !== storedHash;
-  }
-
   /**
-   * Single flight per PR *revision*: callers asking for the same head SHA and
-   * context share one classifier call. A request for an updated PR has a
-   * different key, so it never joins work started for an older revision.
+   * Single flight per PR *revision*: callers asking for the same head SHA,
+   * context and linked-issue content share one classifier call. A request for
+   * an updated PR or an edited linked issue has a different key, so it never
+   * joins work started with older inputs. The issue is read before the key
+   * (pass `issue` when the caller already read it; `undefined` = read it here).
    */
-  private derive(ctx: PrContext, diff?: UnifiedDiff): Promise<DerivationResult> {
+  private async derive(ctx: PrContext, diff?: UnifiedDiff, issue?: LinkedIssue | null): Promise<DerivationResult> {
+    const startedAt = new Date();
+    const linkedIssue =
+      issue !== undefined
+        ? issue
+        : ctx.linked.status === 'identified'
+          ? await this.fetchIssue(ctx, ctx.linked.number)
+          : null;
     let byKey = inflight.get(this.container);
     if (!byKey) {
       byKey = new Map();
       inflight.set(this.container, byKey);
     }
-    const key = `${ctx.pull.id}:${ctx.pull.headSha}:${ctx.contextHash}`;
+    const key = `${ctx.pull.id}:${ctx.pull.headSha}:${ctx.contextHash}:${issueHash(linkedIssue)}`;
     const existing = byKey.get(key);
     if (existing) return existing;
-    const run = this.runDerivation(ctx, diff).finally(() => byKey.delete(key));
+    const run = this.runDerivation(ctx, linkedIssue, startedAt, diff).finally(() => byKey.delete(key));
     byKey.set(key, run);
     return run;
   }
 
-  private async runDerivation(ctx: PrContext, diff?: UnifiedDiff): Promise<DerivationResult> {
-    const startedAt = new Date();
+  private async runDerivation(
+    ctx: PrContext,
+    issue: LinkedIssue | null,
+    startedAt: Date,
+    diff?: UnifiedDiff,
+  ): Promise<DerivationResult> {
     const choice = await resolveFeatureModel(this.container, ctx.workspaceId, 'review_intent');
     let llm;
     try {
@@ -261,29 +267,32 @@ export class IntentService {
     let called = false;
     try {
       const d = diff ?? (await loadDiff(this.container, this.reviews, ctx.workspaceId, ctx.pull, ctx.repo));
-      const issue =
-        ctx.linked.status === 'identified' ? await this.fetchIssue(ctx, ctx.linked.number) : null;
       const inDiff = new Set(d.files.map((f) => f.path));
       const extraFiles = ctx.files
         .filter((f) => !inDiff.has(f.path))
         .map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions }));
       called = true;
-      const out = await withTimeout(
-        deriveIntent({
-          llm,
-          model: choice.model,
-          diff: d,
-          title: ctx.pull.title,
-          description: ctx.pull.body,
-          linkedIssue: issue,
-          extraFiles,
-          timeoutMs: INTENT_TIMEOUT_MS,
-          maxRetries: INTENT_MAX_RETRIES,
-          sessionId: `${ctx.repo.owner}/${ctx.repo.name}#${ctx.pull.number}:intent`,
-        }),
+      // The deadline aborts the classifier request itself (no orphaned call
+      // keeps running, and possibly billing, after the derivation has failed).
+      const out = await withAbortableTimeout(
+        (signal) =>
+          deriveIntent({
+            llm,
+            model: choice.model,
+            diff: d,
+            title: ctx.pull.title,
+            description: ctx.pull.body,
+            linkedIssue: issue,
+            extraFiles,
+            timeoutMs: INTENT_TIMEOUT_MS,
+            maxRetries: INTENT_MAX_RETRIES,
+            sessionId: `${ctx.repo.owner}/${ctx.repo.name}#${ctx.pull.number}:intent`,
+            signal,
+          }),
         INTENT_TIMEOUT_MS + INTENT_TIMEOUT_MARGIN_MS,
       );
       const derivationId = randomUUID();
+      const derivedIssueHash = issueHash(issue);
       const stored = await this.intents.saveSuccess({
         prId: ctx.pull.id,
         derivationId,
@@ -292,7 +301,7 @@ export class IntentService {
         evidence: out.evidence,
         headSha: ctx.pull.headSha,
         contextHash: ctx.contextHash,
-        issueHash: issueHash(issue),
+        issueHash: derivedIssueHash,
         promptVersion: out.promptVersion,
         linkedIssue: issue ? { number: issue.number, title: issue.title } : null,
         provider: choice.provider,
@@ -312,6 +321,7 @@ export class IntentService {
         analysis: out.analysis,
         headSha: ctx.pull.headSha,
         contextHash: ctx.contextHash,
+        issueHash: derivedIssueHash,
         provider: choice.provider,
         model: out.model,
         tokensIn: out.tokensIn,
@@ -321,6 +331,8 @@ export class IntentService {
       };
     } catch (err) {
       const error = (err as Error).message;
+      // An interrupted (timed-out or aborted) request may still have been
+      // billed by the provider with no usage returned: mark the cost unknown.
       await this.intents.saveFailure(ctx.pull.id, { status: 'failed', error, at: startedAt, mayHaveBilled: called });
       return { ok: false, status: 'failed', error };
     }
