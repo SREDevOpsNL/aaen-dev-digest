@@ -1,0 +1,366 @@
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
+import type {
+  IntentAnalysis,
+  IntentAnalysisRaw,
+  Review,
+  RunTrace,
+  StructuredRequest,
+  StructuredResult,
+} from '@devdigest/shared';
+import { startPg, dockerAvailable, type PgFixture } from './helpers/pg.js';
+import { waitForPrRuns } from './helpers/runs.js';
+import { buildApp } from '../src/app.js';
+import { loadConfig } from '../src/platform/config.js';
+import { seed } from '../src/db/seed.js';
+import {
+  MockEmbedder,
+  MockGitClient,
+  MockGitHubClient,
+  MockLLMProvider,
+  MockSecretsProvider,
+} from '../src/adapters/mocks.js';
+import { ReviewService } from '../src/modules/reviews/service.js';
+import { IntentRepository } from '../src/modules/intent/repository.js';
+import { IntentService } from '../src/modules/intent/service.js';
+import * as t from '../src/db/schema.js';
+
+const hasDocker = await dockerAvailable();
+const d = hasDocker ? describe : describe.skip;
+const config = () => loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv);
+
+const DIFF = `diff --git a/src/config.ts b/src/config.ts
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -10,3 +10,4 @@
+   port: 3000,
++  stripeKey: "sk_live_xxx",
+   redisUrl: x,`;
+
+const INTENT_RAW: IntentAnalysisRaw = {
+  claimed_purpose: 'Add the Stripe key to config',
+  supported_points: [
+    { statement: 'Adds a Stripe key to the config', evidence: [{ file: 'src/config.ts', side: 'new', start_line: 11, end_line: 11 }] },
+  ],
+  discrepancies: [],
+  in_scope: ['payment configuration'],
+  out_of_scope: ['rate limiting'],
+  confidence: 'medium',
+};
+
+const REVIEW: Review = {
+  verdict: 'request_changes',
+  summary: 'Hardcoded secret.',
+  score: 40,
+  findings: [{
+    id: 'f1', severity: 'CRITICAL', category: 'security', title: 'Hardcoded Stripe secret key',
+    file: 'src/config.ts', start_line: 11, end_line: 11, rationale: 'Live key in source.', confidence: 0.95, kind: 'finding',
+  }],
+};
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+/** Review calls return REVIEW at $0.01; Intent calls are counted, can block or fail, and cost $0.004. */
+class IntentLLM extends MockLLMProvider {
+  intentCalls = 0;
+  gate: ReturnType<typeof deferred> | null = null;
+  failIntent = false;
+  intentFixture: IntentAnalysisRaw = INTENT_RAW;
+
+  constructor() {
+    super('openai', { structuredBySchema: { Review: REVIEW } });
+  }
+
+  override async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+    if (req.schemaName !== 'Intent') {
+      const res = await super.completeStructured(req);
+      return { ...res, providerCostUsd: 0.01 };
+    }
+    this.intentCalls += 1;
+    if (this.gate) await this.gate.promise;
+    if (this.failIntent) throw new Error('classifier exploded');
+    return {
+      data: this.intentFixture as unknown as T,
+      model: 'cheap-intent-model',
+      tokensIn: 300,
+      tokensOut: 80,
+      providerCostUsd: 0.004,
+      costUsd: 0.004,
+      raw: JSON.stringify(this.intentFixture),
+      attempts: 1,
+    };
+  }
+}
+
+let seq = 0;
+
+d('Intent Layer (Testcontainers pg)', () => {
+  let pg: PgFixture;
+  let workspaceId: string;
+
+  beforeAll(async () => {
+    pg = await startPg();
+    await seed(pg.handle.db);
+    const [ws] = await pg.handle.db.select().from(t.workspaces);
+    workspaceId = ws!.id;
+  });
+  afterAll(async () => {
+    await pg?.stop();
+  });
+
+  async function setup(opts: { body?: string; ws?: string; noKeys?: boolean } = {}) {
+    const llm = new IntentLLM();
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        git: new MockGitClient({ diff: DIFF }),
+        github: new MockGitHubClient(),
+        ...(opts.noKeys ? { llm: {}, secrets: new MockSecretsProvider({}) } : { llm: { openai: llm } }),
+      },
+    });
+    const ws = opts.ws ?? workspaceId;
+    const name = `intent-${seq++}`;
+    const [repo] = await pg.handle.db
+      .insert(t.repos)
+      .values({ workspaceId: ws, owner: 'acme', name, fullName: `acme/${name}` })
+      .returning();
+    const [pr] = await pg.handle.db
+      .insert(t.pullRequests)
+      .values({
+        workspaceId: ws, repoId: repo!.id, number: 7, title: 'Add Stripe config', author: 'dev',
+        branch: 'feat/stripe', base: 'main', headSha: 'head-1', body: opts.body ?? 'Adds payment config.',
+      })
+      .returning();
+    await pg.handle.db.insert(t.prFiles).values({ prId: pr!.id, path: 'src/config.ts', additions: 1, deletions: 0 });
+    return { app, llm, pr: pr!, repo: repo! };
+  }
+
+  const intentUrl = (prId: string) => `/pulls/${prId}/intent`;
+
+  it('GET never calls the model; first-open POST generates once and caches', async () => {
+    const { app, llm, pr } = await setup();
+    const before = (await app.inject({ method: 'GET', url: intentUrl(pr.id) })).json();
+    expect(before.state).toBe('missing');
+    expect(llm.intentCalls).toBe(0);
+
+    const first = (await app.inject({ method: 'POST', url: intentUrl(pr.id) })).json();
+    expect(first).toMatchObject({ state: 'ready', stale: false, model: 'cheap-intent-model', provider_cost_usd: 0.004 });
+    expect(first.analysis.supported_points).toHaveLength(1);
+    expect(llm.intentCalls).toBe(1);
+
+    await app.inject({ method: 'POST', url: intentUrl(pr.id) });
+    const after = (await app.inject({ method: 'GET', url: intentUrl(pr.id) })).json();
+    expect(after.state).toBe('ready');
+    expect(llm.intentCalls).toBe(1); // reused, not regenerated
+    await app.close();
+  });
+
+  it('concurrent first-open requests share one classifier call', async () => {
+    const { app, llm, pr } = await setup();
+    llm.gate = deferred();
+    // Count entries into the single-flight point, so the gate opens only once
+    // all three requests are waiting on the same derivation.
+    const deriveSpy = vi.spyOn(IntentService.prototype as unknown as { derive: () => unknown }, 'derive');
+    try {
+      const a = app.inject({ method: 'POST', url: intentUrl(pr.id) });
+      const b = app.inject({ method: 'POST', url: intentUrl(pr.id) });
+      const c = app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` });
+      await vi.waitFor(() => expect(deriveSpy).toHaveBeenCalledTimes(3));
+      llm.gate.resolve();
+      const results = await Promise.all([a, b, c]);
+      expect(results.map((r) => r.json().state)).toEqual(['ready', 'ready', 'ready']);
+      expect(llm.intentCalls).toBe(1);
+    } finally {
+      deriveSpy.mockRestore();
+      await app.close();
+    }
+  });
+
+  it('shows stale intent after a new head or edited description, and only Recompute regenerates', async () => {
+    const { app, llm, pr } = await setup();
+    await app.inject({ method: 'POST', url: intentUrl(pr.id) });
+    await pg.handle.db.update(t.pullRequests).set({ headSha: 'head-2' }).where(eq(t.pullRequests.id, pr.id));
+    let view = (await app.inject({ method: 'GET', url: intentUrl(pr.id) })).json();
+    expect(view).toMatchObject({ stale: true, stale_reasons: ['head_changed'], head_sha: 'head-1', current_head_sha: 'head-2' });
+
+    await pg.handle.db.update(t.pullRequests).set({ body: 'Edited description.' }).where(eq(t.pullRequests.id, pr.id));
+    view = (await app.inject({ method: 'POST', url: intentUrl(pr.id) })).json(); // first-open path
+    expect(view.stale_reasons).toEqual(['head_changed', 'context_changed']);
+    expect(llm.intentCalls).toBe(1); // no automatic regeneration
+
+    view = (await app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` })).json();
+    expect(view).toMatchObject({ state: 'ready', stale: false, head_sha: 'head-2' });
+    expect(llm.intentCalls).toBe(2);
+    await app.close();
+  });
+
+  it('a failed Recompute keeps the previous valid intent and reports the error', async () => {
+    const { app, llm, pr } = await setup();
+    const good = (await app.inject({ method: 'POST', url: intentUrl(pr.id) })).json();
+    llm.failIntent = true;
+    const view = (await app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` })).json();
+    expect(view.state).toBe('ready');
+    expect(view.analysis).toEqual(good.analysis);
+    expect(view.last_error).toContain('classifier exploded');
+    const [row] = await pg.handle.db.select().from(t.prIntent).where(eq(t.prIntent.prId, pr.id));
+    expect(row!.totalCostComplete).toBe(false); // the failed call may have been billed
+    await app.close();
+  });
+
+  it('without a provider key, first open records skipped_no_key instead of failing', async () => {
+    const { app, pr } = await setup({ noKeys: true });
+    const res = await app.inject({ method: 'POST', url: intentUrl(pr.id) });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ state: 'skipped_no_key', analysis: null });
+    expect(res.json().last_error).toMatch(/not configured/);
+    await app.close();
+  });
+
+  it('every intent route is workspace-scoped', async () => {
+    const [other] = await pg.handle.db.insert(t.workspaces).values({ name: `intent-other-${Date.now()}` }).returning();
+    const { app, llm, pr } = await setup({ ws: other!.id });
+    for (const [method, url] of [
+      ['GET', intentUrl(pr.id)],
+      ['POST', intentUrl(pr.id)],
+      ['POST', `${intentUrl(pr.id)}/recompute`],
+    ] as const) {
+      expect((await app.inject({ method, url })).statusCode).toBe(404);
+    }
+    expect(llm.intentCalls).toBe(0);
+    await app.close();
+  });
+
+  it('uses a linked issue only when a closing keyword identifies it', async () => {
+    const linked = await setup({ body: 'Fixes #12' });
+    expect((await linked.app.inject({ method: 'POST', url: intentUrl(linked.pr.id) })).json().linked_issue)
+      .toEqual({ number: 12, title: 'Issue #12' });
+    await linked.app.close();
+
+    const mention = await setup({ body: 'Related to #12' });
+    expect((await mention.app.inject({ method: 'POST', url: intentUrl(mention.pr.id) })).json().linked_issue).toBeNull();
+    await mention.app.close();
+  });
+
+  it('an older derivation never overwrites a newer one, but its spend is still counted', async () => {
+    const { pr } = await setup();
+    const repo = new IntentRepository(pg.handle.db);
+    const analysis = (claimed: string): IntentAnalysis => ({ ...INTENT_RAW, claimed_purpose: claimed, unverified_statements: [] });
+    const save = (claimed: string, startedAt: Date, cost: number | null) =>
+      repo.saveSuccess({
+        prId: pr.id, derivationId: crypto.randomUUID(), startedAt, analysis: analysis(claimed),
+        evidence: { files_listed: 1, files_excerpted: 1, truncated: false, invalid_citations: 0 },
+        headSha: 'head-1', contextHash: 'c', issueHash: 'i', promptVersion: 1, linkedIssue: null,
+        provider: 'openai', model: 'm', tokensIn: 10, tokensOut: 5, providerCostUsd: cost,
+      });
+    expect(await save('newer', new Date('2026-10-14T10:00:02Z'), 0.002)).toBe(true);
+    expect(await save('older', new Date('2026-10-14T10:00:01Z'), 0.003)).toBe(false);
+    await repo.saveFailure(pr.id, { status: 'failed', error: 'late failure', at: new Date(), mayHaveBilled: false });
+
+    const row = (await repo.get(pr.id))!;
+    expect(row.analysis!.claimed_purpose).toBe('newer');
+    expect(row.status).toBe('ready');
+    expect(row.lastError).toBe('late failure');
+    expect(row.totalTokensIn).toBe(20);
+    expect(row.totalProviderCostUsd).toBeCloseTo(0.005);
+    expect(row.intent).toBe('Adds a Stripe key to the config'); // legacy non-null column kept populated
+  });
+
+  describe('review integration', () => {
+    async function reviewBatch(agentCount: number) {
+      const ctx = await setup();
+      const agents = [];
+      for (let i = 0; i < agentCount; i++) {
+        const created = (
+          await ctx.app.inject({
+            method: 'POST',
+            url: '/agents',
+            payload: { name: `intent-agent-${seq}-${i}`, provider: 'openai', model: 'gpt-4.1', system_prompt: 's' },
+          })
+        ).json();
+        const [row] = await pg.handle.db.select().from(t.agents).where(eq(t.agents.id, created.id));
+        agents.push(row!);
+      }
+      const run = async () => {
+        const { runs } = await new ReviewService(ctx.app.container).runReview(workspaceId, ctx.pr.id, agents);
+        await waitForPrRuns(pg.handle.db, ctx.pr.id, { expected: runs.length });
+        // Status commits before the trace is saved: wait for every trace.
+        const traces: RunTrace[] = [];
+        for (const r of runs) {
+          await vi.waitFor(async () => {
+            const [row] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, r.run_id));
+            expect(row).toBeDefined();
+            traces.push(row!.trace as RunTrace);
+          });
+        }
+        return { runs, traces };
+      };
+      return { ...ctx, run };
+    }
+
+    it('reuses fresh cached intent across agents and records it in each trace', async () => {
+      const { app, llm, pr, run } = await reviewBatch(2);
+      await app.inject({ method: 'POST', url: intentUrl(pr.id) });
+      const { traces } = await run();
+      expect(llm.intentCalls).toBe(1);
+      for (const trace of traces) {
+        expect(trace.intent).toMatchObject({ source: 'cache', status: 'used', attribution: 'shared' });
+        expect(trace.prompt_assembly.intent).toContain('<untrusted source="intent">');
+        expect(trace.prompt_assembly.system).toContain('INTENT POLICY');
+      }
+      await app.close();
+    });
+
+    it('refreshes stale intent once for the whole batch', async () => {
+      const { app, llm, pr, run } = await reviewBatch(2);
+      await app.inject({ method: 'POST', url: intentUrl(pr.id) });
+      await pg.handle.db.update(t.pullRequests).set({ headSha: 'head-2' }).where(eq(t.pullRequests.id, pr.id));
+      const { traces } = await run();
+      expect(llm.intentCalls).toBe(2);
+      expect(traces.map((tr) => tr.intent?.source)).toEqual(['derived', 'derived']);
+      expect(traces[0]!.intent!.derivation_id).toBe(traces[1]!.intent!.derivation_id);
+      expect(traces[0]!.intent!.head_sha).toBe('head-2');
+      await app.close();
+    });
+
+    it('reviews without intent when generation fails, and never uses the stale intent', async () => {
+      const { app, llm, pr, run } = await reviewBatch(1);
+      await app.inject({ method: 'POST', url: intentUrl(pr.id) });
+      await pg.handle.db.update(t.pullRequests).set({ headSha: 'head-2' }).where(eq(t.pullRequests.id, pr.id));
+      llm.failIntent = true;
+      const { runs, traces } = await run();
+      expect(traces[0]!.intent).toMatchObject({ source: 'none', status: 'failed', analysis: null });
+      expect(traces[0]!.prompt_assembly.intent ?? null).toBeNull();
+      expect(traces[0]!.prompt_assembly.system).not.toContain('INTENT POLICY');
+      const [row] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, runs[0]!.run_id));
+      expect(row!.status).toBe('done'); // the review itself still ran
+      await app.close();
+    });
+
+    it('keeps the trace immutable after Recompute and keeps classifier cost out of review totals', async () => {
+      const { app, llm, pr, repo, run } = await reviewBatch(1);
+      await app.inject({ method: 'POST', url: intentUrl(pr.id) });
+      const { runs } = await run();
+      const traceUrl = `/runs/${runs[0]!.run_id}/trace`;
+      const before = (await app.inject({ method: 'GET', url: traceUrl })).json();
+
+      llm.intentFixture = { ...INTENT_RAW, claimed_purpose: 'A completely different purpose' };
+      await app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` });
+      const after = (await app.inject({ method: 'GET', url: traceUrl })).json();
+      expect(after.intent).toEqual(before.intent);
+      expect(after.intent.analysis.claimed_purpose).toBe('Add the Stripe key to config');
+
+      const [agentRun] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, runs[0]!.run_id));
+      expect(agentRun!.costUsd).toBeCloseTo(0.01); // review only, no classifier cost
+      const listed = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json()
+        .find((p: { id: string }) => p.id === pr.id);
+      expect(listed.cost_usd).toBeCloseTo(0.01);
+      await app.close();
+    });
+  });
+});

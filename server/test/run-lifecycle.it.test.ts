@@ -57,6 +57,10 @@ class GatedLLM extends MockLLMProvider {
   failAfterGate = false;
 
   override async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+    // The L03 intent pre-work is not what these tests gate: let it through
+    // ungated (the Review fixture fails the Intent schema, so the batch simply
+    // reviews without intent) and gate only the review calls.
+    if (req.schemaName === 'Intent') return super.completeStructured(req);
     this.started.resolve();
     await this.gate.promise;
     if (this.failAfterGate) throw new Error('provider exploded');
@@ -175,7 +179,10 @@ d('run lifecycle: cancellation and terminal states (Testcontainers pg)', () => {
     expect(await reviewsForRun(first!)).toHaveLength(1);
     expect((await runRow(second!)).status).toBe('cancelled');
     expect(await reviewsForRun(second!)).toHaveLength(0);
-    expect(llm.calls.filter((c) => c.method === 'completeStructured')).toHaveLength(1);
+    const reviewCalls = llm.calls.filter(
+      (c) => c.method === 'completeStructured' && (c.req as { schemaName?: string }).schemaName === 'Review',
+    );
+    expect(reviewCalls).toHaveLength(1);
     await app.close();
   });
 

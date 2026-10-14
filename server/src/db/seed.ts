@@ -8,6 +8,8 @@ import {
   PERFORMANCE_REVIEWER_PROMPT,
   TEST_QUALITY_REVIEWER_PROMPT,
 } from './seed-prompts.js';
+import { INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
+import { contextHash, identifyLinkedIssue, issueHash } from '../modules/intent/helpers.js';
 
 /** Default provider/model for the built-in reviewer agents. */
 const DEFAULT_PROVIDER = 'openrouter' as const;
@@ -173,6 +175,58 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       },
     ]);
   }
+
+  // ---- cached PR intent for #482 (L03) ----
+  // A demo intent fingerprinted exactly as IntentService does, so it reads as
+  // fresh: opening the seeded PR never triggers generation, and seeded e2e
+  // flows stay read-only with no model call. Never overwrites a real one.
+  const seededFiles = await db.select().from(t.prFiles).where(eq(t.prFiles.prId, pr!.id));
+  const linked = identifyLinkedIssue(pr!.body, { owner: 'acme', name: 'payments-api' });
+  await db
+    .insert(t.prIntent)
+    .values({
+      prId: pr!.id,
+      intent: 'Adds a token-bucket rate limiter to the public API endpoints',
+      inScope: ['public API rate limiting', 'rate-limit configuration'],
+      outOfScope: ['authenticated endpoints', 'billing'],
+      status: 'ready',
+      analysis: {
+        claimed_purpose:
+          'Add rate limiting to public API endpoints to prevent abuse from unauthenticated clients.',
+        supported_points: [
+          {
+            statement: 'Adds a token-bucket rate limiter to the public API endpoints',
+            evidence: [{ file: 'src/middleware/ratelimit.ts', side: 'new', start_line: 1, end_line: 12 }],
+          },
+        ],
+        discrepancies: [
+          {
+            kind: 'undeclared_change',
+            statement: 'Also changes payment configuration in src/config.ts',
+            evidence: [{ file: 'src/config.ts', side: 'new', start_line: 12, end_line: 12 }],
+          },
+        ],
+        in_scope: ['public API rate limiting', 'rate-limit configuration'],
+        out_of_scope: ['authenticated endpoints', 'billing'],
+        confidence: 'medium',
+        unverified_statements: [],
+      },
+      evidence: { files_listed: seededFiles.length, files_excerpted: 2, truncated: false, invalid_citations: 0 },
+      headSha: pr!.headSha,
+      contextHash: contextHash({
+        title: pr!.title,
+        body: pr!.body,
+        files: seededFiles,
+        linkedIssueNumber: linked.status === 'identified' ? linked.number : null,
+      }),
+      issueHash: issueHash(null),
+      promptVersion: INTENT_PROMPT_VERSION,
+      provider: 'seed',
+      model: 'seed',
+      derivedAt: new Date('2026-10-01T00:00:00Z'),
+      startedAt: new Date('2026-10-01T00:00:00Z'),
+    })
+    .onConflictDoNothing();
 
   // ---- built-in skills (text configuration only; never executable) ----
   const seedSkills: Array<typeof t.skills.$inferInsert> = [
