@@ -312,13 +312,15 @@ PR description, agent prompt, caller digest, repo map, and rank note.
 
 Before the agents run, the executor resolves one PR intent for the whole batch
 through the `intent` module: a fresh cached intent is reused, a missing or stale
-one is refreshed once (single-flight per PR revision: PR, head SHA and context
-fingerprint), and on failure the batch reviews without intent. A derivation
-that a newer one superseded, or one for a different revision, is never injected.
-If every run is cancelled before this step, no classifier call is made. Single
-flight is in-process, like the rest of the executor's state, so it relies on the
-one-process-per-database assumption. `reviewer-core` renders the validated intent as an untrusted
-section and adds a trusted scope policy to the system message after the
+one is refreshed once (single-flight per PR revision: PR, head SHA, context
+fingerprint and linked-issue content), and on failure the batch reviews without
+intent. A derivation that a newer one superseded, or one for different inputs,
+is never injected. If every run is cancelled before this step, no classifier
+call is made. The derivation's deadline aborts the classifier request through
+`StructuredRequest.signal` rather than abandoning it. Single flight is
+in-process, like the rest of the executor's state, so it relies on the
+one-process-per-database assumption. `reviewer-core` renders the validated
+intent as an untrusted section and adds a trusted scope policy to the system message after the
 injection guard; without intent the prompt is unchanged. The run trace stores an
 immutable copy of the intent used, and classifier cost stays on the `pr_intent`
 cache rather than in the run's cost.

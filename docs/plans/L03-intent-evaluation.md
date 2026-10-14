@@ -133,6 +133,17 @@ unconfirmed; a later probe saw only one provider.
 - Before enabling intent by default: repeat with more runs per variant, record
   the upstream provider and pin it (or test on a second model).
 
+## Release decision (2026-10-14)
+
+- The reworded scope policy stays.
+- Intent-aware review quality is **experimental**. No improvement in
+  significant-defect recall is claimed.
+- No further unpinned 12-call comparison will be run: at this size, with the
+  provider drift above, it cannot give a reliable answer.
+- A claim needs a reproducible comparison: the upstream provider recorded and
+  pinned, controlled fixtures, and enough runs per variant to separate the
+  effect from run-to-run variance.
+
 ## Not covered
 
 Severity accuracy beyond the key, duplicate detection, other fixtures and

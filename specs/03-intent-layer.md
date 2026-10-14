@@ -31,8 +31,14 @@ from an intended one.
 - `POST /pulls/:id/intent/recompute` always derives. If it fails, the previous
   valid intent stays, with the error shown alongside.
 - Concurrent requests share one classifier call only when they are for the same
-  PR revision: the same PR, head SHA and context fingerprint. A request after
-  the PR changes starts its own derivation instead of joining the older one.
+  PR revision: the same PR, head SHA, context fingerprint and linked-issue
+  content. The linked issue is read before the request joins or starts a
+  derivation, so a request after the PR or its issue changes starts its own
+  derivation instead of joining the older one.
+- Each classifier HTTP request has a 30 s timeout, and the whole derivation
+  (retries included) a 35 s deadline. At either limit the request is aborted,
+  not abandoned; an interrupted request marks the PR's classifier cost as
+  incomplete, since the provider may have billed it without reporting usage.
 - A result is written only if its derivation started no earlier than the stored
   one, so an older result never overwrites a newer one. A superseded result is
   reported as `superseded`, and its cost is still added to the PR's total. An
@@ -64,9 +70,10 @@ from an intended one.
 
 - A review batch reuses fresh intent, refreshes stale intent once, or reviews
   without intent if that fails. It never uses stale intent, and it uses a
-  derived result only if it matches the batch's own head SHA and context
-  fingerprint; when its derivation was superseded, it reviews without intent
-  (`status: superseded`) unless the stored intent matches that revision.
+  derived result only if it matches the batch's own head SHA, context
+  fingerprint and linked-issue content; when its derivation was superseded, it
+  reviews without intent (`status: superseded`) unless the stored intent
+  matches all three.
 - If every run in the batch is cancelled before intent work begins, no
   classifier call is made.
 - Reviewers receive the intent as an untrusted section; a trusted scope policy
@@ -74,6 +81,10 @@ from an intended one.
   prompt is byte-identical to before.
 - The policy never lets intent remove or downgrade a real defect; low-confidence
   or unverified intent is context only.
+- **Review quality with intent is experimental.** No improvement in
+  significant-defect recall is claimed. Such a claim needs a reproducible
+  comparison with a recorded and pinned upstream provider and controlled
+  fixtures; see the [evaluation](../docs/plans/L03-intent-evaluation.md).
 - Each run trace stores an immutable copy of the intent it used. Classifier
   cost stays on the cache, not in the run's cost or the PR-list total.
 
@@ -91,14 +102,16 @@ history), and automatic recomputation in the UI.
 
 - reviewer-core: evidence budgets and exact line sets, citation validation,
   prompt byte-identity without intent, policy placement, no post-model
-  filtering.
-- server: linked-issue identification and fingerprints (unit); cache, single
-  flight, staleness, failed Recompute, no-key, authorization, ordering, review
-  reuse/refresh/failure, trace immutability and cost separation (Postgres);
-  deterministic gated tests for a PR update during an in-flight derivation, a
-  superseded derivation never reaching a review, an older failure not
-  overwriting newer metadata, and no classifier call when every run is
-  cancelled first.
+  filtering; OpenRouter requests aborted on timeout and on a caller signal,
+  checked against a loopback server that never answers.
+- server: linked-issue identification and fingerprints, and OpenAI/Anthropic
+  request aborts (unit); cache, single flight, staleness, failed Recompute,
+  no-key, authorization, ordering, review reuse/refresh/failure, trace
+  immutability and cost separation (Postgres); deterministic gated tests for a
+  PR update or a linked-issue edit during an in-flight derivation, a superseded
+  derivation never reaching a review, an older failure not overwriting newer
+  metadata, no classifier call when every run is cancelled first, and a
+  timed-out classifier request aborted before the next one begins.
 - client: every Intent card state.
 - e2e: `10-pr-intent.flow.json` renders the seeded, fresh intent with no model
   call.
