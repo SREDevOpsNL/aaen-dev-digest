@@ -87,9 +87,12 @@ export class ReviewService {
     if (!(await this.repo.runInWorkspace(workspaceId, runId))) {
       throw new NotFoundError('Run not found');
     }
-    this.publish(runId, 'info', 'Cancellation requested — stopping…');
+    // Fast-path signal, then the durable transition (the executor's
+    // authoritative check), then the event and stream completion — so a client
+    // that refetches on "done" already sees the cancelled row.
     this.container.runBus.cancel(runId);
     await this.repo.cancelRunIfRunning(workspaceId, runId);
+    this.publish(runId, 'info', 'Cancellation requested — stopping…');
     this.container.runBus.complete(runId);
   }
 
