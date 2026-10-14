@@ -26,6 +26,7 @@ Its current operational capabilities centre on:
 - managing reusable text-only review skills and attaching them to agents;
 - extracting grounded house-rule conventions from a repository sample and
   turning accepted conventions into skills;
+- deriving and caching each PR's intent and giving it to reviewers as context;
 - executing one or all enabled AI reviewer configurations;
 - grounding findings against actual changed lines;
 - persisting reviews, findings, run status, and execution traces;
@@ -309,6 +310,15 @@ assembled skill block in the run trace. Memory and project specs remain extensio
 points that the studio does not resolve today. The executor also passes the diff,
 PR description, agent prompt, caller digest, repo map, and rank note.
 
+Before the agents run, the executor resolves one PR intent for the whole batch
+through the `intent` module: a fresh cached intent is reused, a missing or stale
+one is refreshed once (single-flight per PR), and on failure the batch reviews
+without intent. `reviewer-core` renders the validated intent as an untrusted
+section and adds a trusted scope policy to the system message after the
+injection guard; without intent the prompt is unchanged. The run trace stores an
+immutable copy of the intent used, and classifier cost stays on the `pr_intent`
+cache rather than in the run's cost.
+
 ### Strategy selection
 
 Each agent can choose:
@@ -455,6 +465,7 @@ calls GitHub and does not persist a second local comment copy.
 | Agents | Agent CRUD, versions, model lists, and ordered skill links (`GET/POST /agents/:id/skills`) under `/agents` and `/providers` |
 | Skills | `GET/POST /skills`, `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions`, and `GET /skills/:id/agents` |
 | Conventions | `GET /repos/:id/conventions`, `POST /repos/:id/conventions/extract`, `POST /repos/:id/conventions/skill`, `PATCH/DELETE /conventions/:id` |
+| PR intent | `GET /pulls/:id/intent` (cache only), `POST /pulls/:id/intent` (first-open generation), `POST /pulls/:id/intent/recompute`; the POSTs are rate-limited |
 | Reviews | `POST /pulls/:id/review`, review/finding reads and actions |
 | Runs | Active/history reads, cancel/delete, SSE events, and persisted trace |
 
@@ -477,7 +488,7 @@ Operational table groups include:
 | Repositories and PRs | `repos`, `pull_requests`, `pr_files`, `pr_commits` |
 | Agents | `agents`, `agent_versions` |
 | Skills and conventions | `skills`, `skill_versions`, `agent_skills`, `conventions` |
-| Reviews | `reviews`, `findings` |
+| Reviews | `reviews`, `findings`, `pr_intent` (intent cache) |
 | Execution | `agent_runs`, `run_traces`, `jobs` |
 | Repo intelligence | `repo_index_state`, `file_edges`, `file_facts`, `file_rank`, `repo_map_cache`, plus indexed symbol/reference storage |
 
