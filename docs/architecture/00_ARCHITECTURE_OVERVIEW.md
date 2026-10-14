@@ -26,6 +26,7 @@ Its current operational capabilities centre on:
 - managing reusable text-only review skills and attaching them to agents;
 - extracting grounded house-rule conventions from a repository sample and
   turning accepted conventions into skills;
+- deriving and caching each PR's intent and giving it to reviewers as context;
 - executing one or all enabled AI reviewer configurations;
 - grounding findings against actual changed lines;
 - persisting reviews, findings, run status, and execution traces;
@@ -309,6 +310,21 @@ assembled skill block in the run trace. Memory and project specs remain extensio
 points that the studio does not resolve today. The executor also passes the diff,
 PR description, agent prompt, caller digest, repo map, and rank note.
 
+Before the agents run, the executor resolves one PR intent for the whole batch
+through the `intent` module: a fresh cached intent is reused, a missing or stale
+one is refreshed once (single-flight per PR revision: PR, head SHA, context
+fingerprint and linked-issue content), and on failure the batch reviews without
+intent. A derivation that a newer one superseded, or one for different inputs,
+is never injected. If every run is cancelled before this step, no classifier
+call is made. The derivation's deadline aborts the classifier request through
+`StructuredRequest.signal` rather than abandoning it. Single flight is
+in-process, like the rest of the executor's state, so it relies on the
+one-process-per-database assumption. `reviewer-core` renders the validated
+intent as an untrusted section and adds a trusted scope policy to the system message after the
+injection guard; without intent the prompt is unchanged. The run trace stores an
+immutable copy of the intent used, and classifier cost stays on the `pr_intent`
+cache rather than in the run's cost.
+
 ### Strategy selection
 
 Each agent can choose:
@@ -319,7 +335,8 @@ Each agent can choose:
   lines and changes more than one file.
 
 File chunks are processed sequentially. Cancellation is checked before each
-expensive chunk call. Structured output receives up to two repair/retry attempts
+agent, before each expensive chunk call, and before persistence, against the
+durable `agent_runs.status` (the in-memory flag is only a fast path). Structured output receives up to two repair/retry attempts
 by default.
 
 ### Structured output
@@ -387,7 +404,10 @@ outputs, but `prompt_assembly` is a whole-diff representation rather than a
 complete copy of every exact per-file message sent to the model.
 
 Failures and cancellations update the run status and persist a trace containing
-the event log and error information available at that point. On server startup,
+the event log and error information available at that point. Terminal status
+writes are compare-and-set from `running`, so a cancelled run is never
+overwritten to `done` or `failed`; a successful run's status, review, findings,
+and reviewed head commit in one transaction. On server startup,
 runs left in `running` state by a dead process are reaped rather than resumed.
 Historical runs and runs whose provider did not report a complete cost retain a
 `null` cost. They are displayed as unavailable, never as `$0.00`.
@@ -451,6 +471,7 @@ calls GitHub and does not persist a second local comment copy.
 | Agents | Agent CRUD, versions, model lists, and ordered skill links (`GET/POST /agents/:id/skills`) under `/agents` and `/providers` |
 | Skills | `GET/POST /skills`, `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions`, and `GET /skills/:id/agents` |
 | Conventions | `GET /repos/:id/conventions`, `POST /repos/:id/conventions/extract`, `POST /repos/:id/conventions/skill`, `PATCH/DELETE /conventions/:id` |
+| PR intent | `GET /pulls/:id/intent` (cache only), `POST /pulls/:id/intent` (first-open generation), `POST /pulls/:id/intent/recompute`; the POSTs are rate-limited |
 | Reviews | `POST /pulls/:id/review`, review/finding reads and actions |
 | Runs | Active/history reads, cancel/delete, SSE events, and persisted trace |
 
@@ -473,7 +494,7 @@ Operational table groups include:
 | Repositories and PRs | `repos`, `pull_requests`, `pr_files`, `pr_commits` |
 | Agents | `agents`, `agent_versions` |
 | Skills and conventions | `skills`, `skill_versions`, `agent_skills`, `conventions` |
-| Reviews | `reviews`, `findings` |
+| Reviews | `reviews`, `findings`, `pr_intent` (intent cache) |
 | Execution | `agent_runs`, `run_traces`, `jobs` |
 | Repo intelligence | `repo_index_state`, `file_edges`, `file_facts`, `file_rank`, `repo_map_cache`, plus indexed symbol/reference storage |
 

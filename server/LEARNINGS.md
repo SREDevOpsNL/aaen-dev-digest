@@ -49,6 +49,17 @@ correction. Repo-intel remains server-scoped;
   `server/src/modules/agents/repository.ts:208`
   (`AgentsRepository.enabledSkillsForPrompt`).
 
+- **2026-10-13** — `RunBus.isCancelled()` is not a reliable cancellation signal
+  after any await: `cancelRun` calls `runBus.complete()` right after
+  signalling, and `complete()` clears the flag. Check the durable
+  `agent_runs.status = 'cancelled'` instead, and keep terminal writes
+  compare-and-set from `running`. The persisted trace is built from the bus
+  buffer (`RunLogger.logFor`), so events published after `complete()` must
+  still be buffered even though they are no longer emitted. Evidence:
+  `server/src/platform/sse.ts` (`RunBus.complete`, `RunBus.publish`),
+  `server/src/platform/run-logger.ts:94` (`RunLogger.logFor`),
+  `server/test/run-lifecycle.it.test.ts`.
+
 ## Decisions
 
 ## Recurring Errors & Fixes
@@ -79,6 +90,23 @@ correction. Repo-intel remains server-scoped;
   statement before the generated drop; for conventions this preserves
   `accepted = true` as `status = 'accepted'`. Evidence:
   `server/src/db/migrations/0011_add_convention_evidence.sql:7` (status backfill).
+
+- **2026-10-14** — In tests, `waitForPrRuns` does not mean the executor has
+  finished for a run cancelled through the API: `cancelRun` writes `cancelled`
+  immediately, so the poll returns while the executor is still in its catch
+  path. Assertions such as "no review persisted" can then pass vacuously, and
+  trace assertions fail intermittently. Wait for the run's trace (the
+  executor's last step) with `vi.waitFor` before asserting. Evidence:
+  `server/test/run-lifecycle.it.test.ts` failed once (`expected undefined to
+  be defined` on the trace), then passed in 5 of 5 runs after the fix.
+
+- **2026-10-14** — Extension of the 2026-10-14 `waitForPrRuns` entry: the
+  race is not limited to API-cancelled runs. A successful run's status also
+  commits (in its finalize transaction) before its trace is saved, so any test
+  that reads `/runs/:id/trace` right after `waitForPrRuns` can get a 404. Call
+  `waitForRunTrace(db, runId)` first. Evidence: `server/test/helpers/runs.ts`
+  (`waitForRunTrace`); `reviews.it.test.ts` "runs a review: map-reduce …"
+  failed in CI with `Cannot read properties of undefined (reading 'model')`.
 
 ## Session Notes
 

@@ -40,6 +40,7 @@ flow, read
 | Agent management | Operational | Users can create, update, enable/disable, delete, and version reviewer configurations. |
 | Reusable review Skills | Operational | Users can create, edit, version, enable, delete, import local text, and reuse Skills across agents. Ordered globally enabled Skills are fenced as untrusted review criteria and persisted in prompt traces. URL/community import, Evals, Stats, and CI execution remain explicitly unavailable. |
 | Conventions Extractor | Operational | Users can scan a bounded code-selected repository sample, triage mechanically grounded house-rule candidates, and turn accepted rules into an editable disabled Skill with source evidence. Extraction requires a configured external model. |
+| PR Intent Layer | Operational | Opening a PR generates its intent once through a rate-limited, workspace-scoped operation (reading never calls a model) and caches it in `pr_intent`. The classifier sees bounded two-tier evidence (file manifest with hunk headers, plus budgeted line excerpts) and a linked issue only when a closing keyword identifies exactly one; citations are checked for presence against the lines it was shown, and uncited statements are marked unverified. The PR Overview card shows purpose, author claim, scope, confidence, discrepancies and freshness; stale intent (new head, changed context or prompt version) offers a manual Recompute, and a failed Recompute keeps the previous intent. A review batch reuses fresh intent, refreshes stale intent once, or reviews without it on failure; reviewers get it as untrusted data under a trusted scope policy that never removes or downgrades real defects. Its effect on review quality is experimental: no improvement in significant-defect recall is claimed (see `docs/plans/L03-intent-evaluation.md`). Each run trace keeps an immutable copy; classifier cost is kept on the cache, outside run and PR-list totals. Requires a configured model for the `review_intent` feature (default unchanged). |
 | One-agent review | Operational | A selected agent can review a PR even when that agent is disabled for “run all.” |
 | Run-all selection | Operational | All enabled agents receive run rows and execute with failure isolation. They currently execute sequentially, not in parallel. |
 | Structured model output | Operational | Review output is validated against the shared schema, with bounded repair/retry behavior. |
@@ -53,7 +54,7 @@ flow, read
 | Run history and trace | Operational | Run status, metrics, logs, prompt assembly, raw model output, and findings are persisted. Failure and cancellation traces are also retained. |
 | Map-reduce prompt trace | Partial | A map-reduce trace stores chunk labels, joined raw outputs, and a whole-diff prompt-assembly representation; it does not persist every exact per-file message sent to the model. |
 | Run cost attribution | Operational | Authoritative provider-reported USD cost is persisted per run and exposed through the APIs and all three UI surfaces. Missing provider cost remains `null`, and the engine's best-available estimated `costUsd` stays separate. Database-backed migration/persistence tests and the hermetic end-to-end regression gate passed against the verified implementation above. |
-| Run cancellation | Partial | Cancellation is checked before model chunks. It cannot interrupt a model request already in flight, and a single-pass review has no later chunk checkpoint. |
+| Run cancellation | Partial | Cancellation is checked before each agent, before model chunks, and before persistence, against the durable run status. It cannot interrupt a model request already in flight; a cancel that lands during one is honoured when the request returns, so no review is persisted and the run stays cancelled. |
 | Finding disposition | Operational | Findings can be accepted or dismissed locally. |
 | Inline GitHub comments | Operational | Comments authored in the Files view are read from and posted directly to GitHub; they are not a local comment mirror. |
 | Offline read degradation | Partial | Persisted repositories, PRs, and review history remain viewable, but cloning, fresh GitHub sync, comments, and LLM review require their external services. |
@@ -64,7 +65,7 @@ flow, read
 | --- | --- | --- |
 | Persistent memory / RAG | Tables, vector-oriented schema, embedder wiring, trace fields, and a prompt slot exist. The studio executor does not retrieve memory or pass it to `reviewer-core`. | Not operational. `EMBEDDINGS_ENABLED=true` alone does not make it operational. |
 | Project context / specs | Tables, contracts, client hooks, and prompt slots exist, but no context module is registered and the studio executor supplies no specs. | Scaffolded. |
-| Intent and PR brief | Schema/contracts exist, but no registered intent or brief module participates in the current review flow. | Scaffolded. |
+| PR brief (blast radius, risks, history, smart diff) | Schema/contracts exist, but no registered brief module participates in the current review flow. The Intent part is operational (see above). | Scaffolded. |
 | Blast Radius | The repo-intelligence facade can calculate impact data, but there is no registered Blast Radius product module or primary UI. Reviews use only caller signatures, repo map, and a high-rank note. | Partial infrastructure, not an operational user feature. |
 | Onboarding generator | Schema and a system prompt exist, but no registered onboarding service/route/UI was verified. | Scaffolded. |
 | Evaluation and conformance | Schema and contracts exist without a registered eval module or current UI workflow. | Scaffolded. |
@@ -75,7 +76,7 @@ flow, read
 | Plugins | Installed-plugin schema exists without registered plugin import/export modules or UI. | Scaffolded. |
 | Agent performance dashboard | Trace and run metrics provide raw inputs, but no performance dashboard route or primary UI is registered. | Not operational. |
 | Weekly digest | A `digests` table exists, but no scheduler, digest module, generator, delivery path, or primary UI is registered. | Not operational. |
-| Feature-model settings | Settings can store model choices for system features. Conventions consumes its configured model; the presence of choices for onboarding, intent, risk brief, or conformance does not make those features operational. | Operational configuration surface for one operational and several scaffolded consumers. |
+| Feature-model settings | Settings can store model choices for system features. Conventions and the PR Intent Layer consume their configured models; the presence of choices for onboarding, risk brief, or conformance does not make those features operational. | Operational configuration surface for two operational and several scaffolded consumers. |
 
 ## Important boundaries and constraints
 
@@ -113,8 +114,9 @@ flow, read
 - Clone/index jobs execute in an in-process queue. The `jobs` table records
   status, but it is not a durable broker and queued work is not reconstructed on
   process restart.
-- Live SSE buffers and cancellation signals are process-local. Completed traces
-  and run status are database-backed.
+- Live SSE buffers and the in-memory cancellation flag are process-local. The
+  durable `cancelled` run status is authoritative; completed traces and run
+  status are database-backed.
 - On API startup, orphaned `running` review rows are reaped rather than resumed.
 
 ### Schema is not capability evidence
@@ -125,7 +127,7 @@ features without registered modules and an end-to-end path:
 
 - `memory`;
 - `code_chunks`, general `symbols`/`references`, `onboarding`;
-- `pr_intent`, `pr_brief`;
+- `pr_brief`;
 - `eval_*`, `conformance_checks`, `composed_reviews`;
 - `ci_installations`, `ci_runs`;
 - `multi_agent_runs`;

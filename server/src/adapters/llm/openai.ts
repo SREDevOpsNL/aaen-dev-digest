@@ -7,7 +7,7 @@ import type {
   StructuredRequest,
   StructuredResult,
 } from '@devdigest/shared';
-import { withRetry, withTimeout } from '../../platform/resilience.js';
+import { withAbortableTimeout, withRetry, withTimeout } from '../../platform/resilience.js';
 import { toJsonSchema, parseWithRepair } from '../../platform/structured.js';
 import { estimateCost } from './pricing.js';
 import { ExternalServiceError } from '../../platform/errors.js';
@@ -94,18 +94,23 @@ export class OpenAIProvider implements LLMProvider {
     let lastRaw = '';
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      // A cancelled call starts no further (billable) attempt.
+      req.signal?.throwIfAborted();
+      // The timeout aborts the request rather than abandoning it.
       const res = await withRetry(() =>
-        withTimeout(
-          this.client.chat.completions.create({
-            model: req.model,
-            messages,
-            ...tuningParams(req.model, req.temperature, req.maxTokens),
-            response_format: {
-              type: 'json_schema',
-              json_schema: { name: req.schemaName, schema: jsonSchema.schema, strict: true },
-            },
-          }),
+        withAbortableTimeout(
+          (signal) =>
+            this.client.chat.completions.create({
+              model: req.model,
+              messages,
+              ...tuningParams(req.model, req.temperature, req.maxTokens),
+              response_format: {
+                type: 'json_schema',
+                json_schema: { name: req.schemaName, schema: jsonSchema.schema, strict: true },
+              },
+            }, { signal }),
           req.timeoutMs ?? DEFAULT_TIMEOUT,
+          req.signal,
         ),
       );
       lastRaw = res.choices?.[0]?.message?.content ?? '';

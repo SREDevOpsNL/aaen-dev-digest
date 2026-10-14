@@ -29,7 +29,10 @@ export interface OpenRouterProviderOptions {
   baseURL?: string;
   /** Provider id for traces/gating (default 'openrouter'). */
   id?: 'openai' | 'openrouter';
-  /** Per-request timeout (ms) — the SDK retries on timeout/5xx/429 with backoff. */
+  /**
+   * Per-request timeout (ms) — the SDK retries on timeout/5xx/429 with backoff.
+   * Also the ceiling for `StructuredRequest.timeoutMs`.
+   */
   timeoutMs?: number;
   maxRetries?: number;
   /** Injected cost estimator; returns USD or null when the model is unknown. */
@@ -41,6 +44,7 @@ export class OpenRouterProvider implements LLMProvider {
   private client: OpenAI;
   private baseURL: string;
   private apiKey: string;
+  private timeoutMs: number;
   private estimateCost?: OpenRouterProviderOptions['estimateCost'];
 
   constructor(apiKey: string, opts: OpenRouterProviderOptions = {}) {
@@ -48,10 +52,11 @@ export class OpenRouterProvider implements LLMProvider {
     this.apiKey = apiKey;
     this.baseURL = opts.baseURL ?? 'https://openrouter.ai/api/v1';
     this.estimateCost = opts.estimateCost;
+    this.timeoutMs = opts.timeoutMs ?? 90_000;
     this.client = new OpenAI({
       apiKey,
       baseURL: this.baseURL,
-      timeout: opts.timeoutMs ?? 90_000,
+      timeout: this.timeoutMs,
       maxRetries: opts.maxRetries ?? 2,
     });
   }
@@ -66,9 +71,12 @@ export class OpenRouterProvider implements LLMProvider {
     let hasAnyProviderCost = false;
     let hasCompleteProviderCost = this.id === 'openrouter';
     let lastRaw = '';
+    const options = this.requestOptions(req);
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-      const res = await this.client.chat.completions.create({
+      // A cancelled call starts no further (billable) attempt.
+      req.signal?.throwIfAborted();
+      const body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
         model: req.model,
         messages,
         temperature: req.temperature ?? 0,
@@ -80,10 +88,15 @@ export class OpenRouterProvider implements LLMProvider {
         // OpenRouter session grouping — extra body field (spread is exempt from
         // excess-property checks). Only sent when talking to OpenRouter.
         ...(this.id === 'openrouter' && req.sessionId ? { session_id: req.sessionId } : {}),
+        ...(this.id === 'openrouter' && req.reasoning ? { reasoning: req.reasoning } : {}),
         // OpenRouter usage accounting — ask it to return the REAL generation
         // cost (USD) in `usage.cost`, instead of estimating from a price book.
         ...(this.id === 'openrouter' ? { usage: { include: true } } : {}),
-      });
+      };
+      // Request options only when asked for, so existing callers send exactly what they did.
+      const res = options
+        ? await this.client.chat.completions.create(body, options)
+        : await this.client.chat.completions.create(body);
 
       // OpenRouter can return HTTP 200 with no `choices` (an upstream provider
       // error / moderation / free-tier limit in the body) — surface it.
@@ -124,6 +137,19 @@ export class OpenRouterProvider implements LLMProvider {
       messages.push({ role: 'user', content: parsed.repromptMessage });
     }
     throw new Error(`OpenRouter structured output failed schema validation for ${req.schemaName}`);
+  }
+
+  /**
+   * SDK request options for `timeoutMs` and `signal`. The SDK aborts a request
+   * that times out (then retries it) and aborts on `signal` without retrying.
+   * The request timeout can shorten the provider's timeout, never extend it, so
+   * a caller that already passed a longer `timeoutMs` keeps today's behaviour.
+   */
+  private requestOptions(req: StructuredRequest<unknown>): { timeout?: number; signal?: AbortSignal } | null {
+    const timeout =
+      req.timeoutMs !== undefined && req.timeoutMs > 0 ? Math.min(req.timeoutMs, this.timeoutMs) : undefined;
+    if (timeout === undefined && !req.signal) return null;
+    return { ...(timeout !== undefined ? { timeout } : {}), ...(req.signal ? { signal: req.signal } : {}) };
   }
 
   /**

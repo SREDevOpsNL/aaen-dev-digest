@@ -1,5 +1,5 @@
 import type { Container } from '../../platform/container.js';
-import type { Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
+import type { IntentRunSnapshot, Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
 import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
@@ -8,6 +8,7 @@ import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './reposit
 import { REVIEW_STRATEGY } from './constants.js';
 import { taskLine, toSkillPromptBlock } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
+import { IntentService, noneSnapshot } from '../intent/service.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -41,11 +42,15 @@ export type RunOutcome = {
  * review. Per-agent failures are isolated.
  */
 export class ReviewRunExecutor {
+  private readonly intents: IntentService;
+
   constructor(
     private container: Container,
     private repo: ReviewRepository,
     private agents: Container['agentsRepo'],
-  ) {}
+  ) {
+    this.intents = new IntentService(container);
+  }
 
   /**
    * Background execution of the queued agent runs (NOT awaited by the route).
@@ -87,7 +92,10 @@ export class ReviewRunExecutor {
           })
           .catch(() => undefined);
         await this.repo
-          .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed'))
+          .saveRunTrace(
+            runId,
+            this.traceFromBuffer(runId, pull, agent, '0/0 passed', 0, noneSnapshot('not_started', null)),
+          )
           .catch(() => undefined);
         this.container.runBus.complete(runId);
       }
@@ -105,6 +113,21 @@ export class ReviewRunExecutor {
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
+    // L03 — one PR intent per batch, shared by every agent: a fresh cached
+    // intent is reused, a missing or stale one is refreshed once, and if that
+    // fails the batch reviews without intent. Never throws.
+    // If every run was cancelled before this point, skip the classifier: no
+    // billable call for a batch nobody will review. Each run still ends as
+    // cancelled through its own checkpoint below.
+    const anyActive = await this.anyRunActive(jobs.map((j) => j.runId));
+    const intent = anyActive
+      ? await this.intents.forReviewBatch(workspaceId, pull, repo, diff, {
+          info: (msg) => runLog.info(msg),
+          warn: (msg) => runLog.info(msg),
+        })
+      : noneSnapshot('not_started', 'all runs were cancelled before intent derivation');
+    if (!anyActive) runLog.info('All runs were cancelled before PR intent — skipping it');
+
     for (const { agent, runId } of jobs) {
       const agentStart = Date.now();
       logger?.info(
@@ -112,7 +135,7 @@ export class ReviewRunExecutor {
         `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
       );
       try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog);
+        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intent);
         logger?.info(
           {
             runId,
@@ -144,6 +167,7 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     runId: string,
     parentLog: RunLogger,
+    intent: IntentRunSnapshot,
   ): Promise<RunOutcome> {
     const start = Date.now();
     // Narrow the fanned-out pre-work logger to THIS run; the shared diff/intent
@@ -154,6 +178,9 @@ export class ReviewRunExecutor {
     runLog.info(`Starting review with agent "${agent.name}" (${agent.provider}/${agent.model})`);
 
     try {
+      // A run cancelled while it waited behind earlier agents stops here.
+      await this.checkpoint(runId);
+
       // Resolve the agent's LLM provider. (container.llm throws if the provider
       // key is missing — caught below and persisted as a failed run.)
       const llm = await runLog.step(
@@ -210,35 +237,17 @@ export class ReviewRunExecutor {
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
+        // L03 — validated intent as untrusted context plus the trusted scope
+        // policy; omitted → the prompt is identical to the no-intent shape.
+        ...(intent.analysis ? { intent: intent.analysis } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
-        checkCancelled: () => {
-          if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();
-        },
+        checkCancelled: () => this.checkpoint(runId),
       });
       const { tokensIn, tokensOut, grounding } = outcome;
 
       const keptFindings = outcome.review.findings;
-
-      // ---- Persist review + findings ----------------------------------------
-      const review = await this.repo.insertReview({
-        workspaceId,
-        prId: pull.id,
-        agentId: agent.id,
-        runId,
-        kind: 'review',
-        verdict: outcome.review.verdict,
-        summary: outcome.review.summary,
-        score: outcome.review.score,
-        model: agent.model,
-      });
-      const findingRows = await this.repo.insertFindings(review.id, keptFindings);
-      runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
-
-      // Mark the commit this review ran against so the PR list can tell
-      // reviewed / needs-review (head moved) / stale apart.
-      await this.repo.markReviewed(pull.id, pull.headSha);
 
       const durationMs = Date.now() - start;
 
@@ -246,19 +255,45 @@ export class ReviewRunExecutor {
       // the timeline colors on, NOT the model's self-reported verdict.
       const blockers = countBlockers(keptFindings, agent.ciFailOn);
 
-      // ---- Observability: agent_runs + ONE run_traces document --------------
-      await this.repo.completeAgentRun(runId, {
-        status: 'done',
-        durationMs,
-        tokensIn,
-        tokensOut,
-        costUsd: outcome.providerCostUsd,
-        findingsCount: findingRows.length,
-        grounding,
-        score: outcome.review.score,
-        blockers,
-        error: null,
+      // ---- Persist atomically: run → done, review, findings, reviewed head ---
+      // One transaction guarded on status = 'running'. A cancel that landed
+      // after the model returned wins: nothing is written and the run stays
+      // cancelled. The reviewed head is marked so the PR list can tell
+      // reviewed / needs-review (head moved) / stale apart.
+      await this.checkpoint(runId);
+      const persisted = await this.repo.finalizeRunSuccess({
+        runId,
+        completion: {
+          durationMs,
+          tokensIn,
+          tokensOut,
+          costUsd: outcome.providerCostUsd,
+          findingsCount: keptFindings.length,
+          grounding,
+          score: outcome.review.score,
+          blockers,
+          error: null,
+        },
+        review: {
+          workspaceId,
+          prId: pull.id,
+          agentId: agent.id,
+          runId,
+          kind: 'review',
+          verdict: outcome.review.verdict,
+          summary: outcome.review.summary,
+          score: outcome.review.score,
+          model: agent.model,
+        },
+        findings: keptFindings,
+        prId: pull.id,
+        headSha: pull.headSha,
       });
+      if (!persisted.applied) throw new RunCancelledError();
+      const { review, findings: findingRows } = persisted;
+      runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
+
+      // ---- Observability: ONE run_traces document ---------------------------
 
       const trace: RunTrace = {
         config: {
@@ -290,6 +325,8 @@ export class ReviewRunExecutor {
         // Persisted log = the run's FULL event buffer (incl. shared pre-work:
         // diff load + intent), not just events recorded inside this method.
         log: runLog.logFor(runId),
+        // Immutable copy of the intent this run used; a later Recompute never changes it.
+        intent,
       };
       runLog.info('Run complete; trace persisted');
       await this.repo.saveRunTrace(runId, trace);
@@ -316,10 +353,32 @@ export class ReviewRunExecutor {
         })
         .catch(() => undefined);
       await this.repo
-        .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start))
+        .saveRunTrace(
+          runId,
+          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, intent),
+        )
         .catch(() => undefined);
       this.container.runBus.complete(runId);
       throw err;
+    }
+  }
+
+  /** Whether at least one run of the batch is not cancelled (same signal as the checkpoint). */
+  private async anyRunActive(runIds: string[]): Promise<boolean> {
+    for (const runId of runIds) {
+      if (!this.container.runBus.isCancelled(runId) && !(await this.repo.isRunCancelled(runId))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Cancellation checkpoint. The in-memory flag is only a fast path: cancelRun
+   * completes the bus right after signalling, which clears it. The durable
+   * `agent_runs.status = 'cancelled'` row is the authoritative signal.
+   */
+  private async checkpoint(runId: string): Promise<void> {
+    if (this.container.runBus.isCancelled(runId) || (await this.repo.isRunCancelled(runId))) {
+      throw new RunCancelledError();
     }
   }
 
@@ -435,6 +494,7 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     grounding: string,
     durationMs = 0,
+    intent?: IntentRunSnapshot,
   ): RunTrace {
     return {
       config: {
@@ -459,6 +519,7 @@ export class ReviewRunExecutor {
       memory_pulled: [],
       specs_read: [],
       log: this.container.runBus.buffer(runId).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg })),
+      ...(intent ? { intent } : {}),
     };
   }
 }

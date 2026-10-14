@@ -1,5 +1,6 @@
 import type {
   Finding,
+  IntentAnalysis,
   LLMProvider,
   PromptAssembly,
   Review,
@@ -8,6 +9,7 @@ import type {
 } from '@devdigest/shared';
 import { Review as ReviewSchema } from '@devdigest/shared';
 import { assemblePrompt } from '../prompt.js';
+import { renderIntentForReview } from '../intent/prompt.js';
 import { groundFindings, groundingSummary } from '../grounding.js';
 import { reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
 
@@ -71,6 +73,12 @@ export interface ReviewInput {
   /** PR author's description/body (untrusted; truncated + delimiter-wrapped in
       the prompt). Empty/undefined → section omitted. */
   prDescription?: string;
+  /**
+   * Validated derived intent (L03). Rendered as an untrusted section plus the
+   * trusted scope policy; omitted → prompt identical to the no-intent shape.
+   * It never touches grounding or scoring.
+   */
+  intent?: IntentAnalysis;
   /** Task framing line, e.g. "Review PR #482 …". */
   task?: string;
   /** Override the structured-output retry budget. */
@@ -85,11 +93,13 @@ export interface ReviewInput {
   /** Progress sink. */
   onEvent?: (e: ReviewEvent) => void;
   /**
-   * Cancellation checkpoint, called before each (expensive) chunk LLM call.
-   * Supply a function that THROWS to abort mid-run (the caller owns the error
-   * type, e.g. the server's RunCancelledError); the engine stays agnostic.
+   * Cancellation checkpoint, awaited before each (expensive) chunk LLM call.
+   * Supply a function that THROWS (or returns a rejecting promise) to abort
+   * mid-run; the caller owns the error type (e.g. the server's
+   * RunCancelledError) and the engine stays agnostic. Synchronous checkpoints
+   * keep working unchanged: awaiting `void` only adds one microtask.
    */
-  checkCancelled?: () => void;
+  checkCancelled?: () => void | Promise<void>;
 }
 
 export interface ReviewOutcome {
@@ -138,6 +148,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     callers: input.callers,
     repoMap: input.repoMap,
     prDescription: input.prDescription,
+    intent: input.intent ? renderIntentForReview(input.intent) : undefined,
     task: input.task,
   };
 
@@ -165,7 +176,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
 
   for (const chunk of chunks) {
     // Cancellation checkpoint — stop before the next (expensive) LLM call.
-    input.checkCancelled?.();
+    await input.checkCancelled?.();
     // 'map:' prefix only for the map-reduce path (one call per file). In
     // single-pass there is exactly one chunk (the whole diff) — don't mislabel it.
     emit(

@@ -57,3 +57,39 @@ export {
 // The single OpenAI-compatible structured provider (OpenRouter), shared by the
 // CI runner and the server's openrouter path. Owns session grouping + guards.
 export { OpenRouterProvider, type OpenRouterProviderOptions } from './llm/openrouter.js';
+
+// Intent Layer (L03): bounded evidence → one classifier call → citation-checked
+// analysis. deriveIntent calls the injected LLMProvider; the rest is pure.
+export {
+  buildIntentEvidence,
+  DEFAULT_INTENT_EVIDENCE_LIMITS,
+  MANIFEST_INCOMPLETE_NOTE,
+  NO_HUNKS_LABEL,
+  type ExtraFile,
+  type IntentEvidence,
+  type IntentEvidenceLimits,
+  type SampledLines,
+} from './intent/evidence.js';
+export {
+  checkCitation,
+  validateIntent,
+  INTENT_MAX_CITATION_SPAN,
+  INTENT_OUTPUT_LIMITS,
+  type IntentValidation,
+} from './intent/validate.js';
+export {
+  buildIntentMessages,
+  renderIntentForReview,
+  INTENT_PROMPT_VERSION,
+  INTENT_SYSTEM_PROMPT,
+  MAX_LINKED_ISSUE_CHARS,
+  type IntentClaims,
+} from './intent/prompt.js';
+export {
+  deriveIntent,
+  DEFAULT_INTENT_MAX_TOKENS,
+  DEFAULT_INTENT_REASONING,
+  type DeriveIntentInput,
+  type DeriveIntentOutcome,
+} from './intent/derive.js';
+export { INTENT_SCOPE_POLICY } from './prompt.js';

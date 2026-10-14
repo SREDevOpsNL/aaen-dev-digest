@@ -34,9 +34,32 @@ correction. Genuinely cross-package findings belong in
   `reviewer-core/src/review/run.ts:104-105` (`ReviewOutcome.assembly`),
   `reviewer-core/src/review/run.ts:142` (`reviewPullRequest`)
 
+- **2026-10-14** — An OpenRouter model ID does not pin the upstream provider,
+  so the same model and a byte-identical prompt can change behaviour between
+  evaluation runs. For `deepseek/deepseek-v4-flash` on one day, one identical
+  review prompt was counted as 1,702 input tokens in some calls and 2,927 in
+  others; between two runs the mean findings dropped from about 5 to 2.7, the
+  cost per token fell, and one review came back in Chinese. When comparing
+  prompt variants, record the response's top-level `provider` field (the engine
+  does not capture it) and pin the provider, or treat run-to-run differences as
+  noise. Evidence: `docs/plans/L03-intent-evaluation.md` (run 2,
+  "Run-to-run drift"), `reviewer-core/src/llm/openrouter.ts`
+  (`OpenRouterProvider.completeStructured`).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
+
+- **2026-10-14** — A reasoning model can return empty structured output because
+  its reasoning tokens consume the whole `max_tokens` budget. With
+  `deepseek/deepseek-v4-flash` on OpenRouter, the intent classifier stopped with
+  `finish_reason=length` and empty or truncated JSON in 3 of 4 calls at 1,500
+  tokens and 3 of 3 calls at 4,000 (all 4,000 were reasoning tokens). Raising
+  the budget does not help; pass `reasoning: { effort: 'low' }` (or a reasoning
+  `max_tokens`), and check `finish_reason` when a structured call fails
+  validation. Evidence: `reviewer-core/src/intent/derive.ts`
+  (`DEFAULT_INTENT_REASONING`), `reviewer-core/src/llm/openrouter.ts`
+  (`OpenRouterProvider.completeStructured`).
 
 ## Session Notes
 

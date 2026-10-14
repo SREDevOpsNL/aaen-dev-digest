@@ -121,6 +121,20 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   agent runs inside a stdin-fed script. Evidence: a two-session sentinel test
   printed only the first session's result until `</dev/null` was added.
 
+- **2026-10-14** — `withTimeout` (a `Promise.race`) does not stop the model
+  call: the caller gets a `TimeoutError`, but the SDK request keeps running, and
+  possibly billing, in the background. Before L03's fix, `OpenRouterProvider`
+  also ignored `StructuredRequest.timeoutMs`: a classifier asked for 120 s took
+  445 s, because only the client's 90 s per-request default applied, and it
+  restarts with every SDK and structured-output retry. A timeout
+  that should cancel must pass an `AbortSignal` into the SDK call; use
+  `withAbortableTimeout` (server) or `StructuredRequest.signal`, and test it
+  against a loopback server that never answers, checking that the connection
+  closes. Evidence: `server/src/platform/resilience.ts`
+  (`withAbortableTimeout`), `reviewer-core/src/llm/openrouter.ts`
+  (`requestOptions`), `server/test/llm-abort.test.ts`,
+  `docs/plans/L03-intent-evaluation.md` (run 2, the 445 s derivation).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source
@@ -239,6 +253,16 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   multi-step experiments. Evidence: `devdigest-final-review-db` was healthy,
   then exited with code 0 before the next migration command; the same sequence
   completed when kept in one session (`migrate` → `seed` → API → two reviews).
+
+- **2026-10-13** — In a fresh worktree, `server` `pnpm typecheck` fails with
+  `TS2322: Type 'unknown' is not assignable to type 'T'` in
+  `src/adapters/llm/anthropic.ts` and `openai.ts` even when the code is
+  unchanged, because the server compiles `reviewer-core` source through a path
+  alias and `reviewer-core/node_modules` is missing, so its Zod types do not
+  resolve. Run `npm ci` in `reviewer-core/` before typechecking `server/` in a
+  new worktree. Evidence: the same commit typechecked cleanly after
+  `npm ci` in `reviewer-core/`, with identical `typescript` and `zod`
+  versions in `server/`.
 
 ## Session Notes
 
