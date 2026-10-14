@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import type { Db } from '../../../db/client.js';
+import type { Db, DbOrTx } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
 
@@ -170,27 +170,35 @@ export async function createAgentRun(
   return row!.id;
 }
 
+/** Terminal stats written when a run leaves `running`. */
+export type RunCompletion = {
+  status: 'done' | 'failed' | 'cancelled';
+  durationMs: number;
+  tokensIn: number;
+  tokensOut: number;
+  /** Authoritative provider-reported USD cost; null when unavailable. */
+  costUsd: number | null;
+  findingsCount: number;
+  grounding: string;
+  /** Review score (0-100); null on failed/cancelled runs. */
+  score?: number | null;
+  /** Findings that tripped the agent's gate; 0 on failed/cancelled runs. */
+  blockers?: number | null;
+  /** Failure reason (status='failed') / cancellation note. Null clears it. */
+  error?: string | null;
+};
+
+/**
+ * Move a run from `running` to a terminal status. Compare-and-set: it applies
+ * only while the row is still `running`, so a run the user already cancelled
+ * is never overwritten to `done` or `failed`. Returns whether it applied.
+ */
 export async function completeAgentRun(
-  db: Db,
+  db: DbOrTx,
   runId: string,
-  values: {
-    status: 'done' | 'failed' | 'cancelled';
-    durationMs: number;
-    tokensIn: number;
-    tokensOut: number;
-    /** Authoritative provider-reported USD cost; null when unavailable. */
-    costUsd: number | null;
-    findingsCount: number;
-    grounding: string;
-    /** Review score (0-100); null on failed/cancelled runs. */
-    score?: number | null;
-    /** Findings that tripped the agent's gate; 0 on failed/cancelled runs. */
-    blockers?: number | null;
-    /** Failure reason (status='failed') / cancellation note. Null clears it. */
-    error?: string | null;
-  },
-): Promise<void> {
-  await db
+  values: RunCompletion,
+): Promise<boolean> {
+  const rows = await db
     .update(t.agentRuns)
     .set({
       status: values.status,
@@ -204,7 +212,18 @@ export async function completeAgentRun(
       blockers: values.blockers ?? null,
       error: values.error ?? null,
     })
+    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.status, 'running')))
+    .returning({ id: t.agentRuns.id });
+  return rows.length > 0;
+}
+
+/** Whether the run's durable status is `cancelled` (the authoritative signal). */
+export async function isRunCancelled(db: Db, runId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ status: t.agentRuns.status })
+    .from(t.agentRuns)
     .where(eq(t.agentRuns.id, runId));
+  return row?.status === 'cancelled';
 }
 
 /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */

@@ -53,7 +53,7 @@ flow, read
 | Run history and trace | Operational | Run status, metrics, logs, prompt assembly, raw model output, and findings are persisted. Failure and cancellation traces are also retained. |
 | Map-reduce prompt trace | Partial | A map-reduce trace stores chunk labels, joined raw outputs, and a whole-diff prompt-assembly representation; it does not persist every exact per-file message sent to the model. |
 | Run cost attribution | Operational | Authoritative provider-reported USD cost is persisted per run and exposed through the APIs and all three UI surfaces. Missing provider cost remains `null`, and the engine's best-available estimated `costUsd` stays separate. Database-backed migration/persistence tests and the hermetic end-to-end regression gate passed against the verified implementation above. |
-| Run cancellation | Partial | Cancellation is checked before model chunks. It cannot interrupt a model request already in flight, and a single-pass review has no later chunk checkpoint. |
+| Run cancellation | Partial | Cancellation is checked before each agent, before model chunks, and before persistence, against the durable run status. It cannot interrupt a model request already in flight; a cancel that lands during one is honoured when the request returns, so no review is persisted and the run stays cancelled. |
 | Finding disposition | Operational | Findings can be accepted or dismissed locally. |
 | Inline GitHub comments | Operational | Comments authored in the Files view are read from and posted directly to GitHub; they are not a local comment mirror. |
 | Offline read degradation | Partial | Persisted repositories, PRs, and review history remain viewable, but cloning, fresh GitHub sync, comments, and LLM review require their external services. |
@@ -113,8 +113,9 @@ flow, read
 - Clone/index jobs execute in an in-process queue. The `jobs` table records
   status, but it is not a durable broker and queued work is not reconstructed on
   process restart.
-- Live SSE buffers and cancellation signals are process-local. Completed traces
-  and run status are database-backed.
+- Live SSE buffers and the in-memory cancellation flag are process-local. The
+  durable `cancelled` run status is authoritative; completed traces and run
+  status are database-backed.
 - On API startup, orphaned `running` review rows are reaped rather than resumed.
 
 ### Schema is not capability evidence

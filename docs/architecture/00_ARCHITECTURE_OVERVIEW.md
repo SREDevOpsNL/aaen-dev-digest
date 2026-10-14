@@ -319,7 +319,8 @@ Each agent can choose:
   lines and changes more than one file.
 
 File chunks are processed sequentially. Cancellation is checked before each
-expensive chunk call. Structured output receives up to two repair/retry attempts
+agent, before each expensive chunk call, and before persistence, against the
+durable `agent_runs.status` (the in-memory flag is only a fast path). Structured output receives up to two repair/retry attempts
 by default.
 
 ### Structured output
@@ -387,7 +388,10 @@ outputs, but `prompt_assembly` is a whole-diff representation rather than a
 complete copy of every exact per-file message sent to the model.
 
 Failures and cancellations update the run status and persist a trace containing
-the event log and error information available at that point. On server startup,
+the event log and error information available at that point. Terminal status
+writes are compare-and-set from `running`, so a cancelled run is never
+overwritten to `done` or `failed`; a successful run's status, review, findings,
+and reviewed head commit in one transaction. On server startup,
 runs left in `running` state by a dead process are reaped rather than resumed.
 Historical runs and runs whose provider did not report a complete cost retain a
 `null` cost. They are displayed as unavailable, never as `$0.00`.
