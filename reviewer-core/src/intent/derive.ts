@@ -40,6 +40,8 @@ export interface DeriveIntentInput extends IntentClaims {
   limits?: Partial<IntentEvidenceLimits>;
   sessionId?: string;
   timeoutMs?: number;
+  /** Aborts the classifier request (e.g. at the caller's deadline). */
+  signal?: AbortSignal;
   maxRetries?: number;
   maxTokens?: number;
   /** Reasoning control passed to providers that support it (default: low effort). */
@@ -73,6 +75,7 @@ export async function deriveIntent(input: DeriveIntentInput): Promise<DeriveInte
     maxTokens: input.maxTokens ?? DEFAULT_INTENT_MAX_TOKENS,
     reasoning: input.reasoning ?? DEFAULT_INTENT_REASONING,
     ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
     ...(input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {}),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
   });

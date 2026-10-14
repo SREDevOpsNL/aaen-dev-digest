@@ -23,6 +23,39 @@ export async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+/**
+ * `withTimeout` that also cancels the work: `fn` receives a signal that aborts
+ * at the deadline or when `parent` aborts, so the underlying request stops
+ * instead of running on unobserved. The caller still gets a `TimeoutError` at
+ * the deadline even if `fn` ignores the signal.
+ */
+export async function withAbortableTimeout<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  parent?: AbortSignal,
+): Promise<T> {
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort(parent!.reason);
+  if (parent?.aborted) controller.abort(parent.reason);
+  else parent?.addEventListener('abort', onParentAbort, { once: true });
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const work = fn(controller.signal);
+    if (!ms || ms <= 0) return await work;
+    const timeout = new Promise<never>((_, reject) => {
+      handle = setTimeout(() => {
+        const err = new TimeoutError(ms);
+        reject(err);
+        controller.abort(err);
+      }, ms);
+    });
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(handle);
+    parent?.removeEventListener('abort', onParentAbort);
+  }
+}
+
 export interface RetryOptions {
   retries?: number;
   baseDelayMs?: number;
