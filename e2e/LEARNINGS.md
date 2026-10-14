@@ -27,6 +27,16 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
 
 ## Recurring Errors & Fixes
 
+- **2026-10-14** — `agent-browser wait --text` matches the rendered text after
+  CSS `text-transform`, case-sensitively: `wait --text "Author claims"` never
+  matches a heading styled `uppercase` (only "AUTHOR CLAIMS" does).
+  `SectionLabel` and `SeverityBadge` in `@devdigest/ui` uppercase their text. A
+  substring wait can also pass on transient text — "PR intent" matched the
+  card's loading line "Deriving PR intent…", not its uppercased label. Assert
+  on unstyled content that only appears once data has loaded. Evidence: a local
+  probe page (lowercase query: no match; uppercase: match), and
+  `e2e/specs/10-pr-intent.flow.json`.
+
 ## Session Notes
 
 ## Open Questions

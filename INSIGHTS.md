@@ -58,3 +58,26 @@ says which file a finding goes in.
   event must include both an exit code of zero and the expected injected
   context. Evidence: `.claude/settings.json:9` (`args`),
   `.claude/hooks/engineering-insights-reminder.mjs:13` (`hook_event_name`).
+
+- **2026-10-14** — L03 Intent Layer: a misleading PR description plus derived
+  intent made the reviewer drop the standalone hardcoded-key CRITICAL in 2 of 3
+  runs (it survived only inside the "key sent to the callback" finding), while
+  without intent it was a separate CRITICAL in 3 of 3; with the honest
+  description it was flagged in 6 of 6. Intent otherwise cut unmatched
+  findings from 1.33 to 0.67 per run at about 0.5–1× the cost of one review per
+  derivation. Treat the scope policy's "one finding per root cause" rule as the
+  first suspect and re-evaluate before enabling intent by default. Evidence:
+  `docs/plans/L03-intent-evaluation.md` (n = 3 per variant,
+  `deepseek/deepseek-v4-flash`), `reviewer-core/src/prompt.ts`
+  (`INTENT_SCOPE_POLICY`).
+
+- **2026-10-14** — Follow-up to the L03 entry above: after the scope policy
+  stopped saying "one finding per root cause" and named a hardcoded secret plus
+  its exfiltration as two findings, *misleading / with intent* kept the
+  standalone hardcoded-secret finding in 2 of 3 runs (was 1 of 3), the same as
+  *misleading / without* in the same run. That is not evidence the regression
+  is fixed: the without-intent baseline itself fell from 3 of 3 to 2 of 3 on a
+  byte-identical prompt, so run-to-run model drift is as large as the effect
+  (see the provider-drift entry in `reviewer-core/LEARNINGS.md`). Evidence:
+  `docs/plans/L03-intent-evaluation.md` (run 2), `reviewer-core/src/prompt.ts`
+  (`INTENT_SCOPE_POLICY`, rule 4).

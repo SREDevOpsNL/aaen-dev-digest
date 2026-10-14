@@ -1,0 +1,20 @@
+{
+  "name": "PR detail shows the cached PR intent card",
+  "description": "From PR #482, the Overview tab renders the L03 Intent card from the seeded, fresh pr_intent row: author claim, a supported point, scope, confidence, and the model it was derived with. The seeded intent's fingerprint matches the seeded PR, so it is not stale and opening the PR triggers no generation and no model call. Read-only seeded data. Assumes a freshly-seeded DB (see e2e/README.md).",
+  "steps": [
+    { "cmd": ["open", "{BASE}/"], "label": "load the app root" },
+    { "cmd": ["wait", "--url", "/pulls"], "label": "land on the PR list" },
+    { "cmd": ["wait", "--text", "Add rate limiting to public API endpoints"], "label": "seeded PR row is visible" },
+    { "cmd": ["find", "text", "Add rate limiting to public API endpoints", "click"], "label": "open the PR row" },
+    { "cmd": ["wait", "--url", "/pulls/482"], "label": "navigate to the PR detail route" },
+    { "cmd": ["wait", "--text", "Adds a token-bucket rate limiter to the public API endpoints"], "label": "the Intent card renders a supported point from the cached intent (wait --text matches rendered text, so assert content, not CSS-uppercased labels)" },
+    { "cmd": ["wait", "--text", "authenticated endpoints"], "label": "scope from the cached intent is shown" },
+    { "cmd": ["wait", "--text", "Medium confidence"], "label": "confidence is shown" },
+    { "cmd": ["wait", "--text", "Derived with seed"], "label": "the cached (seeded) derivation is shown, not a new one" },
+    {
+      "cmd": ["eval", "document.querySelector('[data-testid=\"intent-card\"]').innerText.includes('Stale')"],
+      "label": "the seeded intent is current, so no Stale badge",
+      "assert": { "stdoutIncludes": "false" }
+    }
+  ]
+}

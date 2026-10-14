@@ -59,14 +59,31 @@ export interface StructuredRequest<T> {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Per-request timeout (ms) for each provider HTTP request. A timed-out
+   * request is aborted, not abandoned. OpenRouter caps it at the provider's
+   * own configured timeout.
+   */
   timeoutMs?: number;
   maxRetries?: number;
+  /**
+   * Cancels the call: the in-flight provider request is aborted and no further
+   * attempt starts. Omit it to keep the default behaviour.
+   */
+  signal?: AbortSignal;
   /**
    * OpenRouter session id — groups related generations (e.g. all map-reduce
    * chunks of one review) into a session in the OpenRouter dashboard. Sent as
    * the `session_id` body field; ignored by providers that don't support it.
    */
   sessionId?: string;
+  /**
+   * Reasoning control for reasoning models (OpenRouter's `reasoning` field).
+   * Reasoning tokens count against `maxTokens`: without a limit a model can
+   * spend the whole budget reasoning and return no content. Providers that do
+   * not support it ignore it.
+   */
+  reasoning?: { effort?: 'low' | 'medium' | 'high'; max_tokens?: number };
 }
 
 export interface StructuredResult<T> {
