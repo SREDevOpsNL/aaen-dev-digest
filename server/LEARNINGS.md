@@ -100,6 +100,14 @@ correction. Repo-intel remains server-scoped;
   `server/test/run-lifecycle.it.test.ts` failed once (`expected undefined to
   be defined` on the trace), then passed in 5 of 5 runs after the fix.
 
+- **2026-10-14** — Extension of the 2026-10-14 `waitForPrRuns` entry: the
+  race is not limited to API-cancelled runs. A successful run's status also
+  commits (in its finalize transaction) before its trace is saved, so any test
+  that reads `/runs/:id/trace` right after `waitForPrRuns` can get a 404. Call
+  `waitForRunTrace(db, runId)` first. Evidence: `server/test/helpers/runs.ts`
+  (`waitForRunTrace`); `reviews.it.test.ts` "runs a review: map-reduce …"
+  failed in CI with `Cannot read properties of undefined (reading 'model')`.
+
 ## Session Notes
 
 ## Open Questions
