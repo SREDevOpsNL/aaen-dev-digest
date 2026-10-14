@@ -125,9 +125,22 @@ export class IntentRepository {
           status: sql`CASE WHEN ${t.prIntent.analysis} IS NOT NULL THEN ${t.prIntent.status} ELSE ${f.status} END`,
           lastError: f.error,
           lastAttemptAt: f.at,
-          totalCostComplete: sql`${t.prIntent.totalCostComplete} AND ${!f.mayHaveBilled}`,
         },
+        // An attempt that started before the stored derivation, or before a
+        // later recorded attempt, is older news: it must not overwrite them.
+        setWhere: and(
+          or(isNull(t.prIntent.startedAt), lte(t.prIntent.startedAt, f.at)),
+          or(isNull(t.prIntent.lastAttemptAt), lte(t.prIntent.lastAttemptAt, f.at)),
+        ),
       });
+    // A call that may have been billed leaves the cumulative cost incomplete,
+    // whatever its ordering.
+    if (f.mayHaveBilled) {
+      await this.db
+        .update(t.prIntent)
+        .set({ totalCostComplete: false })
+        .where(eq(t.prIntent.prId, prId));
+    }
   }
 
   private async addSpend(prId: string, tokensIn: number, tokensOut: number, cost: number | null) {

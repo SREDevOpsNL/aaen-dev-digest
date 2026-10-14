@@ -70,6 +70,10 @@ class IntentLLM extends MockLLMProvider {
   gate: ReturnType<typeof deferred> | null = null;
   failIntent = false;
   intentFixture: IntentAnalysisRaw = INTENT_RAW;
+  /** callGates[i] holds the (i+1)-th intent call until resolved (deterministic ordering). */
+  callGates: ReturnType<typeof deferred>[] = [];
+  /** Optional per-call fixture, so concurrent derivations are distinguishable. */
+  fixtureFor: ((call: number) => IntentAnalysisRaw) | null = null;
 
   constructor() {
     super('openai', { structuredBySchema: { Review: REVIEW } });
@@ -81,18 +85,30 @@ class IntentLLM extends MockLLMProvider {
       return { ...res, providerCostUsd: 0.01 };
     }
     this.intentCalls += 1;
-    if (this.gate) await this.gate.promise;
+    const call = this.intentCalls;
+    const gate = this.callGates[call - 1] ?? this.gate;
+    if (gate) await gate.promise;
     if (this.failIntent) throw new Error('classifier exploded');
+    const fixture = this.fixtureFor ? this.fixtureFor(call) : this.intentFixture;
     return {
-      data: this.intentFixture as unknown as T,
+      data: fixture as unknown as T,
       model: 'cheap-intent-model',
       tokensIn: 300,
       tokensOut: 80,
       providerCostUsd: 0.004,
       costUsd: 0.004,
-      raw: JSON.stringify(this.intentFixture),
+      raw: JSON.stringify(fixture),
       attempts: 1,
     };
+  }
+}
+
+/** A git client whose diff load waits on a gate, so a test can act before review pre-work. */
+class GatedGit extends MockGitClient {
+  gate = deferred();
+  override async diff(...args: Parameters<MockGitClient['diff']>) {
+    await this.gate.promise;
+    return super.diff(...args);
   }
 }
 
@@ -112,14 +128,14 @@ d('Intent Layer (Testcontainers pg)', () => {
     await pg?.stop();
   });
 
-  async function setup(opts: { body?: string; ws?: string; noKeys?: boolean } = {}) {
+  async function setup(opts: { body?: string; ws?: string; noKeys?: boolean; git?: MockGitClient } = {}) {
     const llm = new IntentLLM();
     const app = await buildApp({
       config: config(),
       db: pg.handle.db,
       overrides: {
         embedder: new MockEmbedder(),
-        git: new MockGitClient({ diff: DIFF }),
+        git: opts.git ?? new MockGitClient({ diff: DIFF }),
         github: new MockGitHubClient(),
         ...(opts.noKeys ? { llm: {}, secrets: new MockSecretsProvider({}) } : { llm: { openai: llm } }),
       },
@@ -272,8 +288,8 @@ d('Intent Layer (Testcontainers pg)', () => {
   });
 
   describe('review integration', () => {
-    async function reviewBatch(agentCount: number) {
-      const ctx = await setup();
+    async function reviewBatch(agentCount: number, opts: Parameters<typeof setup>[0] = {}) {
+      const ctx = await setup(opts);
       const agents = [];
       for (let i = 0; i < agentCount; i++) {
         const created = (
@@ -360,6 +376,98 @@ d('Intent Layer (Testcontainers pg)', () => {
       const listed = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json()
         .find((p: { id: string }) => p.id === pr.id);
       expect(listed.cost_usd).toBeCloseTo(0.01);
+      await app.close();
+    });
+
+    it('a Recompute for an updated PR never joins the older in-flight derivation, and the older result never overwrites it', async () => {
+      const { app, llm, pr } = await setup();
+      llm.callGates = [deferred(), deferred()];
+      llm.fixtureFor = (call) => ({ ...INTENT_RAW, claimed_purpose: call === 1 ? 'derived for head-1' : 'derived for head-2' });
+
+      const older = app.inject({ method: 'POST', url: intentUrl(pr.id) }); // head-1
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(1));
+      await pg.handle.db.update(t.pullRequests).set({ headSha: 'head-2' }).where(eq(t.pullRequests.id, pr.id));
+      const newer = app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` }); // head-2
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(2)); // its own call, not joined
+
+      llm.callGates[1]!.resolve(); // the newer derivation finishes first
+      expect((await newer).json()).toMatchObject({ head_sha: 'head-2', stale: false });
+      llm.callGates[0]!.resolve(); // the older one finishes last and is superseded
+      await older;
+
+      const view = (await app.inject({ method: 'GET', url: intentUrl(pr.id) })).json();
+      expect(view).toMatchObject({ head_sha: 'head-2', stale: false });
+      expect(view.analysis.claimed_purpose).toBe('derived for head-2');
+      const [row] = await pg.handle.db.select().from(t.prIntent).where(eq(t.prIntent.prId, pr.id));
+      expect(row!.totalTokensIn).toBe(600); // both calls are accounted for
+      await app.close();
+    });
+
+    it('a review batch never injects a derivation that was superseded', async () => {
+      const { app, llm, pr, run } = await reviewBatch(1);
+      llm.callGates = [deferred(), deferred()];
+      llm.fixtureFor = (call) => ({ ...INTENT_RAW, claimed_purpose: call === 1 ? 'batch derivation (head-1)' : 'recompute (head-2)' });
+
+      const batch = run(); // the batch snapshot is head-1; its derivation is call 1
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(1));
+      await pg.handle.db.update(t.pullRequests).set({ headSha: 'head-2' }).where(eq(t.pullRequests.id, pr.id));
+      const recompute = app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` });
+      await vi.waitFor(() => expect(llm.intentCalls).toBe(2));
+      llm.callGates[1]!.resolve();
+      await recompute; // head-2 wins the cache
+      llm.callGates[0]!.resolve(); // the batch's own derivation is now superseded
+
+      const { traces, runs } = await batch;
+      expect(traces[0]!.intent).toMatchObject({ source: 'none', status: 'superseded', analysis: null });
+      expect(traces[0]!.prompt_assembly.intent ?? null).toBeNull();
+      const [row] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, runs[0]!.run_id));
+      expect(row!.status).toBe('done'); // reviewed, just without intent
+      await app.close();
+    });
+
+    it('an older failed attempt never overwrites newer success metadata, but still marks cost incomplete', async () => {
+      const { pr } = await setup();
+      const repo = new IntentRepository(pg.handle.db);
+      await repo.saveSuccess({
+        prId: pr.id, derivationId: crypto.randomUUID(), startedAt: new Date('2026-10-14T12:00:02Z'),
+        analysis: { ...INTENT_RAW, unverified_statements: [] },
+        evidence: { files_listed: 1, files_excerpted: 1, truncated: false, invalid_citations: 0 },
+        headSha: 'head-1', contextHash: 'c', issueHash: 'i', promptVersion: 1, linkedIssue: null,
+        provider: 'openai', model: 'm', tokensIn: 10, tokensOut: 5, providerCostUsd: 0.001,
+      });
+      await repo.saveFailure(pr.id, { status: 'failed', error: 'stale failure', at: new Date('2026-10-14T12:00:01Z'), mayHaveBilled: true });
+      let row = (await repo.get(pr.id))!;
+      expect(row.lastError).toBeNull();
+      expect(row.lastAttemptAt!.toISOString()).toBe('2026-10-14T12:00:02.000Z');
+      expect(row.totalCostComplete).toBe(false);
+
+      await repo.saveFailure(pr.id, { status: 'failed', error: 'newer failure', at: new Date('2026-10-14T12:00:03Z'), mayHaveBilled: false });
+      row = (await repo.get(pr.id))!;
+      expect(row.lastError).toBe('newer failure');
+      expect(row.status).toBe('ready'); // the valid analysis is kept
+    });
+
+    it('cancelling every queued run before intent starts makes no classifier call', async () => {
+      const git = new GatedGit({ diff: DIFF });
+      const { app, llm, pr, agents } = await (async () => {
+        const ctx = await reviewBatch(2, { git });
+        const rows = await pg.handle.db.select().from(t.agents).where(eq(t.agents.workspaceId, workspaceId));
+        return { ...ctx, agents: rows.filter((a) => a.name.startsWith(`intent-agent-${seq - 1}-`)) };
+      })();
+      const { runs } = await new ReviewService(app.container).runReview(workspaceId, pr.id, agents);
+      for (const r of runs) await app.inject({ method: 'POST', url: `/runs/${r.run_id}/cancel` });
+      git.gate.resolve(); // pre-work resumes only after every run is cancelled
+
+      for (const r of runs) {
+        await vi.waitFor(async () => {
+          const [row] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, r.run_id));
+          expect(row).toBeDefined();
+          expect((row!.trace as RunTrace).intent).toMatchObject({ source: 'none', status: 'not_started' });
+        });
+        const [run] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, r.run_id));
+        expect(run!.status).toBe('cancelled');
+      }
+      expect(llm.intentCalls).toBe(0);
       await app.close();
     });
   });

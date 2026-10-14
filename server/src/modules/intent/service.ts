@@ -38,7 +38,9 @@ export type DerivationResult =
       ok: true;
       derivationId: string;
       analysis: IntentAnalysis;
+      /** The revision and context this result was derived for. */
       headSha: string;
+      contextHash: string;
       provider: string;
       model: string;
       tokensIn: number;
@@ -46,7 +48,7 @@ export type DerivationResult =
       providerCostUsd: number | null;
       derivedAt: Date;
     }
-  | { ok: false; status: 'failed' | 'skipped_no_key'; error: string };
+  | { ok: false; status: 'failed' | 'skipped_no_key' | 'superseded'; error: string };
 
 /** Minimal logger the review executor passes in (RunLogger-compatible). */
 export interface IntentLog {
@@ -61,6 +63,10 @@ export interface IntentLog {
  * process per database; the started_at guard in the repository covers the rest.)
  */
 const inflight = new WeakMap<Container, Map<string, Promise<DerivationResult>>>();
+// Deployment note: the API supports one process per database (see the product
+// boundary), so this in-process map plus the started_at ordering guard in the
+// repository is the coordination. Several API instances could each pay for a
+// derivation of the same revision; that topology is not supported.
 
 /**
  * PR intent (L03). Reading never calls a model. Generation happens on first
@@ -128,7 +134,30 @@ export class IntentService {
         log?.info(row?.analysis ? 'PR intent: cached intent is stale — refreshing' : 'PR intent: deriving');
       }
       const result = await this.derive(ctx, diff);
-      if (result.ok) return snapshotFromDerivation(result, INTENT_PROMPT_VERSION);
+      if (result.ok) {
+        // Inject only an intent derived for exactly this revision and context.
+        if (result.headSha === pull.headSha && result.contextHash === ctx.contextHash) {
+          return snapshotFromDerivation(result, INTENT_PROMPT_VERSION);
+        }
+        log?.warn('PR intent: derived for a different revision — reviewing without intent');
+        return noneSnapshot('superseded', 'derived intent does not match this revision');
+      }
+      if (result.status === 'superseded') {
+        // This batch's derivation lost to a newer one. Never inject the superseded
+        // result; use the cache only if the winner is for this same revision.
+        const latest = await this.intents.get(pull.id);
+        if (
+          latest?.analysis &&
+          latest.headSha === pull.headSha &&
+          latest.contextHash === ctx.contextHash &&
+          latest.promptVersion === INTENT_PROMPT_VERSION
+        ) {
+          log?.info('PR intent: a newer derivation for this revision is cached; using it');
+          return snapshotFromRow(latest);
+        }
+        log?.warn('PR intent: superseded by a derivation for another revision — reviewing without intent');
+        return noneSnapshot('superseded', result.error);
+      }
       log?.warn(`PR intent unavailable (${result.status}): ${result.error} — reviewing without intent`);
       return noneSnapshot(result.status, result.error);
     } catch (err) {
@@ -197,17 +226,22 @@ export class IntentService {
     return issueHash(issue) !== storedHash;
   }
 
-  /** Single-flight per PR: concurrent callers share one classifier call. */
+  /**
+   * Single flight per PR *revision*: callers asking for the same head SHA and
+   * context share one classifier call. A request for an updated PR has a
+   * different key, so it never joins work started for an older revision.
+   */
   private derive(ctx: PrContext, diff?: UnifiedDiff): Promise<DerivationResult> {
-    let byPr = inflight.get(this.container);
-    if (!byPr) {
-      byPr = new Map();
-      inflight.set(this.container, byPr);
+    let byKey = inflight.get(this.container);
+    if (!byKey) {
+      byKey = new Map();
+      inflight.set(this.container, byKey);
     }
-    const existing = byPr.get(ctx.pull.id);
+    const key = `${ctx.pull.id}:${ctx.pull.headSha}:${ctx.contextHash}`;
+    const existing = byKey.get(key);
     if (existing) return existing;
-    const run = this.runDerivation(ctx, diff).finally(() => byPr.delete(ctx.pull.id));
-    byPr.set(ctx.pull.id, run);
+    const run = this.runDerivation(ctx, diff).finally(() => byKey.delete(key));
+    byKey.set(key, run);
     return run;
   }
 
@@ -250,7 +284,7 @@ export class IntentService {
         INTENT_TIMEOUT_MS + INTENT_TIMEOUT_MARGIN_MS,
       );
       const derivationId = randomUUID();
-      await this.intents.saveSuccess({
+      const stored = await this.intents.saveSuccess({
         prId: ctx.pull.id,
         derivationId,
         startedAt,
@@ -267,11 +301,17 @@ export class IntentService {
         tokensOut: out.tokensOut,
         providerCostUsd: out.providerCostUsd,
       });
+      // A derivation that started later already won the cache: this result is
+      // superseded and must not be used (its spend is still recorded).
+      if (!stored) {
+        return { ok: false, status: 'superseded', error: 'superseded by a newer derivation for this PR' };
+      }
       return {
         ok: true,
         derivationId,
         analysis: out.analysis,
         headSha: ctx.pull.headSha,
+        contextHash: ctx.contextHash,
         provider: choice.provider,
         model: out.model,
         tokensIn: out.tokensIn,

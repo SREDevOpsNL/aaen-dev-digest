@@ -116,10 +116,17 @@ export class ReviewRunExecutor {
     // L03 — one PR intent per batch, shared by every agent: a fresh cached
     // intent is reused, a missing or stale one is refreshed once, and if that
     // fails the batch reviews without intent. Never throws.
-    const intent = await this.intents.forReviewBatch(workspaceId, pull, repo, diff, {
-      info: (msg) => runLog.info(msg),
-      warn: (msg) => runLog.info(msg),
-    });
+    // If every run was cancelled before this point, skip the classifier: no
+    // billable call for a batch nobody will review. Each run still ends as
+    // cancelled through its own checkpoint below.
+    const anyActive = await this.anyRunActive(jobs.map((j) => j.runId));
+    const intent = anyActive
+      ? await this.intents.forReviewBatch(workspaceId, pull, repo, diff, {
+          info: (msg) => runLog.info(msg),
+          warn: (msg) => runLog.info(msg),
+        })
+      : noneSnapshot('not_started', 'all runs were cancelled before intent derivation');
+    if (!anyActive) runLog.info('All runs were cancelled before PR intent — skipping it');
 
     for (const { agent, runId } of jobs) {
       const agentStart = Date.now();
@@ -354,6 +361,14 @@ export class ReviewRunExecutor {
       this.container.runBus.complete(runId);
       throw err;
     }
+  }
+
+  /** Whether at least one run of the batch is not cancelled (same signal as the checkpoint). */
+  private async anyRunActive(runIds: string[]): Promise<boolean> {
+    for (const runId of runIds) {
+      if (!this.container.runBus.isCancelled(runId) && !(await this.repo.isRunCancelled(runId))) return true;
+    }
+    return false;
   }
 
   /**

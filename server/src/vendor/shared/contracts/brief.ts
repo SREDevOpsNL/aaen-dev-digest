@@ -118,7 +118,8 @@ export type PrIntentView = z.infer<typeof PrIntentView>;
 export const IntentRunSnapshot = z.object({
   /** `cache` = reused, `derived` = generated for this batch, `none` = reviewed without intent. */
   source: z.enum(['cache', 'derived', 'none']),
-  status: z.enum(['used', 'skipped_no_key', 'failed', 'not_started']),
+  /** `superseded`: a newer derivation won the cache, so this run used no intent rather than a stale one. */
+  status: z.enum(['used', 'skipped_no_key', 'failed', 'not_started', 'superseded']),
   derivation_id: z.string().nullable(),
   head_sha: z.string().nullable(),
   prompt_version: z.number().int().nullable(),
