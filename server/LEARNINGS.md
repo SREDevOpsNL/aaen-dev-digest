@@ -108,6 +108,36 @@ correction. Repo-intel remains server-scoped;
   (`waitForRunTrace`); `reviews.it.test.ts` "runs a review: map-reduce …"
   failed in CI with `Cannot read properties of undefined (reading 'model')`.
 
+- **2026-10-14** — The git adapter finds a clone at
+  `<cloneDir>/<owner>/<name>`, computed at runtime. It never reads the stored
+  `repos.clone_path`, which is only a presence check. A relative
+  `DEVDIGEST_CLONE_DIR` (the `.env.example` value is `./clones`) resolves
+  against the API process's working directory, so clones belong to the
+  worktree they were imported from. **Reproduction:** several worktrees share
+  one dev database; a repo is imported while the API runs from worktree A;
+  the API is later started from worktree B. B then looks under its own
+  `server/clones/`, finds nothing, and:
+  - Conventions extraction fails with `422 Nothing to sample — clone and index
+    the repository before running the scan`, although `/index-state` reports
+    `full`.
+  - Review and intent diffs silently fall back to the stored `pr_files`
+    patches (`loadDiff`).
+
+  **Fix:** set `DEVDIGEST_CLONE_DIR` to the same absolute path in every
+  worktree's `server/.env`, outside all worktrees — for example
+  `DEVDIGEST_CLONE_DIR=/home/<user>/.devdigest/workspace`, which is also the
+  default when the variable is unset. Repos cloned under a relative directory
+  must then be cloned again there. Evidence:
+  `server/src/platform/config.ts:66-68` (`cloneDir` resolved against
+  `process.cwd()`), `server/src/adapters/git/simple-git.ts:37-38`
+  (`clonePathFor`), `server/src/adapters/git/simple-git.ts:129-130`
+  (`readFile`), `server/src/modules/repo-intel/service.ts:146`
+  (`clonePath` as presence check), `server/src/modules/conventions/service.ts:63-66`,
+  `server/src/modules/reviews/diff-loader.ts:19-29`. Observed on the dev
+  database: the API from `main` returned the 422 for a repo cloned from the
+  `l01-feature` worktree, and extracted 9 candidates once
+  `DEVDIGEST_CLONE_DIR` pointed to that worktree's `server/clones`.
+
 ## Session Notes
 
 ## Open Questions
