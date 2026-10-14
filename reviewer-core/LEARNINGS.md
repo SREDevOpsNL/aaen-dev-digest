@@ -34,6 +34,18 @@ correction. Genuinely cross-package findings belong in
   `reviewer-core/src/review/run.ts:104-105` (`ReviewOutcome.assembly`),
   `reviewer-core/src/review/run.ts:142` (`reviewPullRequest`)
 
+- **2026-10-14** — An OpenRouter model ID does not pin the upstream provider,
+  so the same model and a byte-identical prompt can change behaviour between
+  evaluation runs. For `deepseek/deepseek-v4-flash` on one day, one identical
+  review prompt was counted as 1,702 input tokens in some calls and 2,927 in
+  others; between two runs the mean findings dropped from about 5 to 2.7, the
+  cost per token fell, and one review came back in Chinese. When comparing
+  prompt variants, record the response's top-level `provider` field (the engine
+  does not capture it) and pin the provider, or treat run-to-run differences as
+  noise. Evidence: `docs/plans/L03-intent-evaluation.md` (run 2,
+  "Run-to-run drift"), `reviewer-core/src/llm/openrouter.ts`
+  (`OpenRouterProvider.completeStructured`).
+
 ## Decisions
 
 ## Recurring Errors & Fixes

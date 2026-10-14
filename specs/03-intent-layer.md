@@ -30,9 +30,17 @@ from an intended one.
   Recompute; it never recomputes on its own.
 - `POST /pulls/:id/intent/recompute` always derives. If it fails, the previous
   valid intent stays, with the error shown alongside.
-- Concurrent requests for the same PR share one classifier call. A result is
-  written only if its derivation started no earlier than the stored one, so an
-  older result never overwrites a newer one.
+- Concurrent requests share one classifier call only when they are for the same
+  PR revision: the same PR, head SHA and context fingerprint. A request after
+  the PR changes starts its own derivation instead of joining the older one.
+- A result is written only if its derivation started no earlier than the stored
+  one, so an older result never overwrites a newer one. A superseded result is
+  reported as `superseded`, and its cost is still added to the PR's total. An
+  older failure never overwrites the error or attempt time of a newer attempt.
+- Single flight and the ordering guard are in-process: they assume one API
+  process per database, as the rest of the server does. Running several
+  instances against one database would need cross-instance coordination, such
+  as a lease, which is not built.
 
 **Classifier input (bounded, untrusted)**
 
@@ -55,7 +63,12 @@ from an intended one.
 **Review integration**
 
 - A review batch reuses fresh intent, refreshes stale intent once, or reviews
-  without intent if that fails. It never uses stale intent.
+  without intent if that fails. It never uses stale intent, and it uses a
+  derived result only if it matches the batch's own head SHA and context
+  fingerprint; when its derivation was superseded, it reviews without intent
+  (`status: superseded`) unless the stored intent matches that revision.
+- If every run in the batch is cancelled before intent work begins, no
+  classifier call is made.
 - Reviewers receive the intent as an untrusted section; a trusted scope policy
   is added to the system message only when intent is present. Without intent the
   prompt is byte-identical to before.
@@ -81,7 +94,11 @@ history), and automatic recomputation in the UI.
   filtering.
 - server: linked-issue identification and fingerprints (unit); cache, single
   flight, staleness, failed Recompute, no-key, authorization, ordering, review
-  reuse/refresh/failure, trace immutability and cost separation (Postgres).
+  reuse/refresh/failure, trace immutability and cost separation (Postgres);
+  deterministic gated tests for a PR update during an in-flight derivation, a
+  superseded derivation never reaching a review, an older failure not
+  overwriting newer metadata, and no classifier call when every run is
+  cancelled first.
 - client: every Intent card state.
 - e2e: `10-pr-intent.flow.json` renders the seeded, fresh intent with no model
   call.

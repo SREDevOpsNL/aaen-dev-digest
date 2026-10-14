@@ -70,3 +70,14 @@ says which file a finding goes in.
   `docs/plans/L03-intent-evaluation.md` (n = 3 per variant,
   `deepseek/deepseek-v4-flash`), `reviewer-core/src/prompt.ts`
   (`INTENT_SCOPE_POLICY`).
+
+- **2026-10-14** — Follow-up to the L03 entry above: after the scope policy
+  stopped saying "one finding per root cause" and named a hardcoded secret plus
+  its exfiltration as two findings, *misleading / with intent* kept the
+  standalone hardcoded-secret finding in 2 of 3 runs (was 1 of 3), the same as
+  *misleading / without* in the same run. That is not evidence the regression
+  is fixed: the without-intent baseline itself fell from 3 of 3 to 2 of 3 on a
+  byte-identical prompt, so run-to-run model drift is as large as the effect
+  (see the provider-drift entry in `reviewer-core/LEARNINGS.md`). Evidence:
+  `docs/plans/L03-intent-evaluation.md` (run 2), `reviewer-core/src/prompt.ts`
+  (`INTENT_SCOPE_POLICY`, rule 4).
