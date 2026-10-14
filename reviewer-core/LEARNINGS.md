@@ -38,6 +38,17 @@ correction. Genuinely cross-package findings belong in
 
 ## Recurring Errors & Fixes
 
+- **2026-10-14** — A reasoning model can return empty structured output because
+  its reasoning tokens consume the whole `max_tokens` budget. With
+  `deepseek/deepseek-v4-flash` on OpenRouter, the intent classifier stopped with
+  `finish_reason=length` and empty or truncated JSON in 3 of 4 calls at 1,500
+  tokens and 3 of 3 calls at 4,000 (all 4,000 were reasoning tokens). Raising
+  the budget does not help; pass `reasoning: { effort: 'low' }` (or a reasoning
+  `max_tokens`), and check `finish_reason` when a structured call fails
+  validation. Evidence: `reviewer-core/src/intent/derive.ts`
+  (`DEFAULT_INTENT_REASONING`), `reviewer-core/src/llm/openrouter.ts`
+  (`OpenRouterProvider.completeStructured`).
+
 ## Session Notes
 
 ## Open Questions
