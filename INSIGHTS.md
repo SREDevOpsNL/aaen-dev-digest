@@ -58,3 +58,15 @@ says which file a finding goes in.
   event must include both an exit code of zero and the expected injected
   context. Evidence: `.claude/settings.json:9` (`args`),
   `.claude/hooks/engineering-insights-reminder.mjs:13` (`hook_event_name`).
+
+- **2026-10-14** — L03 Intent Layer: a misleading PR description plus derived
+  intent made the reviewer drop the standalone hardcoded-key CRITICAL in 2 of 3
+  runs (it survived only inside the "key sent to the callback" finding), while
+  without intent it was a separate CRITICAL in 3 of 3; with the honest
+  description it was flagged in 6 of 6. Intent otherwise cut unmatched
+  findings from 1.33 to 0.67 per run at about 0.5–1× the cost of one review per
+  derivation. Treat the scope policy's "one finding per root cause" rule as the
+  first suspect and re-evaluate before enabling intent by default. Evidence:
+  `docs/plans/L03-intent-evaluation.md` (n = 3 per variant,
+  `deepseek/deepseek-v4-flash`), `reviewer-core/src/prompt.ts`
+  (`INTENT_SCOPE_POLICY`).
