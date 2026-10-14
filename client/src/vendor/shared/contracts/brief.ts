@@ -13,6 +13,127 @@ export const Intent = z.object({
 });
 export type Intent = z.infer<typeof Intent>;
 
+// ---- Intent Layer (L03) ----
+// The classifier answers "why was this PR opened?" from bounded evidence. Its
+// raw output is validated before anyone sees it: every cited line must be one
+// the model was actually shown. Citations prove presence, not correctness.
+
+/** A cited range in the sampled diff excerpts (`new` = head side, `old` = base side). */
+export const IntentEvidenceRef = z.object({
+  file: z.string(),
+  side: z.enum(['new', 'old']),
+  start_line: z.number().int(),
+  end_line: z.number().int(),
+});
+export type IntentEvidenceRef = z.infer<typeof IntentEvidenceRef>;
+
+export const IntentConfidence = z.enum(['low', 'medium', 'high']);
+export type IntentConfidence = z.infer<typeof IntentConfidence>;
+
+export const IntentPoint = z.object({
+  statement: z.string(),
+  evidence: z.array(IntentEvidenceRef),
+});
+export type IntentPoint = z.infer<typeof IntentPoint>;
+
+export const IntentDiscrepancy = z.object({
+  kind: z.enum(['unsupported_claim', 'undeclared_change']),
+  statement: z.string(),
+  evidence: z.array(IntentEvidenceRef),
+});
+export type IntentDiscrepancy = z.infer<typeof IntentDiscrepancy>;
+
+/** What the classifier model returns (structured output). */
+export const IntentAnalysisRaw = z.object({
+  /** What the author claims (title, description, linked issue); empty when nothing is claimed. */
+  claimed_purpose: z.string(),
+  /** What the evidence supports, each point with citations into the sampled excerpts. */
+  supported_points: z.array(IntentPoint),
+  discrepancies: z.array(IntentDiscrepancy),
+  in_scope: z.array(z.string()),
+  out_of_scope: z.array(z.string()),
+  confidence: IntentConfidence,
+});
+export type IntentAnalysisRaw = z.infer<typeof IntentAnalysisRaw>;
+
+export const UnverifiedStatement = z.object({
+  statement: z.string(),
+  origin: z.enum(['supported_point', 'discrepancy']),
+  reason: z.enum(['no_citation', 'file_not_sampled', 'lines_not_sampled', 'invalid_range']),
+});
+export type UnverifiedStatement = z.infer<typeof UnverifiedStatement>;
+
+/** Validated analysis — what reviewers, traces and the UI receive. Never filled by the model. */
+export const IntentAnalysis = IntentAnalysisRaw.extend({
+  unverified_statements: z.array(UnverifiedStatement),
+});
+export type IntentAnalysis = z.infer<typeof IntentAnalysis>;
+
+/** Size of the evidence the classifier saw, for display and the trace. */
+export const IntentEvidenceStats = z.object({
+  files_listed: z.number().int(),
+  files_excerpted: z.number().int(),
+  truncated: z.boolean(),
+  invalid_citations: z.number().int(),
+});
+export type IntentEvidenceStats = z.infer<typeof IntentEvidenceStats>;
+
+export const IntentStaleReason = z.enum(['head_changed', 'context_changed', 'prompt_changed', 'legacy']);
+export type IntentStaleReason = z.infer<typeof IntentStaleReason>;
+
+/**
+ * `GET /pulls/:id/intent` — the PR-level cached intent. `missing` means nothing
+ * has been generated yet; `failed` / `skipped_no_key` only appear when no valid
+ * analysis exists (a failed recompute keeps the previous analysis and reports
+ * `last_error` instead).
+ */
+export const PrIntentView = z.object({
+  pr_id: z.string(),
+  state: z.enum(['missing', 'ready', 'failed', 'skipped_no_key']),
+  stale: z.boolean(),
+  stale_reasons: z.array(IntentStaleReason),
+  analysis: IntentAnalysis.nullable(),
+  head_sha: z.string().nullable(),
+  current_head_sha: z.string(),
+  linked_issue: z.object({ number: z.number().int(), title: z.string() }).nullable(),
+  evidence: IntentEvidenceStats.nullable(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  derived_at: z.string().nullable(),
+  tokens_in: z.number().int().nullable(),
+  tokens_out: z.number().int().nullable(),
+  /** Provider-reported cost of the derivation shown; null when unknown, 0 when reported as zero. */
+  provider_cost_usd: z.number().nonnegative().nullable(),
+  last_error: z.string().nullable(),
+  last_attempt_at: z.string().nullable(),
+});
+export type PrIntentView = z.infer<typeof PrIntentView>;
+
+/**
+ * The exact intent a review run used, copied into its immutable trace. A later
+ * Recompute changes the PR cache, never this snapshot. Classifier cost here is
+ * shared pre-work for the batch (`attribution: 'shared'`): it is not part of
+ * the run's own cost, and aggregators must dedupe by `derivation_id`.
+ */
+export const IntentRunSnapshot = z.object({
+  /** `cache` = reused, `derived` = generated for this batch, `none` = reviewed without intent. */
+  source: z.enum(['cache', 'derived', 'none']),
+  status: z.enum(['used', 'skipped_no_key', 'failed', 'not_started']),
+  derivation_id: z.string().nullable(),
+  head_sha: z.string().nullable(),
+  prompt_version: z.number().int().nullable(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  derived_at: z.string().nullable(),
+  analysis: IntentAnalysis.nullable(),
+  tokens_in: z.number().int().nullable(),
+  tokens_out: z.number().int().nullable(),
+  provider_cost_usd: z.number().nonnegative().nullable(),
+  error: z.string().nullable(),
+  attribution: z.literal('shared'),
+});
+export type IntentRunSnapshot = z.infer<typeof IntentRunSnapshot>;
+
 // ---- Blast radius ----
 export const ChangedSymbol = z.object({
   name: z.string(),

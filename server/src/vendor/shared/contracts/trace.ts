@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IntentRunSnapshot } from './brief.js';
 
 /**
  * Run trace. The ENTIRE trace of one run is persisted as a SINGLE
@@ -48,6 +49,8 @@ export const PromptAssembly = z.object({
   repo_map: z.string().nullish(),
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
+  /** The derived-intent block (wrapped as untrusted) the model saw; null when reviewed without intent. */
+  intent: z.string().nullish(),
   user: z.string(),
 });
 export type PromptAssembly = z.infer<typeof PromptAssembly>;
@@ -86,6 +89,8 @@ export const RunTrace = z.object({
   memory_pulled: z.array(MemoryPulled),
   specs_read: z.array(z.string()),
   log: z.array(RunLogLine),
+  /** Immutable copy of the intent this run used (L03); absent in historical traces. */
+  intent: IntentRunSnapshot.nullish(),
 });
 export type RunTrace = z.infer<typeof RunTrace>;
 

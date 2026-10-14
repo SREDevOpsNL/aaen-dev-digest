@@ -61,6 +61,13 @@ export interface StructuredRequest<T> {
   maxTokens?: number;
   timeoutMs?: number;
   maxRetries?: number;
+  /**
+   * Reasoning control for reasoning models (OpenRouter's `reasoning` field).
+   * Reasoning tokens count against `maxTokens`: without a limit a model can
+   * spend the whole budget reasoning and return no content. Providers that do
+   * not support it ignore it.
+   */
+  reasoning?: { effort?: 'low' | 'medium' | 'high'; max_tokens?: number };
 }
 
 export interface StructuredResult<T> {
