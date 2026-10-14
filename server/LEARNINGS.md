@@ -124,10 +124,16 @@ correction. Repo-intel remains server-scoped;
     patches (`loadDiff`).
 
   **Fix:** set `DEVDIGEST_CLONE_DIR` to the same absolute path in every
-  worktree's `server/.env`, outside all worktrees — for example
-  `DEVDIGEST_CLONE_DIR=/home/<user>/.devdigest/workspace`, which is also the
-  default when the variable is unset. Repos cloned under a relative directory
-  must then be cloned again there. Evidence:
+  worktree's `server/.env`. Recloning is not automatically required:
+  - **Reuse existing clones:** point it at the directory that already holds
+    `<owner>/<name>` (here the absolute path of the importing worktree's
+    `server/clones`). That is how the smoke test below recovered. Such a root
+    disappears if that worktree is removed.
+  - **Root independent of any worktree**, for example
+    `/home/<user>/.devdigest/workspace` (the default when the variable is
+    unset): repos must then be cloned or moved there.
+
+  Evidence:
   `server/src/platform/config.ts:66-68` (`cloneDir` resolved against
   `process.cwd()`), `server/src/adapters/git/simple-git.ts:37-38`
   (`clonePathFor`), `server/src/adapters/git/simple-git.ts:129-130`
