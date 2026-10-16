@@ -137,6 +137,19 @@ test("a change to this workflow also lists its own router tests", () => {
   }
 });
 
+test("a change to the instruction checker itself re-runs the checker", () => {
+  const repo = fixtureRepo();
+  try {
+    write(repo.dir, "scripts/verify-agent-instructions.mjs", "// changed\n");
+    const report = buildReport({ cwd: repo.dir, base: "main" });
+    assert.deepEqual(report.checks, [
+      { package: "agent-instructions", cwd: ".", commands: ["node scripts/verify-agent-instructions.mjs"] },
+    ]);
+  } finally {
+    repo.cleanup();
+  }
+});
+
 test("an unknown base fails clearly", () => {
   const repo = fixtureRepo();
   try {

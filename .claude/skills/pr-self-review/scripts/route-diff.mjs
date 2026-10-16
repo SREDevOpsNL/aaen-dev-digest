@@ -56,6 +56,8 @@ export const ROUTES = [
 const IGNORED = [/(^|\/)clones\//, /(^|\/)node_modules\//];
 
 const INSTRUCTION_FILE = /(^|\/)(AGENTS|CLAUDE)\.md$/;
+/** The instruction checker and its workflow: changing either must re-run the checker. */
+const INSTRUCTION_TOOLING = ["scripts/verify-agent-instructions.mjs", ".github/workflows/agent-instructions.yml"];
 
 /** Deterministic checks per touched package, from the AGENTS.md validation routing. */
 export function checksFor(files) {
@@ -73,7 +75,7 @@ export function checksFor(files) {
   }
   if (touched("reviewer-core/")) checks.push({ package: "reviewer-core", cwd: "reviewer-core", commands: ["npm run typecheck", "npm test"] });
   if (touched("e2e/")) checks.push({ package: "e2e", cwd: "e2e", commands: ["npm run typecheck", "npm run e2e:hermetic"] });
-  if (files.some((f) => INSTRUCTION_FILE.test(f.path) || f.path.startsWith(".claude/"))) {
+  if (files.some((f) => INSTRUCTION_FILE.test(f.path) || f.path.startsWith(".claude/") || INSTRUCTION_TOOLING.includes(f.path))) {
     const commands = ["node scripts/verify-agent-instructions.mjs"];
     if (files.some((f) => f.path.startsWith(".claude/skills/pr-self-review/"))) {
       commands.push("node --test .claude/skills/pr-self-review/scripts/route-diff.test.mjs");
