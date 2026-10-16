@@ -155,6 +155,9 @@ Postgres); everything else is hermetic. The browser e2e flows live in
   applied. The server does **not** migrate on boot: run `cd server && pnpm db:migrate`.
 - **Port 5432 already in use** — another Postgres is running. Stop it, or change the
   host port in `docker-compose.yml`.
+- **Can't reach Postgres from another machine or the WSL IP** — by design: it is
+  published on `127.0.0.1` only. In WSL2, Windows tools still reach it at
+  `localhost:5432` through WSL's localhost forwarding.
 - **`vector` type errors** — the pgvector extension is enabled by migration `0000`;
   make sure migrations ran against the Dockerized DB, not a different one.
 - **Reset everything** — `docker compose down -v` drops the volume, then re-run
