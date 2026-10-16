@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Button, FormField, Modal, SelectInput, TextInput } from "@devdigest/ui";
+import { Button, FormField, Modal, SelectInput, TextInput, Textarea } from "@devdigest/ui";
 import type { SkillType } from "@devdigest/shared";
 import { useCreateSkill } from "@/lib/hooks/skills";
 import { SKILL_TYPES } from "../../../constants";
@@ -13,6 +13,9 @@ export function CreateSkillModal({ onClose, onCreated }: { onClose: () => void; 
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [type, setType] = React.useState<SkillType>("custom");
+  // The body starts as a starter template that follows the name until the user edits it.
+  const [editedBody, setEditedBody] = React.useState<string | null>(null);
+  const body = editedBody ?? t("create.starterBody", { name: name.trim() || "my-skill" });
 
   const submit = async () => {
     const skill = await create.mutateAsync({
@@ -20,7 +23,7 @@ export function CreateSkillModal({ onClose, onCreated }: { onClose: () => void; 
       description: description.trim(),
       type,
       source: "manual",
-      body: t("create.starterBody", { name: name.trim() }),
+      body: body.trim(),
       enabled: true,
     });
     onCreated(skill.id);
@@ -28,13 +31,13 @@ export function CreateSkillModal({ onClose, onCreated }: { onClose: () => void; 
 
   return (
     <Modal
-      width={520}
+      width={640}
       title={t("create.title")}
       subtitle={t("create.subtitle")}
       onClose={onClose}
       footer={
         <div style={{ display: "flex", gap: 8 }}>
-          <Button kind="primary" onClick={() => void submit()} disabled={!name.trim() || create.isPending}>
+          <Button kind="primary" onClick={() => void submit()} disabled={!name.trim() || !body.trim() || create.isPending}>
             {create.isPending ? t("actions.creating") : t("create.create")}
           </Button>
           <Button kind="ghost" onClick={onClose}>{t("actions.cancel")}</Button>
@@ -54,6 +57,9 @@ export function CreateSkillModal({ onClose, onCreated }: { onClose: () => void; 
             onChange={(value) => setType(value as SkillType)}
             options={SKILL_TYPES.map((value) => ({ value, label: t(`listItem.type.${value}`) }))}
           />
+        </FormField>
+        <FormField label={t("fields.body")} required hint={t("create.bodyHint")}>
+          <Textarea value={body} onChange={setEditedBody} rows={10} mono />
         </FormField>
         {create.isError && <div role="alert" style={{ color: "var(--crit)", fontSize: 13 }}>{t("create.createFailed")}</div>}
       </div>
