@@ -21,6 +21,7 @@ For Cursor compatibility, create a `.cursor/skills/ → ../.claude/skills` symli
 | [security](security/SKILL.md) | Full-stack | OWASP Top 10:2025, auth, injection, uploads, secrets |
 | [mermaid-diagram](mermaid-diagram/SKILL.md) | Shared | Mermaid diagrams in markdown (flowcharts, sequence, ERD, …) |
 | [engineering-insights](engineering-insights/SKILL.md) | Workflow | Capture non-obvious findings as they emerge and at task wrap-up |
+| [pr-self-review](pr-self-review/SKILL.md) | Workflow | Manual pre-PR review: routes the local diff to the governing skills, runs package checks, reports PASS/WARN/BLOCKED |
 
 ## What Are Skills?
 

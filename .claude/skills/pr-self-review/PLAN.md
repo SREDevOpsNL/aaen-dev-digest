@@ -1,6 +1,6 @@
 # PR Self Review - implementation plan
 
-Status: **planned only** - no `SKILL.md`, hook, command, workflow, or merge rule is created by this document.
+Status: **manual workflow implemented** (2026-10-16) — [SKILL.md](SKILL.md) plus the deterministic router `scripts/route-diff.mjs` cover the manual mode: §3 baseline and change collection, §4 routing, §5 checks (listed, then run by the agent), §7 severity and §8 human report. Not built, by decision: the pre-PR hook, CI required check, machine-readable report schema, suppressions and caching (§2 pre-PR/CI modes, §9-§11, delivery phases 4-6). The skill is invoked manually only.
 
 ## 1. Outcome
 

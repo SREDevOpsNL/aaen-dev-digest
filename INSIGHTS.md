@@ -81,3 +81,11 @@ says which file a finding goes in.
   (see the provider-drift entry in `reviewer-core/LEARNINGS.md`). Evidence:
   `docs/plans/L03-intent-evaluation.md` (run 2), `reviewer-core/src/prompt.ts`
   (`INTENT_SCOPE_POLICY`, rule 4).
+
+- **2026-10-16** — Homework 2: the approved plan used one-line `@AGENTS.md`
+  imports for the required `CLAUDE.md` files, and a sentinel probe below a
+  package root showed that this would have stopped Claude Code loading project
+  instructions in nested sessions (none at all from `client/src/app`). The
+  repository uses symlinks instead, after approval. A probe started only at the
+  root or a package root would have passed the broken setup. Details and
+  evidence: the 2026-10-16 correction in `LEARNINGS.md`.
