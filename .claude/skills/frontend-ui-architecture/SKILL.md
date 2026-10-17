@@ -2,7 +2,7 @@
 name: frontend-ui-architecture
 description: Decide React and Next.js UI architecture and code placement. Use when locating or splitting components, hooks, constants, utilities, feature logic, and App Router files, or when reviewing frontend boundaries. Focuses on architecture and organization, not rendering performance.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Frontend UI Architecture
@@ -28,6 +28,25 @@ Keep pages and visual components easy to read by placing each responsibility at 
 - Name helpers by domain intent. Use `utils` only for genuinely generic, side-effect-free operations.
 - Prefer explicit props and composition. Use context for stable cross-cutting data consumed across a subtree, after considering props and children.
 - Avoid barrels that obscure ownership, create cycles, or turn private feature internals into public APIs.
+
+## Where things live in `client/src`
+
+| What | Location |
+| --- | --- |
+| App Router page | `app/<segment>/page.tsx` (dynamic segments `[id]`, `[repoId]`); thin, composes feature components |
+| Page-owned components | `app/<segment>/_components/<Name>/<Name>.tsx`, with nested `_components/` for their private children |
+| Page-owned helpers and constants | `app/<segment>/helpers.ts`, `constants.ts`, `styles.ts` beside the page |
+| Shared components (used by more than one route) | `components/<area>/`, e.g. `components/app-shell/`, `components/diff-viewer/<Name>/` |
+| Data hooks and API access | `lib/hooks/<domain>.ts` over `lib/api.ts`; components never call `fetch` directly |
+| Vendored UI primitives | `vendor/ui` (`@devdigest/ui`): consume, do not modify |
+| Tests | beside the code they cover: `<Name>.test.tsx` next to the component, `<file>.test.ts` next to a helper |
+
+## Naming conventions
+
+- React components and their folders: PascalCase (`AgentCard/AgentCard.tsx`), one component per folder with an `index.ts` when the folder has a public entry.
+- Hooks: camelCase starting with `use` (`useSkills`); functions and variables: camelCase; module-level constants: UPPER_SNAKE_CASE (`MAX_AGENT_SKILLS`).
+- Route segments and shared area folders: kebab-case (`app/repos/[repoId]/pulls`, `components/app-shell`); private route folders start with `_` (`_components`).
+- Tests: `*.test.ts(x)` beside the subject; user-facing strings come from `next-intl` messages, not literals in JSX.
 
 ## Project routing
 

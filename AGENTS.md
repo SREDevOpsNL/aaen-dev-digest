@@ -11,10 +11,12 @@ capability is operational.
 agent. This file holds the shared engineering contract; each package's own
 `AGENTS.md` adds module-local context. Keep tool-specific configuration in that
 tool's directory — `.claude/` for Claude Code skills, hooks, and settings,
-`.codex/` for Codex configuration. Do not add `CLAUDE.md`, `CLAUDE.local.md`,
-or `.claude/CLAUDE.md` to the repository: an agent that prefers those names
+`.codex/` for Codex configuration. Next to each of the five `AGENTS.md` files
+there is a `CLAUDE.md` for Claude Code, which is a symlink to that `AGENTS.md`:
+edit `AGENTS.md`, never replace the symlink with a file of its own. Do not add
+`CLAUDE.local.md` or `.claude/CLAUDE.md`: an agent that prefers those names
 would stop reading these instructions. `node scripts/verify-agent-instructions.mjs`
-enforces this, and CI runs it.
+enforces both rules, and CI runs it.
 
 ## Before answering
 

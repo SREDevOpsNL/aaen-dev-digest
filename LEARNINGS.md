@@ -135,6 +135,22 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   (`requestOptions`), `server/test/llm-abort.test.ts`,
   `docs/plans/L03-intent-evaluation.md` (run 2, the 445 s derivation).
 
+- **2026-10-16** — Correction to the 2026-10-02 `CLAUDE.md` symlink entry: the
+  Homework 2 rubric requires a `CLAUDE.md` next to each `AGENTS.md`, so the five
+  are back as symlinks, and they work when the stored target is exactly
+  `AGENTS.md`. The rubric's other allowed form, a one-line `@AGENTS.md` import,
+  fails: Claude Code 2.1.278 expands an `@` import only in the starting
+  directory's `CLAUDE.md`, not in an ancestor's, and once any `CLAUDE.md` exists
+  it no longer reads `AGENTS.md` directly. With imports, a session started in
+  `client/` lost the root `AGENTS.md`, and one started in `client/src/app` got
+  no project instructions at all. With symlinks, sessions started at the root,
+  `client/`, `client/src/app` and `server/src/modules` each received the root
+  and package sentinels exactly once; without any `CLAUDE.md` the same nested
+  probe also passes. Probe below a package root, not only at it. Evidence:
+  headless `claude -p --tools ""` sentinel runs (0 tool calls), sentinels
+  removed afterwards; `scripts/verify-agent-instructions.mjs` (requires Git
+  mode 120000 and the exact stored target).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source
