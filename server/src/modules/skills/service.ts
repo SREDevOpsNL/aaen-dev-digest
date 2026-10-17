@@ -1,5 +1,6 @@
 import type { Skill, SkillSource, SkillSummary, SkillType, SkillVersion } from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
+import { SkillLimitError, ValidationError } from '../../platform/errors.js';
 import { toSkillDto, toSkillVersionDto } from './helpers.js';
 import { SkillsRepository } from './repository.js';
 
@@ -11,6 +12,8 @@ export interface CreateSkillInput {
   body: string;
   enabled?: boolean;
   evidence_files?: string[];
+  /** Link the new skill to this agent in the same transaction. */
+  link_agent_id?: string;
 }
 
 export interface UpdateSkillInput {
@@ -42,11 +45,13 @@ export class SkillsService {
   }
 
   async create(workspaceId: string, input: CreateSkillInput): Promise<Skill> {
-    return toSkillDto(await this.repository.create({
-      workspaceId,
-      ...input,
-      evidenceFiles: input.evidence_files,
-    }));
+    const { link_agent_id: linkAgentId, evidence_files: evidenceFiles, ...fields } = input;
+    const result = await this.repository.create({ workspaceId, ...fields, evidenceFiles, linkAgentId });
+    if (result.kind === 'agent_not_found') {
+      throw new ValidationError('link_agent_id must be an agent in this workspace');
+    }
+    if (result.kind === 'limit_exceeded') throw new SkillLimitError(result.max);
+    return toSkillDto(result.skill);
   }
 
   async update(

@@ -468,8 +468,8 @@ calls GitHub and does not persist a second local comment copy.
 | Pull requests | `GET /repos/:id/pulls`, `GET /pulls/:id`, `POST /repos/:id/poll` |
 | GitHub comments | `GET/POST /pulls/:id/comments` |
 | Repo intelligence | `GET /repos/:id/index-state`, `POST /repos/:id/resync` |
-| Agents | Agent CRUD, versions, model lists, and ordered skill links (`GET/POST /agents/:id/skills`) under `/agents` and `/providers` |
-| Skills | `GET/POST /skills`, `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions`, and `GET /skills/:id/agents` |
+| Agents | Agent CRUD, versions, model lists, and ordered skill links (`GET/POST /agents/:id/skills`; at most 4 per agent, enforced under the agent row lock, `422 skill_limit_reached`) under `/agents` and `/providers` |
+| Skills | `GET/POST /skills` (`link_agent_id` creates and links in one transaction), `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions`, and `GET /skills/:id/agents` |
 | Conventions | `GET /repos/:id/conventions`, `POST /repos/:id/conventions/extract`, `POST /repos/:id/conventions/skill`, `PATCH/DELETE /conventions/:id` |
 | PR intent | `GET /pulls/:id/intent` (cache only), `POST /pulls/:id/intent` (first-open generation), `POST /pulls/:id/intent/recompute`; the POSTs are rate-limited |
 | Reviews | `POST /pulls/:id/review`, review/finding reads and actions |
