@@ -22,6 +22,16 @@ correction. Genuinely cross-package findings belong in
 
 ## Codebase Patterns & Tool / Library Notes
 
+- **2026-10-17** — The vendored `FormField` renders its `label` as a sibling of
+  the control, with no `htmlFor`, and the vendored `TextInput`/`Textarea` accept
+  no `id` or `aria-*` props. A field built with them has **no accessible name**,
+  so `getByRole("textbox", { name })` cannot find it. Without editing
+  `vendor/ui`, wrap the control in its own `<label>` holding a visually hidden
+  copy of the label text, and keep `FormField` for the visible label and hint.
+  Evidence: `client/src/vendor/ui/kit/FormField.tsx`,
+  `client/src/app/skills/_components/SkillsRail/_components/CreateSkillModal.tsx`
+  (body field), `client/src/app/skills/page.test.tsx` (selects it by name).
+
 ## Decisions
 
 ## Recurring Errors & Fixes

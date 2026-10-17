@@ -1,12 +1,20 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@devdigest/shared";
 import messages from "../../../../../messages/en/agents.json";
 import { AgentCard } from "./AgentCard";
 
-afterEach(cleanup);
+const deleteAgent = vi.fn();
+vi.mock("../../../../lib/hooks/agents", () => ({
+  useDeleteAgent: () => ({ mutate: deleteAgent, isPending: false, isError: false }),
+}));
+
+afterEach(() => {
+  cleanup();
+  deleteAgent.mockReset();
+});
 
 const AGENT: Agent = {
   id: "ag1",
@@ -45,5 +53,27 @@ describe("AgentCard (smoke)", () => {
   it("falls back to a translated placeholder when description is empty", () => {
     renderWithIntl(<AgentCard ag={{ ...AGENT, description: "" }} />);
     expect(screen.getByText("No description")).toBeInTheDocument();
+  });
+
+  it("asks for confirmation before deleting; Cancel and X do nothing, Confirm deletes", () => {
+    const onClick = vi.fn();
+    renderWithIntl(<AgentCard ag={AGENT} onClick={onClick} />);
+    const open = () => fireEvent.click(screen.getByRole("button", { name: "Delete agent Security Reviewer" }));
+
+    open();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Delete agent “Security Reviewer”? This cannot be undone.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    open();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(deleteAgent).not.toHaveBeenCalled();
+
+    open();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    expect(deleteAgent).toHaveBeenCalledWith("ag1", expect.anything());
+    expect(onClick).not.toHaveBeenCalled(); // clicks in the dialog never open the agent
   });
 });
