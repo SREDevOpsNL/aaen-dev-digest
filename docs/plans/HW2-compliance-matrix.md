@@ -61,7 +61,7 @@ Status values: `Fail`, `Partial`, `No evidence`, `Pass (static)` (audit only), `
 | 49 | Inline Edit on the card | Pass (static) | — | `ConventionCard` editing state | — | PR-E |
 | 50 | Create skill button appears after at least one Accept | Partial | E | Always visible, disabled until accepted | — | — |
 | 51 | Create-skill modal explains the source; Name, Description, Cancel, Create | Pass (static) | — | Conventions `CreateSkillModal` | — | PR-E |
-| 52 | The new skill appears on the Skills page | Pass (static) | — | Skill created via `POST /skills` | PR #17: created skills appear as grid cards (`page.test.tsx`, Create → list refetch) | PR-B (grid) |
+| 52 | The new skill appears on the Skills page | Pass (static) | — | Skill created via `POST /skills`; `useCreateSkill()` (`client/src/lib/hooks/skills.ts`) invalidates the `["skills"]` query on success, so the grid (`useSkills`) refetches | PR #17 `page.test.tsx` covers only creation and navigation: Create sends the edited body to `POST /skills` and routes to `/skills/new?tab=config`. It does **not** show the new skill appearing in the grid (hooks are mocked). Left for the final acceptance walkthrough (browser: create, return to Skills, card visible) | PR-B (grid) |
 | 53 | Settings → Models → Conventions row with a searchable model dropdown | Pass (static) | — | `SettingsModels` `SearchableSelect`; `FEATURE_MODELS` `conventions` | — | — |
 
 ## Totals
