@@ -1,11 +1,13 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button, FormField, Icon, Modal, SelectInput, Skeleton, TextInput, Textarea, Toggle } from "@devdigest/ui";
 import type { ConventionSkillDraft, SkillType } from "@devdigest/shared";
-import { useAgents, useAppendAgentSkill, useCreateSkill } from "../../../../../../lib/hooks";
+import { useAgents, useCreateSkill, useSkills } from "../../../../../../lib/hooks";
+import { ApiError } from "../../../../../../lib/api";
 import { useToast } from "../../../../../../lib/toast";
 import { s } from "../../styles";
 
@@ -23,8 +25,8 @@ export function CreateSkillModal({ repoName, acceptedCount, draft, onClose }: Cr
   const router = useRouter();
   const toast = useToast();
   const create = useCreateSkill();
-  const appendSkill = useAppendAgentSkill();
-  const { data: agents } = useAgents();
+  const { data: agents, isLoading: agentsLoading } = useAgents();
+  const { data: skills } = useSkills();
 
   const [name, setName] = React.useState(draft?.name ?? "");
   const [description, setDescription] = React.useState(draft?.description ?? "");
@@ -45,8 +47,15 @@ export function CreateSkillModal({ repoName, acceptedCount, draft, onClose }: Cr
     setBody(draft.body);
   }, [draft]);
 
+  // Skill names are not unique: an existing skill with this name is pointed
+  // out, never silently renamed, and does not block saving.
+  const existing = (skills ?? []).find((skill) => skill.name === name.trim());
+  const limitReached = create.error instanceof ApiError && create.error.code === "skill_limit_reached";
+
   const submit = async () => {
     try {
+      // One request: the server creates the skill and links it to the agent in
+      // one transaction, so a refused link leaves no orphan skill.
       const skill = await create.mutateAsync({
         name: name.trim(),
         description,
@@ -55,17 +64,18 @@ export function CreateSkillModal({ repoName, acceptedCount, draft, onClose }: Cr
         source: "extracted",
         enabled,
         evidence_files: draft?.evidence_files,
+        link_agent_id: agentId,
       });
-      if (agentId) await appendSkill.mutateAsync({ agentId, skillId: skill.id });
       toast.success(t("modal.created"));
       onClose();
       router.push(`/skills/${skill.id}?tab=config`);
-    } catch {
-      toast.error(t("modal.failed"));
+    } catch (error) {
+      if (!(error instanceof ApiError && error.code === "skill_limit_reached")) toast.error(t("modal.failed"));
     }
   };
 
-  const pending = create.isPending || appendSkill.isPending;
+  const pending = create.isPending;
+  const noAgents = !agentsLoading && (agents ?? []).length === 0;
 
   return (
     <Modal
@@ -78,7 +88,7 @@ export function CreateSkillModal({ repoName, acceptedCount, draft, onClose }: Cr
           <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("modal.footerHint")}</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
             <Button kind="ghost" onClick={onClose}>{t("modal.cancel")}</Button>
-            <Button kind="primary" icon="Sparkles" onClick={submit} disabled={!draft || pending || name.trim().length === 0 || body.trim().length === 0}>
+            <Button kind="primary" icon="Sparkles" onClick={submit} disabled={!draft || pending || !agentId || name.trim().length === 0 || body.trim().length === 0}>
               {pending ? t("modal.submitting") : t("modal.submit")}
             </Button>
           </div>
@@ -96,6 +106,14 @@ export function CreateSkillModal({ repoName, acceptedCount, draft, onClose }: Cr
         ) : (
           <>
             <FormField label={t("modal.name")} required><TextInput value={name} onChange={setName} /></FormField>
+            {existing && (
+              <div role="status" style={s.nameNotice}>
+                {t.rich("modal.nameExists", {
+                  name: existing.name,
+                  link: (chunks) => <Link href={`/skills/${existing.id}?tab=config`}>{chunks}</Link>,
+                })}
+              </div>
+            )}
             <FormField label={t("modal.description")}><TextInput value={description} onChange={setDescription} /></FormField>
             <div style={{ display: "flex", gap: 24 }}>
               <div style={{ flex: 1 }}>
@@ -107,9 +125,19 @@ export function CreateSkillModal({ repoName, acceptedCount, draft, onClose }: Cr
                 <FormField label={t("modal.enabled")} hint={t("modal.enabledHint")}><Toggle on={enabled} onChange={setEnabled} /></FormField>
               </div>
             </div>
-            <FormField label={t("modal.linkAgent")} hint={t("modal.linkAgentHint")}>
-              <SelectInput value={agentId} onChange={setAgentId} options={[{ value: "", label: t("modal.linkAgentNone") }, ...(agents ?? []).map((agent) => ({ value: agent.id, label: agent.name }))]} />
+            <FormField label={t("modal.linkAgent")} required hint={t("modal.linkAgentHint")}>
+              {noAgents ? (
+                <div role="alert" style={s.nameNotice}>
+                  {t.rich("modal.noAgents", { link: (chunks) => <Link href="/agents">{chunks}</Link> })}
+                </div>
+              ) : (
+                <label style={{ display: "block" }}>
+                  <span style={s.visuallyHidden}>{t("modal.linkAgent")}</span>
+                  <SelectInput value={agentId} onChange={(value) => { create.reset(); setAgentId(value); }} options={[{ value: "", label: t("modal.linkAgentChoose") }, ...(agents ?? []).map((agent) => ({ value: agent.id, label: agent.name }))]} />
+                </label>
+              )}
             </FormField>
+            {limitReached && <div role="alert" style={{ ...s.nameNotice, color: "var(--crit)" }}>{t("modal.limitReached")}</div>}
             <FormField label={t("modal.body")} required>
               <div style={s.bodyHeader}>
                 <Icon.FileText size={13} />
