@@ -2,7 +2,7 @@
 name: onion-architecture
 description: Design and review DevDigest backend modules using Onion Architecture and ports-and-adapters. Use for Fastify modules, services, repositories, Drizzle persistence, external adapters, reviewer-core, dependency direction, and backend refactors. Not for frontend organization.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Onion Architecture
@@ -26,6 +26,23 @@ Enforce one rule: source dependencies point inward toward policy; outer technolo
 - External tools and SDKs are adapters behind ports resolved by `server/src/platform/container.ts`.
 - Feature modules do not import sibling-module internals. Move genuinely shared policy to a stable shared owner or expose it through a port/facade.
 - The composition root may know both ports and concrete adapters; ordinary services may not.
+- **Routes never call adapters directly.** A route handler must not import from `server/src/adapters/**`, an SDK (Octokit, OpenAI, Anthropic, simple-git) or the database client; it calls a service, and the service obtains adapters through ports resolved by `platform/container.ts`.
+
+```ts
+// Bad: the route reaches an adapter and owns the workflow.
+app.post('/repos/:id/sync', async (req) => {
+  const gh = new OctokitGitHubClient(token);           // adapter in a route
+  const pulls = await gh.listPullRequests(repo);
+  await db.insert(t.pullRequests).values(pulls);       // SQL in a route
+});
+
+// Good: the route translates transport data and delegates.
+app.post('/repos/:id/sync', async (req) => {
+  const { workspaceId } = await getContext(app.container, req);
+  return new RepoSyncService(app.container).sync(workspaceId, req.params.id);
+});
+// The service gets the `GitHubClient` port from `container.github()` and a repository.
+```
 
 ## Project routing
 
