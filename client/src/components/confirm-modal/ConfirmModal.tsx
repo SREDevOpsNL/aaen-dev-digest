@@ -15,6 +15,7 @@ export function ConfirmModal({
   cancelLabel,
   pendingLabel,
   pending = false,
+  confirmDisabled = false,
   error,
   onConfirm,
   onCancel,
@@ -25,6 +26,8 @@ export function ConfirmModal({
   cancelLabel: string;
   pendingLabel?: string;
   pending?: boolean;
+  /** Keep Confirm disabled, e.g. until the caller has loaded what the action affects. */
+  confirmDisabled?: boolean;
   error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
@@ -36,7 +39,7 @@ export function ConfirmModal({
       onClose={pending ? undefined : onCancel}
       footer={
         <div style={{ display: "flex", gap: 8 }}>
-          <Button kind="danger" icon="Trash" onClick={onConfirm} disabled={pending}>
+          <Button kind="danger" icon="Trash" onClick={onConfirm} disabled={pending || confirmDisabled}>
             {pending && pendingLabel ? pendingLabel : confirmLabel}
           </Button>
           <Button kind="ghost" onClick={onCancel} disabled={pending}>

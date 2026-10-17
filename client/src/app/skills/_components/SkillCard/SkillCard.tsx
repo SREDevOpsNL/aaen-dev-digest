@@ -10,8 +10,9 @@ import { skillStyles as s } from "../../styles";
 
 /**
  * Skills-grid card: name, type, description, enabled toggle, current version and
- * linked-agent count. Clicking (or Enter/Space) opens the side preview; the
- * toggle and Delete act in place without opening it.
+ * linked-agent count. The card itself is not interactive. It holds three
+ * separate controls, never nested: a native preview button (name +
+ * description), the enabled toggle and Delete.
  */
 export function SkillCard({
   skill,
@@ -24,40 +25,28 @@ export function SkillCard({
 }) {
   const t = useTranslations("skills");
   const update = useUpdateSkill();
-  const stop = (event: React.SyntheticEvent) => event.stopPropagation();
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={t("card.open", { name: skill.name })}
-      onClick={() => onOpen(skill)}
-      onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen(skill);
-        }
-      }}
-      style={s.gridCard(skill.enabled)}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Icon.Sparkles size={15} style={{ color: SKILL_TYPE_COLORS[skill.type], flexShrink: 0 }} />
-        <span className="mono" style={s.cardName}>{skill.name}</span>
-        <label title={skill.enabled ? t("card.disable") : t("card.enable")} onClick={stop} onKeyDown={stop}>
+    <article style={s.gridCard(skill.enabled)}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <button type="button" aria-label={t("card.open", { name: skill.name })} onClick={() => onOpen(skill)} style={s.previewButton}>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Icon.Sparkles size={15} style={{ color: SKILL_TYPE_COLORS[skill.type], flexShrink: 0 }} />
+            <span className="mono" style={s.cardName}>{skill.name}</span>
+          </span>
+          <span style={s.cardDescription}>{skill.description || t("card.noDescription")}</span>
+        </button>
+        <label title={skill.enabled ? t("card.disable") : t("card.enable")} style={{ paddingTop: 2 }}>
           <span style={s.visuallyHidden}>{skill.enabled ? t("card.disable") : t("card.enable")}</span>
           <Toggle on={skill.enabled} onChange={(enabled) => update.mutate({ id: skill.id, patch: { enabled } })} size={14} />
         </label>
-        <span onClick={stop} onKeyDown={stop}>
-          <IconBtn icon="Trash" size={26} danger label={t("card.delete", { name: skill.name })} onClick={() => onDelete(skill)} />
-        </span>
+        <IconBtn icon="Trash" size={26} danger label={t("card.delete", { name: skill.name })} onClick={() => onDelete(skill)} />
       </div>
-      <p style={s.cardDescription}>{skill.description || t("card.noDescription")}</p>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: "auto" }}>
         <Badge color={SKILL_TYPE_COLORS[skill.type]}>{t(`listItem.type.${skill.type}`)}</Badge>
         <span className="mono" style={{ ...s.muted, fontSize: 11 }}>{t("card.version", { version: skill.version })}</span>
         <span style={{ ...s.muted, fontSize: 11, marginLeft: "auto" }}>{t("card.usedBy", { count: skill.used_by_count })}</span>
       </div>
-    </div>
+    </article>
   );
 }

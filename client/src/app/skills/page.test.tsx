@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
 import type { SkillSummary } from "@devdigest/shared";
 import messages from "../../../messages/en/skills.json";
@@ -18,7 +19,7 @@ vi.mock("@/lib/hooks/skills", () => ({
   useSkills: () => ({ data: skills, isLoading: false, isError: false, refetch: vi.fn() }),
   useUpdateSkill: () => ({ mutate: updateSkill, isPending: false }),
   useDeleteSkill: () => ({ mutateAsync: deleteSkill, isPending: false, isError: false }),
-  useSkillAgents: () => ({ data: [{ id: "a1", name: "Test Quality Reviewer" }] }),
+  useSkillAgents: () => ({ data: [{ id: "a1", name: "Test Quality Reviewer" }], isSuccess: true, isError: false, refetch: vi.fn() }),
   useCreateSkill: () => ({ mutateAsync: createSkill, isPending: false, isError: false }),
 }));
 
@@ -120,7 +121,7 @@ describe("Skills page", () => {
 
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByPlaceholderText("test-quality-review"), { target: { value: "api-guard" } });
-    const body = dialog.querySelector("textarea")!; // the vendored FormField does not associate its label
+    const body = within(dialog).getByRole("textbox", { name: "Skill body (Markdown)" }) as HTMLTextAreaElement;
     expect(body.value).toContain("# api-guard"); // starter follows the name until edited
     fireEvent.change(body, { target: { value: "# api-guard\n\nFlag removed routes." } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Create skill" }));
@@ -137,7 +138,46 @@ describe("Skills page", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create skill/ }));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByPlaceholderText("test-quality-review"), { target: { value: "x" } });
-    fireEvent.change(dialog.querySelector("textarea")!, { target: { value: "   " } });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Skill body (Markdown)" }), { target: { value: "   " } });
     expect(within(dialog).getByRole("button", { name: "Create skill" })).toBeDisabled();
+  });
+
+  it("the card is not interactive itself and never nests one control inside another", () => {
+    renderPage();
+    const card = screen.getAllByRole("listitem")[0]!.querySelector("article")!;
+    expect(card).not.toHaveAttribute("role");
+    expect(card).not.toHaveAttribute("tabindex");
+    expect(card.querySelectorAll("button button, button [role=switch], [role=button] button")).toHaveLength(0);
+    const controls = Array.from(card.querySelectorAll("button")); // DOM order = Tab order
+    expect(controls.map((el) => el.getAttribute("aria-label") ?? el.getAttribute("role"))).toEqual([
+      "Preview skill skill-a",
+      "switch",
+      "Delete skill skill-a",
+    ]);
+  });
+
+  it("keyboard: Tab reaches preview, toggle and Delete in order; each key acts only on its own control", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const card = within(screen.getAllByRole("listitem")[0]!);
+
+    card.getByRole("button", { name: "Preview skill skill-a" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog")).toHaveTextContent("Open details");
+    await user.click(within(screen.getByRole("dialog")).getAllByRole("button", { name: "Close" })[0]!);
+
+    card.getByRole("button", { name: "Preview skill skill-a" }).focus();
+    await user.tab();
+    expect(card.getByRole("switch")).toHaveFocus();
+    await user.keyboard(" ");
+    expect(updateSkill).toHaveBeenCalledWith({ id: "a", patch: { enabled: false } });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); // toggling never opens the preview
+
+    await user.tab();
+    expect(card.getByRole("button", { name: "Delete skill skill-a" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Delete skill “skill-a”?");
+    expect(dialog).not.toHaveTextContent("Open details"); // the delete key path does not open the preview
   });
 });

@@ -144,6 +144,10 @@
     "confirm": "Delete",
     "deleting": "Deleting…",
     "cancel": "Cancel",
-    "failed": "The skill could not be deleted. Try again."
+    "failed": "The skill could not be deleted. Try again.",
+    "impactLoading": "Checking which agents use this skill…",
+    "impactFailed": "Could not check which agents use this skill, so it cannot be deleted yet.",
+    "retry": "Retry",
+    "noAgents": "No agent uses this skill."
   }
 }

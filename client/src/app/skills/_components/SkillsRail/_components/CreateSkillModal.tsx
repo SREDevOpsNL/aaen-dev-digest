@@ -6,6 +6,7 @@ import { Button, FormField, Modal, SelectInput, TextInput, Textarea } from "@dev
 import type { SkillType } from "@devdigest/shared";
 import { useCreateSkill } from "@/lib/hooks/skills";
 import { SKILL_TYPES } from "../../../constants";
+import { skillStyles as s } from "../../../styles";
 
 export function CreateSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const t = useTranslations("skills");
@@ -59,7 +60,11 @@ export function CreateSkillModal({ onClose, onCreated }: { onClose: () => void; 
           />
         </FormField>
         <FormField label={t("fields.body")} required hint={t("create.bodyHint")}>
-          <Textarea value={body} onChange={setEditedBody} rows={10} mono />
+          {/* The vendored FormField label is not tied to its control, so this label names the textarea. */}
+          <label style={{ display: "block" }}>
+            <span style={s.visuallyHidden}>{t("fields.body")}</span>
+            <Textarea value={body} onChange={setEditedBody} rows={10} mono />
+          </label>
         </FormField>
         {create.isError && <div role="alert" style={{ color: "var(--crit)", fontSize: 13 }}>{t("create.createFailed")}</div>}
       </div>
