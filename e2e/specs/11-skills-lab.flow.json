@@ -1,6 +1,6 @@
 {
   "name": "Skills Lab navigation, skill cards, preview, Add menu and delete confirmations",
-  "description": "Read-only: checks the SKILLS LAB sidebar section, opens a seeded skill card's side preview and its Open details link, opens the Add skill menu and the Create dialog (with its Markdown body field) without submitting, and dismisses the skill and agent delete confirmations with Cancel and X. Nothing is created or deleted, and no model is called.",
+  "description": "Read-only: checks the SKILLS LAB sidebar section, opens a seeded skill card's side preview (from its preview button and from a pointer click on the card footer) and its Open details link, opens the Add skill menu and the Create dialog (with its Markdown body field) without submitting, and dismisses the skill and agent delete confirmations with Cancel and X. Nothing is created or deleted, and no model is called.",
   "steps": [
     { "cmd": ["open", "{BASE}/skills"], "label": "load the Skills page" },
     { "cmd": ["wait", "--url", "/skills"], "label": "skills route reached" },
@@ -16,6 +16,10 @@
     { "cmd": ["wait", "--text", "Versions"], "label": "detail tabs render" },
     { "cmd": ["open", "{BASE}/skills"], "label": "back to the Skills page" },
     { "cmd": ["wait", "--load", "networkidle"], "label": "skills fetch settles again" },
+    { "cmd": ["click", "article:has([aria-label='Preview skill Behavioral Coverage']) > div:last-child"], "label": "pointer-click the card footer (not a control)" },
+    { "cmd": ["wait", "--text", "Open details"], "label": "footer click opens the side preview" },
+    { "cmd": ["open", "{BASE}/skills"], "label": "reset the Skills page" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "skills fetch settles once more" },
     { "cmd": ["find", "role", "button", "click", "--name", "Add skill"], "label": "open the Add skill menu" },
     { "cmd": ["wait", "--text", "From a Markdown file"], "label": "menu offers Import" },
     { "cmd": ["find", "text", "Write a new skill", "click"], "label": "choose Create" },

@@ -8,11 +8,18 @@ import { useUpdateSkill } from "@/lib/hooks/skills";
 import { SKILL_TYPE_COLORS } from "../../constants";
 import { skillStyles as s } from "../../styles";
 
+/** Clicks that start on a real control keep that control's own behaviour. */
+const CONTROL_SELECTOR = "button, a, input, select, textarea, label, [role=switch]";
+
 /**
  * Skills-grid card: name, type, description, enabled toggle, current version and
- * linked-agent count. The card itself is not interactive. It holds three
- * separate controls, never nested: a native preview button (name +
- * description), the enabled toggle and Delete.
+ * linked-agent count. It holds three separate controls, never nested: a native
+ * preview button (name + description), the enabled toggle and Delete.
+ *
+ * For the mouse, a click anywhere else on the card (e.g. the footer) also opens
+ * the preview. That is a pointer convenience only: the card has no role and no
+ * tabindex, so keyboard and screen-reader users reach the same action through the
+ * preview button, and the toggle and Delete are excluded by CONTROL_SELECTOR.
  */
 export function SkillCard({
   skill,
@@ -27,7 +34,13 @@ export function SkillCard({
   const update = useUpdateSkill();
 
   return (
-    <article style={s.gridCard(skill.enabled)}>
+    <article
+      style={s.gridCard(skill.enabled)}
+      onClick={(event) => {
+        if ((event.target as Element).closest(CONTROL_SELECTOR)) return;
+        onOpen(skill);
+      }}
+    >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
         <button type="button" aria-label={t("card.open", { name: skill.name })} onClick={() => onOpen(skill)} style={s.previewButton}>
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>

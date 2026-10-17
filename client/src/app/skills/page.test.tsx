@@ -142,7 +142,7 @@ describe("Skills page", () => {
     expect(within(dialog).getByRole("button", { name: "Create skill" })).toBeDisabled();
   });
 
-  it("the card is not interactive itself and never nests one control inside another", () => {
+  it("the card has no role or tabindex and never nests one control inside another", () => {
     renderPage();
     const card = screen.getAllByRole("listitem")[0]!.querySelector("article")!;
     expect(card).not.toHaveAttribute("role");
@@ -179,5 +179,37 @@ describe("Skills page", () => {
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("Delete skill “skill-a”?");
     expect(dialog).not.toHaveTextContent("Open details"); // the delete key path does not open the preview
+  });
+
+  it("clicking the card footer or other non-control surface opens the preview", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const card = within(screen.getAllByRole("listitem")[0]!);
+
+    for (const text of ["v3", "2 agents", "rubric"]) {
+      await user.click(card.getByText(text));
+      const drawer = screen.getByRole("dialog");
+      expect(drawer).toHaveTextContent("Open details");
+      await user.click(within(drawer).getAllByRole("button", { name: "Close" })[0]!);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    }
+    expect(updateSkill).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("pointer clicks on Toggle and Delete keep their own behaviour and never open the preview", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const card = within(screen.getAllByRole("listitem")[0]!);
+
+    await user.click(card.getByRole("switch"));
+    expect(updateSkill).toHaveBeenCalledWith({ id: "a", patch: { enabled: false } });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(card.getByRole("button", { name: "Delete skill skill-a" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Delete skill “skill-a”?");
+    expect(dialog).not.toHaveTextContent("Open details");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 });
