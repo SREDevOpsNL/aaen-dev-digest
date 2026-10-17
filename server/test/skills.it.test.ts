@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, eq, sql } from 'drizzle-orm';
 import { buildApp } from '../src/app.js';
 import { MockGitClient, MockGitHubClient } from '../src/adapters/mocks.js';
 import { seed } from '../src/db/seed.js';
@@ -172,6 +173,127 @@ d('skills API and persistence', () => {
     });
     expect(versions[1].body).toBe('Check the caller-visible behavior.');
     expect((await app.inject({ url: `/skills/${skill.id}/versions/2` })).statusCode).toBe(200);
+    await app.close();
+  });
+
+  it('records imported provenance as imported_file and reads it back from PostgreSQL', async () => {
+    const app = await makeApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/skills',
+      payload: {
+        name: `Imported ${Date.now()}`,
+        description: 'From a file.',
+        type: 'custom',
+        source: 'imported_file',
+        body: '# Imported\n\nFlag removed routes.',
+        enabled: false,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ source: 'imported_file', version: 1 });
+
+    // Raw SQL, not the Drizzle row type: the stored text column holds the value.
+    const rows = await pg.handle.db.execute<{ source: string; body: string }>(
+      sql`select source, body from skills where id = ${response.json().id}`,
+    );
+    expect([...rows][0]).toEqual({ source: 'imported_file', body: '# Imported\n\nFlag removed routes.' });
+
+    const unknown = await app.inject({
+      method: 'POST',
+      url: '/skills',
+      payload: { name: 'Bad source', type: 'custom', source: 'community', body: 'x' },
+    });
+    expect(unknown.statusCode).toBe(422); // the API maps request validation errors to 422
+    await app.close();
+  });
+
+  it('restores a previous body as a new version and keeps the full history', async () => {
+    const app = await makeApp();
+    const skill = await createSkill(app, `Restorable ${Date.now()}`);
+    await app.inject({ method: 'PUT', url: `/skills/${skill.id}`, payload: { body: 'Second body.' } });
+    await app.inject({ method: 'PUT', url: `/skills/${skill.id}`, payload: { body: 'Third body.' } });
+
+    const restored = await app.inject({ method: 'POST', url: `/skills/${skill.id}/versions/1/restore` });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json()).toMatchObject({ version: 4, body: 'Check the caller-visible behavior.' });
+
+    const versions = (await app.inject({ url: `/skills/${skill.id}/versions` })).json() as Array<{
+      version: number;
+      body: string;
+    }>;
+    expect(versions.map((v) => [v.version, v.body])).toEqual([
+      [4, 'Check the caller-visible behavior.'],
+      [3, 'Third body.'],
+      [2, 'Second body.'],
+      [1, 'Check the caller-visible behavior.'],
+    ]);
+
+    // Restoring a version whose body is already current changes nothing.
+    const noop = await app.inject({ method: 'POST', url: `/skills/${skill.id}/versions/1/restore` });
+    expect(noop.json().version).toBe(4);
+    expect((await app.inject({ url: `/skills/${skill.id}/versions` })).json()).toHaveLength(4);
+
+    expect(
+      (await app.inject({ method: 'POST', url: `/skills/${skill.id}/versions/99/restore` })).statusCode,
+    ).toBe(404);
+    expect(
+      (await app.inject({ method: 'POST', url: `/skills/${randomUUID()}/versions/1/restore` })).statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
+  it('does not restore a skill from another workspace', async () => {
+    const app = await makeApp();
+    const [otherWorkspace] = await pg.handle.db
+      .insert(t.workspaces)
+      .values({ name: `restore-other-${Date.now()}` })
+      .returning();
+    const [foreign] = await pg.handle.db
+      .insert(t.skills)
+      .values({
+        workspaceId: otherWorkspace!.id,
+        name: 'Foreign restore',
+        description: '',
+        type: 'custom',
+        source: 'manual',
+        body: 'Current.',
+        version: 2,
+      })
+      .returning();
+    await pg.handle.db.insert(t.skillVersions).values([
+      { skillId: foreign!.id, version: 1, body: 'Old.' },
+      { skillId: foreign!.id, version: 2, body: 'Current.' },
+    ]);
+
+    const response = await app.inject({ method: 'POST', url: `/skills/${foreign!.id}/versions/1/restore` });
+    expect(response.statusCode).toBe(404);
+    const [row] = await pg.handle.db.select().from(t.skills).where(eq(t.skills.id, foreign!.id));
+    expect(row).toMatchObject({ body: 'Current.', version: 2 });
+    await app.close();
+  });
+
+  it('keeps version numbers sequential under concurrent restores and edits', async () => {
+    const app = await makeApp();
+    const skill = await createSkill(app, `Concurrent ${Date.now()}`);
+    await app.inject({ method: 'PUT', url: `/skills/${skill.id}`, payload: { body: 'Body two.' } });
+    await app.inject({ method: 'PUT', url: `/skills/${skill.id}`, payload: { body: 'Body three.' } });
+
+    const responses = await Promise.all([
+      app.inject({ method: 'POST', url: `/skills/${skill.id}/versions/1/restore` }),
+      app.inject({ method: 'POST', url: `/skills/${skill.id}/versions/2/restore` }),
+      app.inject({ method: 'PUT', url: `/skills/${skill.id}`, payload: { body: 'Body edited.' } }),
+    ]);
+    expect(responses.map((r) => r.statusCode)).toEqual([200, 200, 200]);
+
+    const versions = (await app.inject({ url: `/skills/${skill.id}/versions` })).json() as Array<{
+      version: number;
+      body: string;
+    }>;
+    expect(versions.map((v) => v.version)).toEqual([6, 5, 4, 3, 2, 1]);
+    const [row] = await pg.handle.db.select().from(t.skills).where(eq(t.skills.id, skill.id));
+    expect(row!.version).toBe(6);
+    expect(row!.body).toBe(versions[0]!.body); // the current body is the newest snapshot
     await app.close();
   });
 
