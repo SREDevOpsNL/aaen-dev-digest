@@ -33,6 +33,8 @@ export const s = {
   actions: { display: "flex", flexDirection: "column", gap: 8, width: 176, flexShrink: 0 } satisfies CSSProperties,
   editRow: { display: "flex", gap: 8, marginTop: 12 } satisfies CSSProperties,
   modalBody: { padding: "20px 24px" } satisfies CSSProperties,
+  nameNotice: { margin: "-6px 0 14px", padding: "8px 12px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-surface)", fontSize: 12.5, lineHeight: 1.5, color: "var(--text-secondary)" } satisfies CSSProperties,
+  visuallyHidden: { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" } satisfies CSSProperties,
   mergedBanner: { display: "flex", gap: 10, alignItems: "flex-start", padding: "12px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-surface)", fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 20 } satisfies CSSProperties,
   bodyHeader: { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", border: "1px solid var(--border-strong)", borderBottom: "none", borderRadius: "7px 7px 0 0", background: "var(--bg-surface)", fontSize: 12, color: "var(--text-secondary)" } satisfies CSSProperties,
   bodyFileName: { fontWeight: 600, color: "var(--text-primary)" } satisfies CSSProperties,

@@ -1,12 +1,13 @@
 {
   "name": "Conventions Extractor opens for the seeded repository",
-  "description": "Navigates from the seeded repository shell to the read-only Conventions page and verifies its empty-state extraction affordance without triggering a model call.",
+  "description": "Navigates from the seeded repository shell to the read-only Conventions page and verifies the empty state, the separate Run Scan (enabled) and ReScan (disabled before a first scan) buttons, and that Create skill is absent, without triggering a model call.",
   "steps": [
     { "cmd": ["open", "{BASE}/"], "label": "load the seeded repository" },
     { "cmd": ["wait", "--load", "networkidle"], "label": "repository shell settles" },
     { "cmd": ["find", "text", "Conventions", "click"], "label": "open repository conventions" },
     { "cmd": ["wait", "--url", "/conventions"], "label": "conventions route reached" },
     { "cmd": ["wait", "--text", "No conventions extracted yet"], "label": "empty state renders" },
-    { "cmd": ["wait", "--text", "Run extraction"], "label": "extraction affordance is visible" }
+    { "cmd": ["wait", "--text", "Run Scan"], "label": "Run Scan is visible" },
+    { "cmd": ["eval", "(() => { const b = (name) => [...document.querySelectorAll('button')].find((el) => el.textContent.trim() === name); return !!b('Run Scan') && !b('Run Scan').disabled && !!b('ReScan') && b('ReScan').disabled && !b('Create skill'); })()"], "assert": { "stdoutIncludes": "true" }, "label": "before the first scan: Run Scan enabled, ReScan disabled, no Create skill" }
   ]
 }

@@ -82,7 +82,7 @@ describe("ConventionsPage", () => {
     extract.mockResolvedValue(scan);
     renderPage();
     expect(screen.getByText("No conventions extracted yet")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByText("Run extraction")[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Run Scan" }));
     await waitFor(() => expect(extract).toHaveBeenCalledWith("r1"));
     expect(await screen.findByText(/3 dropped without evidence, 1 already decided/)).toBeInTheDocument();
   });
@@ -106,6 +106,33 @@ describe("ConventionsPage", () => {
     fireEvent.click(screen.getByText("Create skill"));
     await waitFor(() => expect(draftSkill).toHaveBeenCalledWith({ repoId: "r1", conventionIds: ["a"] }));
     expect(await screen.findByText(/modal open · 1 accepted/)).toBeInTheDocument();
+  });
+
+  it("has separate Run Scan and ReScan buttons: Run Scan before the first scan, ReScan after", async () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: "Run Scan" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "ReScan" })).toBeDisabled();
+    cleanup();
+
+    candidates = [candidate("a", "pending")];
+    extract.mockResolvedValue(scan);
+    renderPage();
+    expect(screen.getByRole("button", { name: "Run Scan" })).toBeDisabled();
+    const rescan = screen.getByRole("button", { name: "ReScan" });
+    expect(rescan).toBeEnabled();
+    fireEvent.click(rescan);
+    await waitFor(() => expect(extract).toHaveBeenCalledWith("r1"));
+  });
+
+  it("shows Create skill only once at least one candidate is accepted", () => {
+    candidates = [candidate("a", "pending"), candidate("b", "rejected")];
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Create skill" })).not.toBeInTheDocument();
+    cleanup();
+
+    candidates = [candidate("a", "pending"), candidate("b", "accepted")];
+    renderPage();
+    expect(screen.getByRole("button", { name: "Create skill" })).toBeEnabled();
   });
 
   it("links evidence to the exact GitHub line", () => {

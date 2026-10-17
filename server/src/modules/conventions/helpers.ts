@@ -5,6 +5,7 @@ import type {
 } from '@devdigest/shared';
 import type { ConventionRow } from './repository.js';
 import {
+  CONVENTIONS_SKILL_NAME,
   MAX_FILE_CHARS,
   MAX_FILE_LINES,
   MAX_SNIPPET_LINES,
@@ -195,8 +196,7 @@ export function buildSkillDraft(
   repoFullName: string,
   rows: ConventionRow[],
 ): ConventionSkillDraft {
-  const short = slugify(repoFullName.split('/').pop() ?? repoFullName, 8);
-  const name = `${short}-conventions`;
+  const name = CONVENTIONS_SKILL_NAME;
   const sections = rows.map((row) => {
     const lines = [`## ${slugify(row.rule)}`, row.rule.trim()];
     if (row.rationale?.trim()) lines.push('', row.rationale.trim());

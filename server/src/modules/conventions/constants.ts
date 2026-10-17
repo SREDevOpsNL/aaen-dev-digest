@@ -26,3 +26,10 @@ export const MAX_SNIPPET_LINES = 8;
 export const EXTRACT_TEMPERATURE = 0.1;
 export const EXTRACT_MAX_TOKENS = 4_000;
 export const EXTRACT_TIMEOUT_MS = 120_000;
+
+/**
+ * Default name of the skill created from accepted conventions. Literal, not
+ * derived from the repository; the user may edit it, and nothing renames it
+ * when a skill with this name already exists (names are not unique).
+ */
+export const CONVENTIONS_SKILL_NAME = 'repo-conventions';

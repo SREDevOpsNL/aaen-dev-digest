@@ -90,7 +90,7 @@ describe('convention deduplication and skill draft', () => {
   it('builds an evidence-backed convention skill draft', () => {
     const row = { id: 'c1', workspaceId: 'w1', repoId: 'r1', category: 'errors', rule: 'Throw NotFoundError', rationale: 'Callers rely on it.', evidencePath: 'src/api/users.ts', evidenceLine: 3, evidenceSnippet: 'throw new NotFoundError();', confidence: 0.9, status: 'accepted', createdAt: new Date('2026-08-05T00:00:00Z') } as ConventionRow;
     const draft = buildSkillDraft('acme/payments-api', [row]);
-    expect(draft).toMatchObject({ name: 'payments-api-conventions', type: 'convention', evidence_files: ['src/api/users.ts'], convention_ids: ['c1'] });
+    expect(draft).toMatchObject({ name: 'repo-conventions', type: 'convention', evidence_files: ['src/api/users.ts'], convention_ids: ['c1'] });
     expect(draft.body).toContain('Detected in `src/api/users.ts:3`:');
   });
   it('makes stable, bounded anchors', () => {
