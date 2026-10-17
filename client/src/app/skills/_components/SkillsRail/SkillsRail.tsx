@@ -2,16 +2,14 @@
 
 import React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Badge, Button, ErrorState, Icon, Skeleton, Toggle } from "@devdigest/ui";
+import { Badge, ErrorState, Icon, Skeleton, Toggle } from "@devdigest/ui";
 import type { SkillSummary } from "@devdigest/shared";
 import { useSkills, useUpdateSkill } from "@/lib/hooks/skills";
 import { filterSkills } from "../../helpers";
 import { SKILL_TYPE_COLORS } from "../../constants";
 import { skillStyles as s } from "../../styles";
-import { CreateSkillModal } from "./_components/CreateSkillModal";
-import { ImportSkillDrawer } from "./_components/ImportSkillDrawer";
+import { AddSkillMenu } from "../AddSkillMenu";
 
 function SkillRailCard({ skill, active, tab }: { skill: SkillSummary; active: boolean; tab: string }) {
   const t = useTranslations("skills");
@@ -51,11 +49,8 @@ function SkillRailCard({ skill, active, tab }: { skill: SkillSummary; active: bo
 
 export function SkillsRail({ activeId, tab = "config" }: { activeId?: string; tab?: string }) {
   const t = useTranslations("skills");
-  const router = useRouter();
   const skills = useSkills();
   const [query, setQuery] = React.useState("");
-  const [createOpen, setCreateOpen] = React.useState(false);
-  const [importOpen, setImportOpen] = React.useState(false);
 
   const visible = filterSkills(skills.data ?? [], query);
   return (
@@ -63,12 +58,7 @@ export function SkillsRail({ activeId, tab = "config" }: { activeId?: string; ta
       <div style={s.railHeader}>
         <div style={s.titleRow}>
           <h1 style={{ flex: 1, fontSize: 18, fontWeight: 700 }}>{t("page.heading")}</h1>
-          <Button kind="primary" size="sm" icon="Plus" onClick={() => setCreateOpen(true)}>
-            {t("page.addSkill")}
-          </Button>
-          <Button kind="ghost" size="sm" icon="Upload" onClick={() => setImportOpen(true)}>
-            {t("page.import")}
-          </Button>
+          <AddSkillMenu />
         </div>
         <label style={s.search}>
           <Icon.Search size={13} style={{ color: "var(--text-muted)" }} />
@@ -93,24 +83,6 @@ export function SkillsRail({ activeId, tab = "config" }: { activeId?: string; ta
         )}
       </div>
 
-      {createOpen && (
-        <CreateSkillModal
-          onClose={() => setCreateOpen(false)}
-          onCreated={(id) => {
-            setCreateOpen(false);
-            router.push(`/skills/${id}?tab=config`);
-          }}
-        />
-      )}
-      {importOpen && (
-        <ImportSkillDrawer
-          onClose={() => setImportOpen(false)}
-          onImported={(id) => {
-            setImportOpen(false);
-            router.push(`/skills/${id}?tab=config`);
-          }}
-        />
-      )}
     </aside>
   );
 }

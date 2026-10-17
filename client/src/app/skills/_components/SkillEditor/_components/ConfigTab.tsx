@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Badge, Button, FormField, SelectInput, TextInput, Toggle } from "@devdigest/ui";
 import type { Skill, SkillType } from "@devdigest/shared";
-import { useDeleteSkill, useSkillAgents, useUpdateSkill } from "@/lib/hooks/skills";
+import { useUpdateSkill } from "@/lib/hooks/skills";
+import { DeleteSkillModal } from "../../DeleteSkillModal";
 import { approximateTokens } from "../../../helpers";
 import { SKILL_TYPES } from "../../../constants";
 import { skillStyles as s } from "../../../styles";
@@ -14,8 +15,7 @@ export function ConfigTab({ skill }: { skill: Skill }) {
   const t = useTranslations("skills");
   const router = useRouter();
   const update = useUpdateSkill();
-  const remove = useDeleteSkill();
-  const linkedAgents = useSkillAgents(skill.id);
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [name, setName] = React.useState(skill.name);
   const [description, setDescription] = React.useState(skill.description);
   const [type, setType] = React.useState<SkillType>(skill.type);
@@ -34,13 +34,6 @@ export function ConfigTab({ skill }: { skill: Skill }) {
       id: skill.id,
       patch: { name: name.trim(), description: description.trim(), type, body },
     });
-  };
-  const deleteSkill = async () => {
-    const names = linkedAgents.data?.map((agent) => agent.name).join(", ");
-    const impact = names ? `\n\n${t("config.deleteLinkedAgents", { names })}` : "";
-    if (!window.confirm(`${t("config.deleteConfirm", { name: skill.name })}${impact}`)) return;
-    await remove.mutateAsync(skill.id);
-    router.push("/skills");
   };
 
   return (
@@ -89,11 +82,14 @@ export function ConfigTab({ skill }: { skill: Skill }) {
         <Button kind="primary" icon="Check" onClick={() => void save()} disabled={!isDirty || !name.trim() || !body.trim() || update.isPending}>
           {update.isPending ? t("actions.saving") : t("actions.save")}
         </Button>
-        <Button kind="danger" icon="Trash" onClick={() => void deleteSkill()} disabled={remove.isPending}>
-          {remove.isPending ? t("actions.deleting") : t("actions.delete")}
+        <Button kind="danger" icon="Trash" onClick={() => setConfirmingDelete(true)}>
+          {t("actions.delete")}
         </Button>
       </div>
-      {(update.isError || remove.isError) && <div role="alert" style={{ color: "var(--crit)", fontSize: 13 }}>{t("config.mutationFailed")}</div>}
+      {confirmingDelete && (
+        <DeleteSkillModal skill={skill} onClose={() => setConfirmingDelete(false)} onDeleted={() => router.push("/skills")} />
+      )}
+      {update.isError && <div role="alert" style={{ color: "var(--crit)", fontSize: 13 }}>{t("config.mutationFailed")}</div>}
     </div>
   );
 }
