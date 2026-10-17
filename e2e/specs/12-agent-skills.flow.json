@@ -1,0 +1,16 @@
+{
+  "name": "Agent Skills tab: link toggles, category labels and drag handles",
+  "description": "Read-only: opens the seeded Test Quality Reviewer's Skills tab and checks that every skill has a link toggle (role switch) and a category label, that the four linked, enabled skills are draggable while unlinked ones are not, and that the arrow buttons remain. Nothing is dragged, linked or saved, and no model is called.",
+  "steps": [
+    { "cmd": ["open", "{BASE}/agents"], "label": "load the Agents page" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "agents fetch settles" },
+    { "cmd": ["find", "text", "Test Quality Reviewer", "click"], "label": "open the seeded Test Quality Reviewer" },
+    { "cmd": ["wait", "--url", "tab=config"], "label": "agent editor reached" },
+    { "cmd": ["eval", "location.assign(location.pathname + '?tab=skills')"], "label": "switch to the Skills tab" },
+    { "cmd": ["wait", "--text", "4 / 4 attached"], "label": "four skills are attached" },
+    { "cmd": ["wait", "--text", "drag an enabled skill to reorder"], "label": "the hint mentions drag-and-drop" },
+    { "cmd": ["eval", "(() => { const rows = [...document.querySelectorAll('[data-testid^=agent-skill-]')]; const on = rows.filter((r) => r.querySelector('[role=switch]')?.getAttribute('aria-checked') === 'true'); return rows.length >= 4 && rows.every((r) => r.querySelector('[role=switch]')) && on.length === 4 && on.every((r) => r.getAttribute('draggable') === 'true') && rows.filter((r) => !on.includes(r)).every((r) => r.getAttribute('draggable') === 'false') && !document.querySelector('input[type=checkbox]'); })()"], "assert": { "stdoutIncludes": "true" }, "label": "every skill has a toggle; exactly the linked, enabled ones are draggable" },
+    { "cmd": ["wait", "--text", "rubric"], "label": "category labels render" },
+    { "cmd": ["find", "role", "button", "hover", "--name", "Move Behavioral Coverage down"], "label": "arrow buttons remain for keyboard reordering" }
+  ]
+}

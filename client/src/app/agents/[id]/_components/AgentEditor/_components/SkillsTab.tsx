@@ -3,11 +3,12 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { Badge, Button, Checkbox, EmptyState, ErrorState, Icon, Skeleton } from "@devdigest/ui";
+import { Badge, Button, EmptyState, ErrorState, Icon, Skeleton, Toggle } from "@devdigest/ui";
 import type { Agent, SkillSummary } from "@devdigest/shared";
 import { useAgentSkills, useSetAgentSkills, useSkills } from "@/lib/hooks/skills";
 import { MAX_AGENT_SKILLS, SKILL_TYPE_COLORS } from "@/app/skills/constants";
 import { skillStyles as s } from "@/app/skills/styles";
+import { moveLinkedSkill } from "../helpers";
 
 function orderedSkills(all: SkillSummary[], linkedIds: string[]): SkillSummary[] {
   const byId = new Map(all.map((skill) => [skill.id, skill]));
@@ -28,6 +29,8 @@ export function SkillsTab({ agent }: { agent: Agent }) {
   const [query, setQuery] = React.useState("");
   const [linkedIds, setLinkedIds] = React.useState<string[]>([]);
   const [limitReached, setLimitReached] = React.useState(false);
+  const [dragId, setDragId] = React.useState<string>();
+  const [overId, setOverId] = React.useState<string>();
 
   React.useEffect(() => {
     if (links.data) {
@@ -65,6 +68,15 @@ export function SkillsTab({ agent }: { agent: Agent }) {
     persist(next);
   };
 
+  const drop = (targetId: string) => {
+    const fromId = dragId;
+    setDragId(undefined);
+    setOverId(undefined);
+    if (!fromId || save.isPending) return;
+    const next = moveLinkedSkill(linkedIds, fromId, targetId);
+    if (next !== linkedIds) persist([...next]);
+  };
+
   if (skills.isError || links.isError) {
     return <ErrorState body={t("skills.loadError")} onRetry={() => { void skills.refetch(); void links.refetch(); }} />;
   }
@@ -94,9 +106,42 @@ export function SkillsTab({ agent }: { agent: Agent }) {
         {rows.map((skill) => {
           const linked = linkedIds.includes(skill.id);
           const index = linkedIds.indexOf(skill.id);
+          // Only a linked, globally enabled skill takes part in drag-and-drop;
+          // the arrows stay available for every linked skill (keyboard).
+          const draggable = linked && skill.enabled && !save.isPending;
           return (
-            <div key={skill.id} style={{ ...s.row, opacity: skill.enabled ? 1 : 0.6 }}>
-              <Checkbox checked={linked} onChange={(checked) => toggle(skill.id, checked)} label={<span style={{ fontWeight: 600 }}>{skill.name}</span>} />
+            <div
+              key={skill.id}
+              data-testid={`agent-skill-${skill.id}`}
+              draggable={draggable}
+              onDragStart={draggable ? (event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", skill.id);
+                setDragId(skill.id);
+              } : undefined}
+              onDragOver={draggable && dragId ? (event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                if (overId !== skill.id) setOverId(skill.id);
+              } : undefined}
+              onDragLeave={draggable ? () => setOverId((id) => (id === skill.id ? undefined : id)) : undefined}
+              onDrop={draggable ? (event) => { event.preventDefault(); drop(skill.id); } : undefined}
+              onDragEnd={() => { setDragId(undefined); setOverId(undefined); }}
+              style={{
+                ...s.row,
+                opacity: skill.enabled ? (dragId === skill.id ? 0.5 : 1) : 0.6,
+                cursor: draggable ? "grab" : undefined,
+                outline: overId === skill.id && dragId !== skill.id ? "2px dashed var(--accent)" : undefined,
+              }}
+            >
+              <span aria-hidden title={draggable ? t("skills.dragHint") : undefined} style={{ display: "flex", color: draggable ? "var(--text-muted)" : "transparent" }}>
+                <Icon.Menu size={13} />
+              </span>
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Toggle on={linked} onChange={(on) => toggle(skill.id, on)} size={14} />
+                <span style={{ fontWeight: 600 }}>{skill.name}</span>
+                <span style={s.visuallyHidden}>{t("skills.linkLabel")}</span>
+              </label>
               <span style={{ flex: 1, color: "var(--text-muted)", fontSize: 12 }}>{skill.description}</span>
               {!skill.enabled && <Badge color="var(--text-muted)">{t("skills.disabledGlobally")}</Badge>}
               <Badge color={SKILL_TYPE_COLORS[skill.type]}>{t(`skills.type.${skill.type}`)}</Badge>

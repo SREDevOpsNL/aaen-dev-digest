@@ -93,7 +93,7 @@
     "enabledCount": "{linked} of {total} enabled",
     "attachedCount": "{linked} / {max} attached",
     "filterPlaceholder": "Filter skills…",
-    "orderHint": "Attach up to {max} skills. Earlier skills appear earlier in the assembled prompt; use the arrows to reorder them.",
+    "orderHint": "Attach up to {max} skills. Earlier skills appear earlier in the assembled prompt: drag an enabled skill to reorder, or use the arrows.",
     "limitReached": "This agent already has the maximum of {max} skills attached.",
     "loadError": "Could not load skills.",
     "emptyTitle": "No skills yet",
@@ -110,7 +110,9 @@
       "convention": "convention",
       "security": "security",
       "custom": "custom"
-    }
+    },
+    "dragHint": "Drag to reorder",
+    "linkLabel": "attached to this agent"
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
