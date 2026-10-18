@@ -5,6 +5,8 @@ import {
   deriveSkillName,
   filterSkills,
   isSupportedSkillFileName,
+  LINE_DIFF_MAX_CELLS,
+  lineDiff,
 } from "./helpers";
 
 const SKILLS: SkillSummary[] = [
@@ -58,5 +60,44 @@ describe("skills helpers", () => {
   it("uses the UI token estimate documented by the editor", () => {
     expect(approximateTokens("")).toBe(0);
     expect(approximateTokens("12345")).toBe(2);
+  });
+});
+
+describe("lineDiff", () => {
+  const render = (before: string, after: string) =>
+    lineDiff(before, after).map((line) => `${{ same: " ", add: "+", del: "-" }[line.kind]}${line.text}`);
+
+  it("returns only unchanged lines for identical bodies", () => {
+    expect(render("a\nb", "a\nb")).toEqual([" a", " b"]);
+  });
+
+  it("marks a changed line as removed then added, keeping the context around it", () => {
+    expect(render("# Title\nold rule\nfooter", "# Title\nnew rule\nfooter")).toEqual([
+      " # Title",
+      "-old rule",
+      "+new rule",
+      " footer",
+    ]);
+  });
+
+  it("handles pure insertions and deletions, including at the ends", () => {
+    expect(render("a\nc", "a\nb\nc")).toEqual([" a", "+b", " c"]);
+    expect(render("a\nb\nc", "b\nc")).toEqual(["-a", " b", " c"]);
+    expect(render("a", "a\nz")).toEqual([" a", "+z"]);
+  });
+
+  it("finds the longest common subsequence when lines move", () => {
+    expect(render("x\na\nb\nc", "a\nb\nx\nc")).toEqual(["-x", " a", " b", "+x", " c"]);
+  });
+
+  it("falls back to one removed and one added block when the middle is too large", () => {
+    const size = Math.ceil(Math.sqrt(LINE_DIFF_MAX_CELLS)) + 1;
+    const before = ["head", ...Array.from({ length: size }, (_, i) => `a${i}`), "tail"].join("\n");
+    const after = ["head", ...Array.from({ length: size }, (_, i) => `b${i}`), "tail"].join("\n");
+    const lines = lineDiff(before, after);
+    expect(lines[0]).toEqual({ kind: "same", text: "head" });
+    expect(lines.at(-1)).toEqual({ kind: "same", text: "tail" });
+    expect(lines.filter((l) => l.kind === "del")).toHaveLength(size);
+    expect(lines.findIndex((l) => l.kind === "add")).toBe(size + 1);
   });
 });

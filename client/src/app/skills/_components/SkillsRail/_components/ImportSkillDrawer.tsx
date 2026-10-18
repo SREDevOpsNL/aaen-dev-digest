@@ -37,7 +37,7 @@ export function ImportSkillDrawer({ onClose, onImported }: { onClose: () => void
       name: resolvedName,
       description: t("import.defaultDescription"),
       type: "custom",
-      source: "manual",
+      source: "imported_file",
       body,
       enabled: false,
     });

@@ -25,7 +25,7 @@ Status values: `Fail`, `Partial`, `No evidence`, `Pass (static)` (audit only), `
 | 13 | Agent Skills tab: link, enable/disable, drag-and-drop reorder | Implemented (PR #19) | D | `AgentEditor/_components/SkillsTab.tsx`: link `Toggle` per skill, native HTML5 drag-and-drop on linked + enabled rows (`moveLinkedSkill` in `AgentEditor/helpers.ts`), arrows kept for keyboard | `SkillsTab.test.tsx` (link/unlink, drop persists the new order, arrows); e2e flow 12 (toggles, draggable rows); temporary Chromium check on the ephemeral stack: DragEvent drop → `POST /agents/:id/skills` → order survives reload. OS mouse drag in the walkthrough | Up/Down arrows, 4-skill limit message |
 | 14 | Drag-and-drop order determines prompt order | Pass (static) | — | `agents/repository.ts` `enabledSkillsForPrompt` orders by `agent_skills.order` | PR #19: `skills-prompt.it.test.ts` relinks in a new order and the next run's Skills block follows it | PR-E must keep order on link-one |
 | 15 | Import from `.md` (or `.zip`) with a content preview before saving | Pass (static) | — | `ImportSkillDrawer` accepts `.md/.markdown/.txt` and shows the body before saving | — (final: check the preview counts as "preview") | PR #17: still reached from the Add menu (`AddSkillMenu` → Import); PR-C (`imported_file`) |
-| 16 | At least one skill linked to the new agents has imported origin | Fail | C, F | `source` is always `manual` on import | — | — |
+| 16 | At least one skill linked to the new agents has imported origin | Partial | C, F | PR #18: `SkillSource` `imported_file` (contract, Drizzle enum, `POST /skills` validator); `ImportSkillDrawer` sends it; `SourceBadge` "Imported" on card, preview and header | PR #18: `skills.it.test.ts` reads `source = 'imported_file'` back by raw SQL; `ImportSkillDrawer.test.tsx`. Still needed (PR-F + walkthrough): a real import of `deprecation-policy.md` linked to the API Contract Reviewer | Import drawer preview (15) |
 | 17 | Controlled experiment, Test Quality (without skill: missed; with: flagged) | No evidence | F | Test Quality Reviewer + 4 skills seeded | — | — |
 | 18 | Controlled experiment, API Contract (breaking route change) | Fail | F | No API Contract reviewer | — | — |
 | 19 | Run trace: separate Skills block with its own token count | Implemented (PR #19) | D | `renderSkillsSection` (reviewer-core) used by `assemblePrompt`; `PromptAssembly.skills_tokens` filled by `skillsSectionTokens` (`container.tokenizer`); `PromptBlock` shows "~N tokens" on the Skills block | `skills-prompt.it.test.ts`: `skills_tokens` = tokenizer count of the exact section sliced from the stored prompt, null without skills (fails if only bodies are counted); `TraceBody.test.tsx`. Browser check on a real run in PR-F / walkthrough | — |
@@ -34,11 +34,11 @@ Status values: `Fail`, `Partial`, `No evidence`, `Pass (static)` (audit only), `
 | 22 | Skill card also shows version and `agent_count` | Implemented (PR #17, merged) | B | `SkillCard` shows `v{version}` and the linked-agent count from the existing `used_by_count` ("N agents"); no contract change | `page.test.tsx`: `v3`, `2 agents`, `No agents` | If the grader requires a literal `agent_count` JSON field: add a compatible alias (plan decision 5) |
 | 23 | Delete button on the skill card | Implemented (PR #17, merged) | B | `SkillCard` Delete (`IconBtn`, sibling control, never nested) | `page.test.tsx`: Delete opens the confirmation, never the preview (pointer and keyboard) | — |
 | 24 | Skill delete confirmation modal (Confirm, Cancel, X) | Implemented (PR #17, merged) | B | `DeleteSkillModal` on `components/confirm-modal/ConfirmModal` (vendored `Modal` with X); used by the card and the Config tab; Confirm disabled until the linked-agent impact has loaded | `ConfirmModal.test.tsx`; `DeleteSkillModal.test.tsx` (loading, failure + Retry, none, linked); `page.test.tsx` (Cancel and X keep, Confirm deletes). e2e 11: Cancel and X | — |
-| 25 | `/skills/:id` tabs Config, Preview, Versioning (Stats optional) | Pass (static) | — | `SKILL_TABS`; tab label currently "Versions" | — | PR-C renames it to "Versioning" |
+| 25 | `/skills/:id` tabs Config, Preview, Versioning (Stats optional) | Implemented (PR #18, merged) | C | `SKILL_TABS` (key `versions` unchanged); label "Versioning" in `messages/en/skills.json` | `VersionsTab.test.tsx` finds the "Versioning" tab; e2e flow 11 opens it | — |
 | 26 | Preview renders Markdown | Pass (static) | — | `PreviewTab` uses `Markdown` | — | — |
-| 27 | Versioning lists all versions | Pass (static) | — | `VersionsTab` + `GET /skills/:id/versions` | — | PR-C |
-| 28 | Diff button per previous version | Fail | C | — | — | — |
-| 29 | Restore button per version | Fail | C | — | — | — |
+| 27 | Versioning lists all versions | Pass (static) | — | `VersionsTab` + `GET /skills/:id/versions` | PR #18: `VersionsTab.test.tsx` lists every version; e2e flow 11 renders "Version history" | Restore must keep history (tested in PR #18) |
+| 28 | Diff button per previous version | Implemented (PR #18, merged) | C | `VersionsTab` Diff on each non-current version; pure `lineDiff` in `app/skills/helpers.ts` | `helpers.test.ts` (5 `lineDiff` cases); `VersionsTab.test.tsx` diff lines and identical-body message | — |
+| 29 | Restore button per version | Implemented (PR #18, merged) | C | Restore on each non-current version (restoring the current one would be a no-op) behind `ConfirmModal`; `POST /skills/:id/versions/:version/restore` → `SkillsRepository.restoreVersion` (one transaction, row lock, appends v(n+1)) | `skills.it.test.ts`: restore → v4 with v1's body, history kept, no-op, 404s, cross-workspace 404, concurrent restores/edit sequential 1–6 (fails without the lock); `VersionsTab.test.tsx` Cancel/X/Confirm. Browser restore + reload in the walkthrough | Version numbering of `PUT /skills/:id` |
 | 30 | Search/filter in the agent Skills tab | Pass (static) | — | `SkillsTab` filter input | — | PR-D |
 | 31 | Drag-and-drop only for enabled skills | Implemented (PR #19) | D | `SkillsTab`: `draggable = linked && skill.enabled && !save.isPending`; no drop handler otherwise | `SkillsTab.test.tsx`: disabled/unlinked rows `draggable="false"` and drags from or onto them never save (fails if the enabled check is removed); e2e flow 12 checks exactly the 4 linked + enabled rows are draggable | — |
 | 32 | Agent card: name, description, model, toggle, linked-skill count | Pass (static) | — | `AgentCard` | `AgentCard.test.tsx` (name, model, count) still passes with the PR #17 delete modal | PR-B |
@@ -70,10 +70,11 @@ Status values: `Fail`, `Partial`, `No evidence`, `Pass (static)` (audit only), `
 | --- | --- |
 | Implemented (PR #16, merged) | 6 (1, 2, 3, 4, 5, 21) |
 | Implemented (PR #17, merged) | 10 (6, 9, 10, 11, 12, 22, 23, 24, 34, 44) |
+| Implemented (PR #18, merged) | 3 (25, 28, 29) |
 | Implemented (PR #19, draft) | 3 (13, 19, 31) |
-| Pass (static) | 25 |
-| Partial | 3 (42, 45, 50) |
-| Fail | 5 (16, 18, 28, 29, 43) |
+| Pass (static) | 24 |
+| Partial | 4 (16, 42, 45, 50) |
+| Fail | 2 (18, 43) |
 | No evidence | 1 (17) |
 | Verified | 0 |
 | **Total** | **53** |

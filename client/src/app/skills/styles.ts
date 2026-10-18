@@ -29,6 +29,14 @@ export const skillStyles = {
   visuallyHidden: { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" } satisfies CSSProperties,
   muted: { color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 } satisfies CSSProperties,
   versionRow: { border: "1px solid var(--border)", background: "var(--bg-elevated)", borderRadius: 8, padding: "12px 14px", marginBottom: 8 } satisfies CSSProperties,
+  versionBody: { marginTop: 12, padding: 12, overflow: "auto", whiteSpace: "pre-wrap", background: "var(--bg-surface)", borderRadius: 7, color: "var(--text-secondary)", fontSize: 12 } satisfies CSSProperties,
+  diffLine: (kind: "same" | "add" | "del"): CSSProperties => ({
+    margin: "0 -12px",
+    padding: "0 12px",
+    // Same tokens as the PR diff viewer (components/diff-viewer/styles.ts).
+    background: kind === "add" ? "var(--code-add)" : kind === "del" ? "var(--code-del)" : undefined,
+    color: kind === "add" ? "var(--code-add-text)" : kind === "del" ? "var(--code-del-text)" : "var(--text-muted)",
+  }),
   row: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid var(--border)", background: "var(--bg-elevated)", borderRadius: 8 } satisfies CSSProperties,
   iconButton: { border: "1px solid var(--border)", background: "var(--bg-surface)", color: "var(--text-secondary)", borderRadius: 6, padding: 6, display: "grid", placeItems: "center" } satisfies CSSProperties,
 } as const;
