@@ -47,7 +47,10 @@ export default function ConventionsPage() {
   const all = candidates ?? [];
   const counts = countByStatus(all);
   const visible = filterCandidates(all, filter);
-  const scanned = all.length > 0;
+  // Scanned = candidates exist, or a scan in this session succeeded (even with zero
+  // candidates). A zero-candidate result is not persisted, so after a reload the page
+  // cannot tell it from "never scanned": Run Scan then stays available, never a dead end.
+  const scanned = all.length > 0 || scan !== null;
   const acceptedIds = all.filter((candidate) => candidate.status === "accepted").map((candidate) => candidate.id);
   const selectedIds = acceptedIds.filter((id) => !excluded.has(id));
 
@@ -78,9 +81,16 @@ export default function ConventionsPage() {
         {modalOpen && <CreateSkillModal repoName={repoName} acceptedCount={selectedIds.length} draft={draft} onClose={() => setModalOpen(false)} />}
         <div style={s.headerRow}>
           <h1 style={s.heading}>{t("page.headingPrefix")}<span className="mono" style={s.repoName}>{repoName}</span></h1>
-          <Button icon="RefreshCw" onClick={runScan} loading={extract.isPending} disabled={extract.isPending}>
-            {extract.isPending ? t("page.scanning") : scanned ? t("page.rescan") : t("page.runExtraction")}
-          </Button>
+          {/* Two separate actions on the same extract call: Run Scan for the first
+              scan of a repository, ReScan once candidates exist. */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button kind="primary" icon="Play" onClick={runScan} loading={extract.isPending && !scanned} disabled={extract.isPending || scanned} title={scanned ? t("page.runScanDone") : undefined}>
+              {extract.isPending && !scanned ? t("page.scanning") : t("page.runScan")}
+            </Button>
+            <Button icon="RefreshCw" onClick={runScan} loading={extract.isPending && scanned} disabled={extract.isPending || !scanned} title={scanned ? undefined : t("page.rescanFirst")}>
+              {extract.isPending && scanned ? t("page.scanning") : t("page.rescan")}
+            </Button>
+          </div>
         </div>
         <p style={s.subtitle}>{t("page.subtitle")}</p>
         {scan && <p style={s.scanSummary}>{t("page.scanSummary", { sampled: scan.sampled_files.length, model: scan.model, proposed: scan.proposed, droppedUngrounded: scan.dropped_ungrounded, droppedDuplicate: scan.dropped_duplicate })}</p>}
@@ -92,13 +102,15 @@ export default function ConventionsPage() {
               <Button kind="ghost" size="sm" icon="X" onClick={() => setExcluded(excluded.size === 0 ? new Set(acceptedIds) : new Set())}>{excluded.size === 0 ? t("page.deselectAll") : t("page.selectAll")}</Button>
               <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("page.selectedCount", { selected: selectedIds.length, total: counts.accepted })}</span>
             </>}
-            <Button kind="primary" icon="Sparkles" disabled={selectedIds.length === 0 || draftSkill.isPending} onClick={openSkillModal}>{t("page.createSkill")}</Button>
+            {counts.accepted > 0 && <Button kind="primary" icon="Sparkles" disabled={selectedIds.length === 0 || draftSkill.isPending} onClick={openSkillModal}>{t("page.createSkill")}</Button>}
           </div>
         )}
         {isLoading && <div style={s.list}>{Array.from({ length: SKELETON_CARDS }, (_, index) => <Skeleton key={index} height={180} />)}</div>}
         {isError && <ErrorState title={t("page.loadError")} onRetry={() => refetch()} />}
-        {!isLoading && !isError && !scanned && <EmptyState icon="ListChecks" title={t("page.empty.title")} body={t("page.empty.body")} cta={t("page.empty.cta")} onCta={runScan} />}
-        {!isLoading && !isError && scanned && visible.length === 0 && <EmptyState icon="ListChecks" title={t("page.emptyFiltered.title")} body={t("page.emptyFiltered.body")} />}
+        {!isLoading && !isError && !scanned && <EmptyState icon="ListChecks" title={t("page.empty.title")} body={t("page.empty.body")} />}
+        {!isLoading && !isError && scanned && visible.length === 0 && (all.length === 0
+          ? <EmptyState icon="ListChecks" title={t("page.emptyScan.title")} body={t("page.emptyScan.body")} />
+          : <EmptyState icon="ListChecks" title={t("page.emptyFiltered.title")} body={t("page.emptyFiltered.body")} />)}
         {visible.length > 0 && <>
           <p style={s.scanSummary}><Icon.Check size={12} style={{ verticalAlign: "-1px", marginRight: 6 }} />{t("page.candidateCount", { count: visible.length })}</p>
           <div style={s.list}>{visible.map((candidate) => (

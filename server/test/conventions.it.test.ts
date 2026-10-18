@@ -60,10 +60,13 @@ suite('conventions module (Testcontainers pg)', () => {
     expect(second.dropped_duplicate).toBe(1);
     expect(second.candidates[0]).toMatchObject({ id: conventionId, status: 'accepted' });
     const draft = (await app.inject({ method: 'POST', url: `/repos/${repoId}/conventions/skill`, payload: {} })).json();
-    expect(draft).toMatchObject({ name: 'billing-api-conventions', type: 'convention', convention_ids: [conventionId] });
-    const created = await app.inject({ method: 'POST', url: '/skills', payload: { ...draft, source: 'extracted', enabled: false } });
+    expect(draft).toMatchObject({ name: 'repo-conventions', type: 'convention', convention_ids: [conventionId] });
+    const agent = (await app.inject({ method: 'POST', url: '/agents', payload: { name: `Conventions agent ${Date.now()}`, provider: 'openai', model: 'gpt-4o-mini', system_prompt: 'Review.' } })).json() as { id: string };
+    const created = await app.inject({ method: 'POST', url: '/skills', payload: { ...draft, source: 'extracted', enabled: false, link_agent_id: agent.id } });
     expect(created.statusCode).toBe(201);
-    expect(created.json()).toMatchObject({ source: 'extracted', enabled: false, evidence_files: ['src/api/users.ts'] });
+    expect(created.json()).toMatchObject({ name: 'repo-conventions', source: 'extracted', enabled: false, evidence_files: ['src/api/users.ts'] });
+    const links = (await app.inject({ url: `/agents/${agent.id}/skills` })).json() as Array<{ skill_id: string }>;
+    expect(links.map((link) => link.skill_id)).toEqual([created.json().id]); // created and linked in one request
     await app.close();
   });
 });

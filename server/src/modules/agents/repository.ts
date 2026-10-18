@@ -1,9 +1,18 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
 import { DEFAULT_AGENT_DESCRIPTION, INITIAL_AGENT_VERSION } from './constants.js';
 import { isConfigChange } from './helpers.js';
+import {
+  exceedsSkillLimit,
+  insertSkillAt,
+  linkedSkillIds,
+  lockAgent,
+  MAX_AGENT_SKILLS,
+  missingWorkspaceSkills,
+  writeAgentSkills,
+} from '../_shared/agent-skill-links.js';
 
 /**
  * A2 — agents data-access. Owns `agents`, `agent_versions`, and the
@@ -51,7 +60,8 @@ export interface LinkedSkillRow {
 export type SetSkillsResult =
   | { kind: 'ok'; links: LinkedSkillRow[] }
   | { kind: 'agent_not_found' }
-  | { kind: 'skills_not_found'; skillIds: string[] };
+  | { kind: 'skills_not_found'; skillIds: string[] }
+  | { kind: 'limit_exceeded'; max: number };
 
 export class AgentsRepository {
   constructor(private db: Db) {}
@@ -237,67 +247,41 @@ export class AgentsRepository {
     agentId: string,
     skillIds: string[],
   ): Promise<SetSkillsResult> {
+    return this.relink(workspaceId, agentId, () => skillIds);
+  }
+
+  /**
+   * Link one skill at `order` (default: the end), or move it there if already
+   * linked. The read of the current links happens under the agent row lock, in
+   * the same transaction as the write, so concurrent link-one requests cannot
+   * overwrite each other.
+   */
+  async linkSkill(
+    workspaceId: string,
+    agentId: string,
+    skillId: string,
+    order?: number,
+  ): Promise<SetSkillsResult> {
+    return this.relink(workspaceId, agentId, (previous) => insertSkillAt(previous, skillId, order));
+  }
+
+  /** Lock the agent, compute the next links from the current ones, validate, write. */
+  private async relink(
+    workspaceId: string,
+    agentId: string,
+    nextFrom: (previous: string[]) => string[],
+  ): Promise<SetSkillsResult> {
     return this.db.transaction(async (tx) => {
-      const [agent] = await tx
-        .select()
-        .from(t.agents)
-        .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.id, agentId)))
-        .for('update');
+      const agent = await lockAgent(tx, workspaceId, agentId);
       if (!agent) return { kind: 'agent_not_found' };
 
-      const ownedSkills =
-        skillIds.length === 0
-          ? []
-          : await tx
-              .select({ id: t.skills.id })
-              .from(t.skills)
-              .where(
-                and(
-                  eq(t.skills.workspaceId, workspaceId),
-                  inArray(t.skills.id, skillIds),
-                ),
-              );
-      const ownedIds = new Set(ownedSkills.map((row) => row.id));
-      const missing = skillIds.filter((id) => !ownedIds.has(id));
+      const previous = await linkedSkillIds(tx, agentId);
+      const next = nextFrom(previous);
+      const missing = await missingWorkspaceSkills(tx, workspaceId, next);
       if (missing.length > 0) return { kind: 'skills_not_found', skillIds: missing };
+      if (exceedsSkillLimit(previous, next)) return { kind: 'limit_exceeded', max: MAX_AGENT_SKILLS };
 
-      const previous = await tx
-        .select({ skillId: t.agentSkills.skillId })
-        .from(t.agentSkills)
-        .where(eq(t.agentSkills.agentId, agentId))
-        .orderBy(asc(t.agentSkills.order), asc(t.agentSkills.skillId));
-      const changed =
-        previous.length !== skillIds.length ||
-        previous.some((link, index) => link.skillId !== skillIds[index]);
-
-      if (changed) {
-        await tx.delete(t.agentSkills).where(eq(t.agentSkills.agentId, agentId));
-        if (skillIds.length > 0) {
-          await tx
-            .insert(t.agentSkills)
-            .values(skillIds.map((skillId, order) => ({ agentId, skillId, order })));
-        }
-
-        const nextVersion = agent.version + 1;
-        await tx
-          .update(t.agents)
-          .set({ version: nextVersion })
-          .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.id, agentId)));
-        await tx.insert(t.agentVersions).values({
-          agentId,
-          version: nextVersion,
-          configJson: {
-            provider: agent.provider,
-            model: agent.model,
-            system_prompt: agent.systemPrompt,
-            output_schema: agent.outputSchema,
-            strategy: agent.strategy,
-            ci_fail_on: agent.ciFailOn,
-            repo_intel: agent.repoIntel,
-            skills: skillIds,
-          },
-        });
-      }
+      await writeAgentSkills(tx, agent, previous, next);
 
       const links = await tx
         .select({ skill: t.skills, order: t.agentSkills.order })
