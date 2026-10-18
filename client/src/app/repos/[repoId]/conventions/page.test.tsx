@@ -124,6 +124,28 @@ describe("ConventionsPage", () => {
     await waitFor(() => expect(extract).toHaveBeenCalledWith("r1"));
   });
 
+  it("treats a successful scan that returns no candidates as scanned: ReScan on, Run Scan off", async () => {
+    extract.mockResolvedValue({ ...scan, candidates: [], proposed: 0, dropped_ungrounded: 0, dropped_duplicate: 0 });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Run Scan" }));
+    expect(await screen.findByText("The scan found no conventions")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run Scan" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "ReScan" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Create skill" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "ReScan" }));
+    await waitFor(() => expect(extract).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps Run Scan available when the extraction fails", async () => {
+    extract.mockRejectedValue(new Error("boom"));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Run Scan" }));
+    await waitFor(() => expect(extract).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Run Scan" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "ReScan" })).toBeDisabled();
+  });
+
   it("shows Create skill only once at least one candidate is accepted", () => {
     candidates = [candidate("a", "pending"), candidate("b", "rejected")];
     renderPage();

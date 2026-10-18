@@ -32,7 +32,11 @@
     },
     "runScan": "Run Scan",
     "runScanDone": "This repository has been scanned. Use ReScan to scan it again.",
-    "rescanFirst": "Run the first scan with Run Scan."
+    "rescanFirst": "Run the first scan with Run Scan.",
+    "emptyScan": {
+      "title": "The scan found no conventions",
+      "body": "No rule passed the evidence check in the sampled files. Use ReScan to try again, for example after the repository changes."
+    }
   },
   "card": {
     "confidence": "Confidence",

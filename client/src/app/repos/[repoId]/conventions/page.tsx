@@ -47,7 +47,10 @@ export default function ConventionsPage() {
   const all = candidates ?? [];
   const counts = countByStatus(all);
   const visible = filterCandidates(all, filter);
-  const scanned = all.length > 0;
+  // Scanned = candidates exist, or a scan in this session succeeded (even with zero
+  // candidates). A zero-candidate result is not persisted, so after a reload the page
+  // cannot tell it from "never scanned": Run Scan then stays available, never a dead end.
+  const scanned = all.length > 0 || scan !== null;
   const acceptedIds = all.filter((candidate) => candidate.status === "accepted").map((candidate) => candidate.id);
   const selectedIds = acceptedIds.filter((id) => !excluded.has(id));
 
@@ -105,7 +108,9 @@ export default function ConventionsPage() {
         {isLoading && <div style={s.list}>{Array.from({ length: SKELETON_CARDS }, (_, index) => <Skeleton key={index} height={180} />)}</div>}
         {isError && <ErrorState title={t("page.loadError")} onRetry={() => refetch()} />}
         {!isLoading && !isError && !scanned && <EmptyState icon="ListChecks" title={t("page.empty.title")} body={t("page.empty.body")} />}
-        {!isLoading && !isError && scanned && visible.length === 0 && <EmptyState icon="ListChecks" title={t("page.emptyFiltered.title")} body={t("page.emptyFiltered.body")} />}
+        {!isLoading && !isError && scanned && visible.length === 0 && (all.length === 0
+          ? <EmptyState icon="ListChecks" title={t("page.emptyScan.title")} body={t("page.emptyScan.body")} />
+          : <EmptyState icon="ListChecks" title={t("page.emptyFiltered.title")} body={t("page.emptyFiltered.body")} />)}
         {visible.length > 0 && <>
           <p style={s.scanSummary}><Icon.Check size={12} style={{ verticalAlign: "-1px", marginRight: 6 }} />{t("page.candidateCount", { count: visible.length })}</p>
           <div style={s.list}>{visible.map((candidate) => (
