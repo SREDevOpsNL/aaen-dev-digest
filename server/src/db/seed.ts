@@ -7,7 +7,11 @@ import {
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
   TEST_QUALITY_REVIEWER_PROMPT,
+  API_CONTRACT_REVIEWER_PROMPT,
 } from './seed-prompts.js';
+import { API_CONTRACT_SEED_SKILLS } from './seed-skills.js';
+import { EXPERIMENT_FIXTURES, patchStats } from './seed-fixtures.js';
+import type { IntentAnalysis } from '@devdigest/shared';
 import { INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
 import { contextHash, identifyLinkedIssue, issueHash } from '../modules/intent/helpers.js';
 
@@ -21,9 +25,10 @@ const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
  *
  * Seeds: default workspace + system user + membership, default settings,
  * demo repo (acme/payments-api), PR #482 with files/commits, a sample review
- * with a few findings, four reusable test-quality skills, and four built-in
- * agents (General + Security + Performance + Test Quality), all on the default
- * openrouter/deepseek-v4-flash provider+model.
+ * with a few findings, four reusable test-quality skills, three API Contract
+ * skills, five built-in agents (General + Security + Performance + Test Quality
+ * + API Contract), all on the default openrouter/deepseek-v4-flash
+ * provider+model, and the two HW2 experiment fixture PRs (#501, #502).
  */
 
 export const DEFAULT_WORKSPACE_NAME = 'default';
@@ -180,53 +185,82 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
   // A demo intent fingerprinted exactly as IntentService does, so it reads as
   // fresh: opening the seeded PR never triggers generation, and seeded e2e
   // flows stay read-only with no model call. Never overwrites a real one.
-  const seededFiles = await db.select().from(t.prFiles).where(eq(t.prFiles.prId, pr!.id));
-  const linked = identifyLinkedIssue(pr!.body, { owner: 'acme', name: 'payments-api' });
-  await db
-    .insert(t.prIntent)
-    .values({
-      prId: pr!.id,
-      intent: 'Adds a token-bucket rate limiter to the public API endpoints',
-      inScope: ['public API rate limiting', 'rate-limit configuration'],
-      outOfScope: ['authenticated endpoints', 'billing'],
-      status: 'ready',
-      analysis: {
-        claimed_purpose:
-          'Add rate limiting to public API endpoints to prevent abuse from unauthenticated clients.',
-        supported_points: [
-          {
-            statement: 'Adds a token-bucket rate limiter to the public API endpoints',
-            evidence: [{ file: 'src/middleware/ratelimit.ts', side: 'new', start_line: 1, end_line: 12 }],
-          },
-        ],
-        discrepancies: [
-          {
-            kind: 'undeclared_change',
-            statement: 'Also changes payment configuration in src/config.ts',
-            evidence: [{ file: 'src/config.ts', side: 'new', start_line: 12, end_line: 12 }],
-          },
-        ],
-        in_scope: ['public API rate limiting', 'rate-limit configuration'],
-        out_of_scope: ['authenticated endpoints', 'billing'],
-        confidence: 'medium',
-        unverified_statements: [],
-      },
-      evidence: { files_listed: seededFiles.length, files_excerpted: 2, truncated: false, invalid_citations: 0 },
-      headSha: pr!.headSha,
-      contextHash: contextHash({
-        title: pr!.title,
-        body: pr!.body,
-        files: seededFiles,
-        linkedIssueNumber: linked.status === 'identified' ? linked.number : null,
-      }),
-      issueHash: issueHash(null),
-      promptVersion: INTENT_PROMPT_VERSION,
-      provider: 'seed',
-      model: 'seed',
-      derivedAt: new Date('2026-10-01T00:00:00Z'),
-      startedAt: new Date('2026-10-01T00:00:00Z'),
-    })
-    .onConflictDoNothing();
+  await seedFreshIntent(db, pr!, {
+    intent: 'Adds a token-bucket rate limiter to the public API endpoints',
+    analysis: {
+      claimed_purpose:
+        'Add rate limiting to public API endpoints to prevent abuse from unauthenticated clients.',
+      supported_points: [
+        {
+          statement: 'Adds a token-bucket rate limiter to the public API endpoints',
+          evidence: [{ file: 'src/middleware/ratelimit.ts', side: 'new', start_line: 1, end_line: 12 }],
+        },
+      ],
+      discrepancies: [
+        {
+          kind: 'undeclared_change',
+          statement: 'Also changes payment configuration in src/config.ts',
+          evidence: [{ file: 'src/config.ts', side: 'new', start_line: 12, end_line: 12 }],
+        },
+      ],
+      in_scope: ['public API rate limiting', 'rate-limit configuration'],
+      out_of_scope: ['authenticated endpoints', 'billing'],
+      confidence: 'medium',
+      unverified_statements: [],
+    },
+    filesExcerpted: 2,
+  });
+
+  // ---- HW2 experiment fixtures: PRs #501 and #502 (see ./seed-fixtures.ts) ----
+  // Reviewed from their stored patches only; each gets a fresh cached intent so
+  // a review batch never derives one. Existing rows are left as they are.
+  for (const fixture of EXPERIMENT_FIXTURES) {
+    let [fixturePr] = await db
+      .select()
+      .from(t.pullRequests)
+      .where(and(eq(t.pullRequests.repoId, repoId), eq(t.pullRequests.number, fixture.number)));
+    if (!fixturePr) {
+      const stats = fixture.files.map((file) => ({ file, ...patchStats(file.patch) }));
+      [fixturePr] = await db
+        .insert(t.pullRequests)
+        .values({
+          workspaceId,
+          repoId,
+          number: fixture.number,
+          title: fixture.title,
+          author: fixture.author,
+          branch: fixture.branch,
+          base: 'main',
+          headSha: fixture.headSha,
+          additions: stats.reduce((sum, f) => sum + f.additions, 0),
+          deletions: stats.reduce((sum, f) => sum + f.deletions, 0),
+          filesCount: fixture.files.length,
+          status: 'needs_review',
+          body: fixture.body,
+        })
+        .returning();
+      await db.insert(t.prFiles).values(
+        stats.map(({ file, additions, deletions }) => ({
+          prId: fixturePr!.id,
+          path: file.path,
+          additions,
+          deletions,
+          patch: file.patch,
+        })),
+      );
+      await db.insert(t.prCommits).values({
+        prId: fixturePr!.id,
+        sha: fixture.headSha,
+        message: fixture.commitMessage,
+        author: fixture.author,
+      });
+    }
+    await seedFreshIntent(db, fixturePr!, {
+      intent: fixture.intent.summary,
+      analysis: fixture.intent.analysis,
+      filesExcerpted: fixture.files.length,
+    });
+  }
 
   // ---- built-in skills (text configuration only; never executable) ----
   const seedSkills: Array<typeof t.skills.$inferInsert> = [
@@ -291,7 +325,27 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       .onConflictDoNothing();
   }
 
-  // ---- built-in agents (the starter presets + Test Quality Reviewer) ----
+  // ---- API Contract skills (three seeded; deprecation-policy is imported) ----
+  const apiContractSkillIds: string[] = [];
+  for (const content of API_CONTRACT_SEED_SKILLS) {
+    let [stored] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, content.name)));
+    if (!stored) {
+      [stored] = await db
+        .insert(t.skills)
+        .values({ workspaceId, ...content, type: 'rubric', source: 'manual', enabled: true, version: 1 })
+        .returning();
+    }
+    apiContractSkillIds.push(stored!.id);
+    await db
+      .insert(t.skillVersions)
+      .values({ skillId: stored!.id, version: 1, body: stored!.body })
+      .onConflictDoNothing();
+  }
+
+  // ---- built-in agents (the starter presets + Test Quality + API Contract) ----
   // Prompt bodies live in ./seed-prompts.ts (mirrored in docs/agent-prompts/*.md).
   const seedAgents: Array<typeof t.agents.$inferInsert> = [
     {
@@ -338,15 +392,35 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       version: 1,
       createdBy: userId,
     },
+    {
+      workspaceId,
+      name: 'API Contract Reviewer',
+      description: 'Flags breaking route, schema, versioning and deprecation changes for existing API clients.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: API_CONTRACT_REVIEWER_PROMPT,
+      // Fixed review shape: one whole-diff call and no repo-intel context, so
+      // runs differ only in their inputs (the fixtures have no clone anyway).
+      strategy: 'single-pass',
+      repoIntel: false,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
   ];
-  let testQualityAgentId: string | undefined;
+  // Seeded links per agent (order = index). Within the 4-skill limit.
+  const linkedSkills: Record<string, string[]> = {
+    'Test Quality Reviewer': skillIds,
+    'API Contract Reviewer': apiContractSkillIds,
+  };
+  const agentIds: Record<string, string> = {};
   for (const a of seedAgents) {
     let [existing] = await db
       .select()
       .from(t.agents)
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, a.name)));
     if (!existing) [existing] = await db.insert(t.agents).values(a).returning();
-    if (a.name === 'Test Quality Reviewer') testQualityAgentId = existing!.id;
+    agentIds[a.name] = existing!.id;
 
     await db
       .insert(t.agentVersions)
@@ -361,20 +435,61 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
           strategy: existing!.strategy,
           ci_fail_on: existing!.ciFailOn,
           repo_intel: existing!.repoIntel,
-          skills: a.name === 'Test Quality Reviewer' ? skillIds : [],
+          skills: linkedSkills[a.name] ?? [],
         },
       })
       .onConflictDoNothing();
   }
 
-  if (testQualityAgentId) {
+  for (const [agentName, ids] of Object.entries(linkedSkills)) {
+    const agentId = agentIds[agentName];
+    if (!agentId || ids.length === 0) continue;
     await db
       .insert(t.agentSkills)
-      .values(skillIds.map((skillId, order) => ({ agentId: testQualityAgentId!, skillId, order })))
+      .values(ids.map((skillId, order) => ({ agentId, skillId, order })))
       .onConflictDoNothing();
   }
 
   return { workspaceId, userId };
+}
+
+/**
+ * Store a cached intent for `pr`, fingerprinted exactly as IntentService does,
+ * so it reads as fresh and a review batch reuses it instead of deriving one.
+ * Never overwrites an existing intent row.
+ */
+async function seedFreshIntent(
+  db: Db,
+  pr: typeof t.pullRequests.$inferSelect,
+  input: { intent: string; analysis: IntentAnalysis; filesExcerpted: number },
+): Promise<void> {
+  const files = await db.select().from(t.prFiles).where(eq(t.prFiles.prId, pr.id));
+  const linked = identifyLinkedIssue(pr.body, { owner: 'acme', name: 'payments-api' });
+  await db
+    .insert(t.prIntent)
+    .values({
+      prId: pr.id,
+      intent: input.intent,
+      inScope: input.analysis.in_scope,
+      outOfScope: input.analysis.out_of_scope,
+      status: 'ready',
+      analysis: input.analysis,
+      evidence: { files_listed: files.length, files_excerpted: input.filesExcerpted, truncated: false, invalid_citations: 0 },
+      headSha: pr.headSha,
+      contextHash: contextHash({
+        title: pr.title,
+        body: pr.body,
+        files,
+        linkedIssueNumber: linked.status === 'identified' ? linked.number : null,
+      }),
+      issueHash: issueHash(null),
+      promptVersion: INTENT_PROMPT_VERSION,
+      provider: 'seed',
+      model: 'seed',
+      derivedAt: new Date('2026-10-01T00:00:00Z'),
+      startedAt: new Date('2026-10-01T00:00:00Z'),
+    })
+    .onConflictDoNothing();
 }
 
 // CLI entrypoint
