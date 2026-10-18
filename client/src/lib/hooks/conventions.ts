@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
-  AgentSkillDetail,
   ConventionCandidate,
   ConventionExtractResult,
   ConventionSkillDraft,
@@ -67,23 +66,5 @@ export function useConventionSkillDraft() {
       api.post<ConventionSkillDraft>(`/repos/${repoId}/conventions/skill`, {
         ...(conventionIds ? { convention_ids: conventionIds } : {}),
       }),
-  });
-}
-
-/** Append a skill to an agent without replacing any existing ordered links. */
-export function useAppendAgentSkill() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ agentId, skillId }: { agentId: string; skillId: string }) => {
-      const current = await api.get<AgentSkillDetail[]>(`/agents/${agentId}/skills`);
-      const skillIds = current.map((link) => link.skill.id);
-      if (!skillIds.includes(skillId)) skillIds.push(skillId);
-      return api.post<AgentSkillDetail[]>(`/agents/${agentId}/skills`, { skill_ids: skillIds });
-    },
-    onSuccess: (links, { agentId }) => {
-      queryClient.setQueryData(["agent-skills", agentId], links);
-      queryClient.invalidateQueries({ queryKey: ["skills"] });
-      queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
-    },
   });
 }

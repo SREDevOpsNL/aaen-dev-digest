@@ -18,6 +18,8 @@ export interface CreateSkillInput {
   body: string;
   enabled?: boolean;
   evidence_files?: string[];
+  /** Link the new skill to this agent in the same request (the server enforces the 4-skill limit). */
+  link_agent_id?: string;
 }
 
 export interface UpdateSkillInput {
@@ -49,9 +51,14 @@ export function useCreateSkill() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateSkillInput) => api.post<Skill>("/skills", input),
-    onSuccess: (skill) => {
+    onSuccess: (skill, input) => {
       queryClient.invalidateQueries({ queryKey: ["skills"] });
       queryClient.setQueryData(["skill", skill.id], skill);
+      if (input.link_agent_id) {
+        queryClient.invalidateQueries({ queryKey: ["agent-skills", input.link_agent_id] });
+        queryClient.invalidateQueries({ queryKey: ["agent", input.link_agent_id] });
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
+      }
     },
   });
 }

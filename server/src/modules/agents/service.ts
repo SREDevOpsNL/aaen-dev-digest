@@ -10,8 +10,8 @@ import type {
   Skill,
   SkillType,
 } from '@devdigest/shared';
-import { ValidationError } from '../../platform/errors.js';
-import { AgentsRepository } from './repository.js';
+import { SkillLimitError, ValidationError } from '../../platform/errors.js';
+import { AgentsRepository, type SetSkillsResult } from './repository.js';
 import { toAgentDto, toAgentVersionDto } from './helpers.js';
 
 /**
@@ -169,14 +169,7 @@ export class AgentsService {
     agentId: string,
     skillIds: string[],
   ): Promise<AgentSkillDetail[] | undefined> {
-    const result = await this.repo.setSkills(workspaceId, agentId, skillIds);
-    if (result.kind === 'agent_not_found') return undefined;
-    if (result.kind === 'skills_not_found') {
-      throw new ValidationError('Every linked skill must exist in the agent workspace', {
-        skill_ids: result.skillIds,
-      });
-    }
-    return this.skillLinks(agentId);
+    return this.linksOrThrow(agentId, await this.repo.setSkills(workspaceId, agentId, skillIds));
   }
 
   /** Link a single skill (append or set order) — additive to existing links. */
@@ -186,13 +179,18 @@ export class AgentsService {
     skillId: string,
     order?: number,
   ): Promise<AgentSkillDetail[] | undefined> {
-    const agent = await this.repo.getById(workspaceId, agentId);
-    if (!agent) return undefined;
-    const existing = await this.repo.skillIdsForAgent(agentId);
-    const withoutTarget = existing.filter((id) => id !== skillId);
-    const targetIndex = Math.min(order ?? withoutTarget.length, withoutTarget.length);
-    withoutTarget.splice(targetIndex, 0, skillId);
-    return this.setSkills(workspaceId, agentId, withoutTarget);
+    return this.linksOrThrow(agentId, await this.repo.linkSkill(workspaceId, agentId, skillId, order));
+  }
+
+  private async linksOrThrow(agentId: string, result: SetSkillsResult): Promise<AgentSkillDetail[] | undefined> {
+    if (result.kind === 'agent_not_found') return undefined;
+    if (result.kind === 'skills_not_found') {
+      throw new ValidationError('Every linked skill must exist in the agent workspace', {
+        skill_ids: result.skillIds,
+      });
+    }
+    if (result.kind === 'limit_exceeded') throw new SkillLimitError(result.max);
+    return this.skillLinks(agentId);
   }
 
   /**

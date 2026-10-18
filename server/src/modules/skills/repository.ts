@@ -1,7 +1,13 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { SkillSource, SkillType } from '@devdigest/shared';
 import type { Db } from '../../db/client.js';
-import type { SkillRow, SkillVersionRow } from '../../db/rows.js';
+import type { AgentRow, SkillRow, SkillVersionRow } from '../../db/rows.js';
+import {
+  linkedSkillIds,
+  lockAgent,
+  MAX_AGENT_SKILLS,
+  writeAgentSkills,
+} from '../_shared/agent-skill-links.js';
 import * as t from '../../db/schema.js';
 import { INITIAL_SKILL_VERSION } from './constants.js';
 import { isSkillConfigChange } from './helpers.js';
@@ -15,7 +21,14 @@ export interface CreateSkillRecord {
   body: string;
   enabled?: boolean;
   evidenceFiles?: string[];
+  /** Link the new skill to this agent (appended last) in the same transaction. */
+  linkAgentId?: string;
 }
+
+export type CreateSkillResult =
+  | { kind: 'ok'; skill: SkillRow }
+  | { kind: 'agent_not_found' }
+  | { kind: 'limit_exceeded'; max: number };
 
 export interface UpdateSkillRecord {
   name?: string;
@@ -62,8 +75,24 @@ export class SkillsRepository {
     return row;
   }
 
-  async create(values: CreateSkillRecord): Promise<SkillRow> {
+  /**
+   * Insert a skill and its first snapshot. With `linkAgentId`, the agent row is
+   * locked first and the limit checked before anything is inserted, so a
+   * refused link leaves no orphan skill and concurrent creates cannot both
+   * take the agent's last free slot.
+   */
+  async create(values: CreateSkillRecord): Promise<CreateSkillResult> {
     return this.db.transaction(async (tx) => {
+      let link: { agent: AgentRow; previous: string[] } | undefined;
+      if (values.linkAgentId) {
+        const agent = await lockAgent(tx, values.workspaceId, values.linkAgentId);
+        if (!agent) return { kind: 'agent_not_found' };
+        const previous = await linkedSkillIds(tx, agent.id);
+        // The new skill is never among the current links, so it always adds one.
+        if (previous.length + 1 > MAX_AGENT_SKILLS) return { kind: 'limit_exceeded', max: MAX_AGENT_SKILLS };
+        link = { agent, previous };
+      }
+
       const [row] = await tx
         .insert(t.skills)
         .values({
@@ -83,7 +112,8 @@ export class SkillsRepository {
         version: INITIAL_SKILL_VERSION,
         body: row!.body,
       });
-      return row!;
+      if (link) await writeAgentSkills(tx, link.agent, link.previous, [...link.previous, row!.id]);
+      return { kind: 'ok', skill: row! };
     });
   }
 
