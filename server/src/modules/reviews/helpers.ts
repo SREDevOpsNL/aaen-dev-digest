@@ -8,10 +8,23 @@ import type { FindingRow, PullRow, ReviewRow } from './repository.js';
 // reduceReviews + sliceDiff live in @devdigest/reviewer-core (pure engine logic
 // shared with the CI runner); re-exported here for backward-compatible imports.
 export { reduceReviews, sliceDiff } from '@devdigest/reviewer-core';
+import { renderSkillsSection } from '@devdigest/reviewer-core';
 
 /** Render resolved skill config; reviewer-core applies the untrusted delimiter. */
 export function toSkillPromptBlock(skill: { name: string; body: string }): string {
   return `### ${skill.name}\n${skill.body.trim()}`;
+}
+
+/**
+ * Token count of the Skills section exactly as `assemblePrompt` renders it into
+ * the user message, or null when no skill is attached (nothing was sent).
+ */
+export function skillsSectionTokens(
+  skillBlocks: string[],
+  tokenizer: { count(text: string): number },
+): number | null {
+  const rendered = renderSkillsSection(skillBlocks);
+  return rendered ? tokenizer.count(rendered.section) : null;
 }
 
 export interface ReviewDtoFinding extends Finding {

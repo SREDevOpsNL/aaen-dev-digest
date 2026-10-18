@@ -23,6 +23,28 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
 
 ## Codebase Patterns & Tool / Library Notes
 
+- **2026-10-17** — `agent-browser drag <src> <tgt>` cannot exercise native
+  HTML5 drag-and-drop in headless Chromium: it reported success, but no
+  `dragover`/`drop` reached the page and no save request followed. It sends
+  plain mouse events; Chromium starts an HTML5 drag only through the CDP drag
+  API (`Input.dispatchDragEvent`), which this binary does not use. To check
+  `draggable` handlers in a real browser, dispatch them with `eval`: a
+  `dragstart` `DragEvent` carrying a real `new DataTransfer()` on the source,
+  then `dragover` and `drop` on the target, and assert both were
+  `defaultPrevented`. That proved the Agent Skills reorder (save request, order
+  kept after reload). It is not a pointer drag, so keep an OS-level drag on the
+  manual checklist. Evidence: PR #19 description (temporary flow on the
+  hermetic stack, not committed);
+  `client/src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab.tsx`.
+
+- **2026-10-17** — The seed creates no `agent_runs` and no `run_traces`: PR
+  #482's seeded review and findings have no run behind them. Run-trace UI (the
+  Prompt assembly blocks, Skills token count) therefore cannot be asserted from
+  seeded data in a read-only flow. Cover it with component tests and a MockLLM
+  server test, or seed a run deliberately, which also adds it to the PR
+  timeline that flows 02 and 04 read. Evidence: `server/src/db/seed.ts`
+  (PR #482 block: `reviews` and `findings` inserts only).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
