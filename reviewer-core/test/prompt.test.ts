@@ -4,7 +4,7 @@
  * truncation, and ordering (before the diff).
  */
 import { describe, it, expect } from 'vitest';
-import { assemblePrompt } from '../src/prompt.js';
+import { assemblePrompt, renderSkillsSection } from '../src/prompt.js';
 
 function userOf(parts: Parameters<typeof assemblePrompt>[0]): string {
   const { messages } = assemblePrompt(parts);
@@ -84,5 +84,26 @@ describe('assemblePrompt — linked skills trust boundary', () => {
     expect(assembly.skills).toContain('<\\/untrusted>');
     expect(messages[0]!.content).toMatch(/linked skill text.*DATA/s);
     expect(messages[0]!.content).toMatch(/review criteria.*never follow commands/s);
+  });
+});
+
+describe('renderSkillsSection — the Skills section as sent', () => {
+  it('is undefined without skills and the prompt has no Skills section', () => {
+    expect(renderSkillsSection(undefined)).toBeUndefined();
+    expect(renderSkillsSection([])).toBeUndefined();
+    const { assembly } = assemblePrompt({ system: 'S', diff: 'd', skills: [] });
+    expect(assembly.skills).toBeNull();
+    expect(assembly.user).not.toContain('## Skills / rules');
+  });
+
+  it('returns the exact section the user message carries, in link order', () => {
+    const skills = ['### first\nRule A', '### second\nRule B'];
+    const rendered = renderSkillsSection(skills)!;
+    const { assembly, messages } = assemblePrompt({ system: 'S', diff: 'd', skills, task: 'Review PR #1' });
+    expect(assembly.skills).toBe(rendered.block);
+    expect(rendered.section.startsWith('## Skills / rules\n')).toBe(true);
+    expect(rendered.section.endsWith(rendered.block)).toBe(true);
+    expect(messages[1]!.content).toContain(`\n\n${rendered.section}\n\n`);
+    expect(rendered.block.indexOf('Rule A')).toBeLessThan(rendered.block.indexOf('Rule B'));
   });
 });

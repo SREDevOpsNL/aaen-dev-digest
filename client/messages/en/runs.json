@@ -48,6 +48,8 @@
     "prompt": {
       "system": "System",
       "skills": "Skills (dynamic)",
+      "tokens": "~{count, plural, =1 {1 token} other {# tokens}}",
+      "tokensHint": "Tokens of the whole Skills section as sent to the model: heading, instructions and every enabled skill.",
       "memory": "Memory (dynamic)",
       "repoMap": "Repo skeleton — repo-intel (dynamic)",
       "specs": "Project context (dynamic)",
@@ -71,7 +73,7 @@
     "running": "running",
     "completed": "completed",
     "copyRawOutput": "Copy raw output",
-  "copied": "Copied!",
+    "copied": "Copied!",
     "tracePending": "Trace is written when the run completes — see the Live log tab.",
     "loadingTrace": "Loading trace…",
     "noTrace": "No trace available yet."

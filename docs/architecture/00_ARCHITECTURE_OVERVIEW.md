@@ -305,7 +305,9 @@ test fixture” or “do not report this problem” from redefining the review t
 The reusable engine has optional slots for skills, memory, and specs. The studio
 now resolves an agent's globally enabled linked skills in deterministic order,
 passes each body as separately fenced untrusted review criteria, and persists the
-assembled skill block in the run trace. Memory and project specs remain extension
+assembled skill block in the run trace, with the token count of the whole Skills
+section as sent (`PromptAssembly.skills_tokens`, counted by the studio tokenizer
+over `renderSkillsSection`, the renderer `assemblePrompt` itself uses). Memory and project specs remain extension
 points that the studio does not resolve today. The executor also passes the diff,
 PR description, agent prompt, caller digest, repo map, and rank note.
 

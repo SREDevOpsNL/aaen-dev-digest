@@ -102,3 +102,4 @@ a CI artifact by `.github/workflows/e2e-web.yml`).
 | `07-settings` | `/settings/api-keys` + `/settings/models` → section titles render |
 | `07a-findings-preview-scroll` | PR #482 → Agent runs tab → Timeline severity counters (runs/reviews GETs stubbed in the page) → preview stays open through a scrollbar drag, an in-place list scroll, and keyboard PageDown; closes on pointer leave, Tab-out, and page scroll |
 | `11-skills-lab` | SKILLS LAB sidebar section → skill card side preview → Open details → Versioning tab → Add menu → Create dialog (not submitted) → skill and agent delete confirmations dismissed with Cancel and X |
+| `12-agent-skills` | Agent Skills tab: a link toggle and category label on every skill; only linked, enabled skills are draggable; arrows remain (nothing is reordered) |
