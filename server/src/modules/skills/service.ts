@@ -1,6 +1,6 @@
 import type { Skill, SkillSource, SkillSummary, SkillType, SkillVersion } from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
-import { SkillLimitError, ValidationError } from '../../platform/errors.js';
+import { NotFoundError, SkillLimitError, ValidationError } from '../../platform/errors.js';
 import { toSkillDto, toSkillVersionDto } from './helpers.js';
 import { SkillsRepository } from './repository.js';
 
@@ -61,6 +61,14 @@ export class SkillsService {
   ): Promise<Skill | undefined> {
     const row = await this.repository.update(workspaceId, id, patch);
     return row ? toSkillDto(row) : undefined;
+  }
+
+  /** Restore a previous version's body as the newest version (see the repository). */
+  async restoreVersion(workspaceId: string, id: string, version: number): Promise<Skill> {
+    const result = await this.repository.restoreVersion(workspaceId, id, version);
+    if (result.kind === 'skill_not_found') throw new NotFoundError('Skill not found');
+    if (result.kind === 'version_not_found') throw new NotFoundError('Skill version not found');
+    return toSkillDto(result.skill);
   }
 
   async delete(workspaceId: string, id: string): Promise<boolean> {

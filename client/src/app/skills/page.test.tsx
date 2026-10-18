@@ -71,6 +71,16 @@ describe("Skills page", () => {
     expect(within(cards[1]!).getByText("No agents")).toBeInTheDocument();
   });
 
+  it("marks imported skills with an Imported badge on the card and in the preview", () => {
+    skills = [skill("a", { source: "imported_file" }), skill("b")];
+    renderPage();
+    const [imported, manual] = screen.getAllByRole("listitem");
+    expect(within(imported!).getByText("Imported")).toBeInTheDocument();
+    expect(within(manual!).queryByText("Imported")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Preview skill skill-a" }));
+    expect(within(screen.getByRole("dialog")).getByText("Imported")).toBeInTheDocument();
+  });
+
   it("opens a side preview with the rendered body, and Open details goes to /skills/:id", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Preview skill skill-a" }));

@@ -38,6 +38,12 @@ export interface UpdateSkillRecord {
   enabled?: boolean;
 }
 
+/** Outcome of restoring a snapshot; `restored: false` means the body already matched. */
+export type RestoreSkillResult =
+  | { kind: 'skill_not_found' }
+  | { kind: 'version_not_found' }
+  | { kind: 'ok'; skill: SkillRow; restored: boolean };
+
 export interface SkillWithUsage {
   skill: SkillRow;
   usedByCount: number;
@@ -147,6 +153,40 @@ export class SkillsRepository {
         });
       }
       return updated;
+    });
+  }
+
+  /**
+   * Restore a snapshot's body as a new version, in one transaction under the
+   * same row lock as `update`, so concurrent edits and restores get sequential
+   * version numbers. History is append-only: the restored body becomes v(n+1),
+   * and no existing snapshot is changed or removed. Snapshots hold the body
+   * only, so name, description, type and enabled are left as they are.
+   */
+  async restoreVersion(workspaceId: string, id: string, version: number): Promise<RestoreSkillResult> {
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(t.skills)
+        .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)))
+        .for('update');
+      if (!current) return { kind: 'skill_not_found' };
+
+      const [snapshot] = await tx
+        .select()
+        .from(t.skillVersions)
+        .where(and(eq(t.skillVersions.skillId, id), eq(t.skillVersions.version, version)));
+      if (!snapshot) return { kind: 'version_not_found' };
+      if (snapshot.body === current.body) return { kind: 'ok', skill: current, restored: false };
+
+      const nextVersion = current.version + 1;
+      const [updated] = await tx
+        .update(t.skills)
+        .set({ body: snapshot.body, version: nextVersion })
+        .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)))
+        .returning();
+      await tx.insert(t.skillVersions).values({ skillId: id, version: nextVersion, body: snapshot.body });
+      return { kind: 'ok', skill: updated!, restored: true };
     });
   }
 

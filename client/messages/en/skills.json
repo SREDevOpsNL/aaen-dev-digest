@@ -85,7 +85,7 @@
       "preview": "Preview",
       "evals": "Evals",
       "stats": "Stats",
-      "versions": "Versions"
+      "versions": "Versioning"
     }
   },
   "config": {
@@ -123,7 +123,19 @@
     "hideBody": "Hide body",
     "loadError": "Could not load version history.",
     "emptyTitle": "No versions yet",
-    "emptyBody": "A version will appear after the skill is saved."
+    "emptyBody": "A version will appear after the skill is saved.",
+    "diff": "Diff",
+    "hideDiff": "Hide diff",
+    "diffTitle": "Changes from v{version} to the current v{current}",
+    "diffLegend": "− only in v{version} · + only in the current body",
+    "diffSame": "This version’s body is identical to the current body.",
+    "restore": "Restore",
+    "restoreTitle": "Restore v{version}?",
+    "restoreBody": "The body of v{version} becomes a new version, v{next}. The history is kept: no version is changed or removed. Name, description and type stay as they are.",
+    "restoreConfirm": "Restore",
+    "restorePending": "Restoring…",
+    "restoreCancel": "Cancel",
+    "restoreFailed": "Could not restore this version. Try again."
   },
   "detail": {
     "loadError": "Could not load this skill.",
@@ -149,5 +161,8 @@
     "impactFailed": "Could not check which agents use this skill, so it cannot be deleted yet.",
     "retry": "Retry",
     "noAgents": "No agent uses this skill."
+  },
+  "source": {
+    "imported_file": "Imported"
   }
 }

@@ -14,7 +14,7 @@ export interface CreateSkillInput {
   name: string;
   description: string;
   type: SkillType;
-  source: "manual" | "extracted";
+  source: "manual" | "imported_file" | "extracted";
   body: string;
   enabled?: boolean;
   evidence_files?: string[];
@@ -83,6 +83,20 @@ export function useDeleteSkill() {
       queryClient.invalidateQueries({ queryKey: ["skills"] });
       queryClient.removeQueries({ queryKey: ["skill", id] });
       queryClient.removeQueries({ queryKey: ["skill-versions", id] });
+    },
+  });
+}
+
+/** Restore a previous version's body; the server appends it as a new version. */
+export function useRestoreSkillVersion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version: number }) =>
+      api.post<Skill>(`/skills/${id}/versions/${version}/restore`, {}),
+    onSuccess: (skill) => {
+      queryClient.invalidateQueries({ queryKey: ["skills"] });
+      queryClient.invalidateQueries({ queryKey: ["skill-versions", skill.id] });
+      queryClient.setQueryData(["skill", skill.id], skill);
     },
   });
 }

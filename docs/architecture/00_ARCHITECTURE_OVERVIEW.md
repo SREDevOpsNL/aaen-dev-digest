@@ -306,7 +306,9 @@ test fixture” or “do not report this problem” from redefining the review t
 The reusable engine has optional slots for skills, memory, and specs. The studio
 now resolves an agent's globally enabled linked skills in deterministic order,
 passes each body as separately fenced untrusted review criteria, and persists the
-assembled skill block in the run trace. Memory and project specs remain extension
+assembled skill block in the run trace, with the token count of the whole Skills
+section as sent (`PromptAssembly.skills_tokens`, counted by the studio tokenizer
+over `renderSkillsSection`, the renderer `assemblePrompt` itself uses). Memory and project specs remain extension
 points that the studio does not resolve today. The executor also passes the diff,
 PR description, agent prompt, caller digest, repo map, and rank note.
 
@@ -469,7 +471,7 @@ calls GitHub and does not persist a second local comment copy.
 | GitHub comments | `GET/POST /pulls/:id/comments` |
 | Repo intelligence | `GET /repos/:id/index-state`, `POST /repos/:id/resync` |
 | Agents | Agent CRUD, versions, model lists, and ordered skill links (`GET/POST /agents/:id/skills`; at most 4 per agent, enforced under the agent row lock, `422 skill_limit_reached`) under `/agents` and `/providers` |
-| Skills | `GET/POST /skills` (`link_agent_id` creates and links in one transaction), `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions`, and `GET /skills/:id/agents` |
+| Skills | `GET/POST /skills` (`link_agent_id` creates and links in one transaction), `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions` (restore a previous body as a new version with `POST /skills/:id/versions/:version/restore`), and `GET /skills/:id/agents` |
 | Conventions | `GET /repos/:id/conventions`, `POST /repos/:id/conventions/extract`, `POST /repos/:id/conventions/skill`, `PATCH/DELETE /conventions/:id` |
 | PR intent | `GET /pulls/:id/intent` (cache only), `POST /pulls/:id/intent` (first-open generation), `POST /pulls/:id/intent/recompute`; the POSTs are rate-limited |
 | Reviews | `POST /pulls/:id/review`, review/finding reads and actions |
