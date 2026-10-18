@@ -46,6 +46,19 @@ correction. Genuinely cross-package findings belong in
   "Run-to-run drift"), `reviewer-core/src/llm/openrouter.ts`
   (`OpenRouterProvider.completeStructured`).
 
+- **2026-10-18** — The grounding gate accepts a finding that cites only
+  *unchanged* context lines. `groundFindings` keeps a finding when its range
+  touches any number in a hunk's `newLineNumbers`, and the server's diff parser
+  adds context lines to that list as well as added ones. "Survives grounding"
+  therefore means "inside a changed hunk", not "on a changed line". To pin a
+  finding to the change itself (an experiment anchor, an eval rule), also check
+  the range against the lines the patch adds. Evidence:
+  `reviewer-core/src/grounding.ts` (`buildLineIndex`, `rangeIntersects`),
+  `server/src/adapters/git/diff-parser.ts` (context lines pushed to
+  `newLineNumbers`); in `server/test/seed-content.test.ts`, an anchor moved to
+  context line 16 of `src/api/payments.ts` still passed `groundFindings` and
+  failed only the added-lines check.
+
 ## Decisions
 
 ## Recurring Errors & Fixes
