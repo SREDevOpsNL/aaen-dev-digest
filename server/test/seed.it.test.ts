@@ -7,6 +7,7 @@ import { seed } from '../src/db/seed.js';
 import { EXPERIMENT_FIXTURES } from '../src/db/seed-fixtures.js';
 import * as t from '../src/db/schema.js';
 import { loadConfig } from '../src/platform/config.js';
+import { createDb } from '../src/db/client.js';
 import { dockerAvailable, startPg, type PgFixture } from './helpers/pg.js';
 import { waitForPrRuns, waitForRunTrace } from './helpers/runs.js';
 
@@ -22,8 +23,7 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
 
   beforeAll(async () => {
     pg = await startPg();
-    ({ workspaceId } = await seed(pg.handle.db));
-    await seed(pg.handle.db); // idempotent: a second run must not duplicate anything
+    ({ workspaceId } = await seed(pg.handle.db)); // the default seed, as `pnpm db:seed` runs it
   });
   afterAll(async () => pg?.stop());
 
@@ -42,6 +42,30 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
       .orderBy(asc(t.agentSkills.order));
     return rows.map((row) => row.name);
   }
+
+  it('the default seed creates no experiment fixtures and keeps #482, its intent and every agent', async () => {
+    const pulls = await db().select().from(t.pullRequests);
+    expect(pulls.map((pull) => pull.number)).toEqual([482]);
+    const app = await buildApp({
+      config: loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv),
+      db: db(),
+      overrides: { git: new MockGitClient(), github: new MockGitHubClient() },
+    });
+    expect((await app.inject({ url: `/pulls/${pulls[0]!.id}/intent` })).json()).toMatchObject({ state: 'ready', stale: false });
+    await app.close();
+    const agents = await db().select({ name: t.agents.name }).from(t.agents).where(eq(t.agents.workspaceId, workspaceId));
+    expect(agents.map((agent) => agent.name).sort()).toEqual([
+      'API Contract Reviewer',
+      'General Reviewer',
+      'Performance Reviewer',
+      'Security Reviewer',
+      'Test Quality Reviewer',
+    ]);
+
+    // Opting in on this disposable database (devdigest_test) adds them; twice is idempotent.
+    await seed(db(), { experimentFixtures: true });
+    await seed(db(), { experimentFixtures: true });
+  });
 
   it('seeds the API Contract Reviewer once, single-pass without repo intel, with three ordered skills', async () => {
     const agent = await agentNamed('API Contract Reviewer');
@@ -119,5 +143,24 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
     const fixturePrIds = (await db().select().from(t.pullRequests).where(inArray(t.pullRequests.number, [501, 502]))).map((p) => p.id);
     const reviewsOnFixtures = await db().select().from(t.reviews).where(inArray(t.reviews.prId, fixturePrIds));
     expect(reviewsOnFixtures.every((review) => review.model !== 'seed')).toBe(true); // the seed adds no fixture reviews
+  });
+
+  it('refuses fixtures on a database named like the dev database, before any write', async () => {
+    await pg.handle.sql.unsafe('create database devdigest');
+    const devNamed = createDb(pg.url.replace(/\/devdigest_test(\?|$)/, '/devdigest$1'), { max: 1 });
+    try {
+      // No migrations ran there: a write would fail differently, so this proves the check comes first.
+      await expect(seed(devNamed.db, { experimentFixtures: true })).rejects.toThrow(/"devdigest" is not a disposable database/);
+      await expect(seed(devNamed.db)).rejects.toThrow(); // and the default seed, unguarded, would try to write
+    } finally {
+      await devNamed.close();
+    }
+  });
+
+  it('refuses fixtures when the database holds another repository, and writes nothing', async () => {
+    await db().insert(t.repos).values({ workspaceId, owner: 'someone', name: 'real-repo', fullName: 'someone/real-repo' });
+    const before = await db().select().from(t.pullRequests);
+    await expect(seed(db(), { experimentFixtures: true })).rejects.toThrow(/holds other repositories \(someone\/real-repo\)/);
+    expect(await db().select().from(t.pullRequests)).toHaveLength(before.length);
   });
 });

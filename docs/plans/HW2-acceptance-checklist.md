@@ -63,11 +63,30 @@ Walkthrough for the final acceptance gate (plan rev. 4.3, Gate 5). A criterion m
 | 52 | The new skill appears on the Skills page | Manual (browser) | — | after Create (row 12 or 42) the new skill is on the Skills grid | |
 | 53 | Settings → Models → Conventions row with a searchable model dropdown | Flow 07 | flow 07 | Settings → Models → Conventions has a searchable dropdown | |
 
-## Open decision: a real Conventions extraction (rows 38, 46, 47, 49)
+## Open decision: Conventions evidence (rows 38, 46, 47, 49)
 
-These rows need a scan that runs and persists. Extraction needs a cloned, indexed repository and one paid model call; the seeded `acme/payments-api` has no clone, so the disposable stack cannot run it as is. Choose one before the walkthrough:
+These rows need candidates in the UI and an extraction that runs and persists. A live extraction needs a cloned, indexed repository and one paid model call. The seeded `acme/payments-api` has no clone, so a disposable stack cannot scan it as is.
 
-1. **Disposable stack + a small public repository:** import it (GitHub token, clone, index), then one extraction with the Conventions feature model. Needs a separate paid-call authorization (one extraction call, bounded by the same preflight as the experiments).
-2. **Existing evidence:** cite the 2026-10-14 post-migration smoke test on the development database (9 candidates persisted) and do a **read-only** SQL check there. Needs a separate authorization to read the development database.
+**Recommended, no cost (needs your approval before it is built):**
+
+1. Seed a handful of convention candidates for `acme/payments-api` as part of the opt-in, disposable-only experiment fixtures: pending, accepted and rejected, each with a rule, category, evidence path, line, snippet and confidence. The Conventions page lists stored rows, so they render without a scan.
+2. That makes these walkthrough steps possible without a model call:
+   - row 46: the card shows the rule, source file and confidence;
+   - row 47: Accept, Reject and Edit;
+   - row 48: a rejection persists across reload, and the draft excludes it;
+   - row 49: inline Edit;
+   - row 50: Create skill appears after an Accept;
+   - rows 51 and 42: the modal, and `repo-conventions` linked to an agent;
+   - row 52: the skill appears on the grid.
+3. Row 38 ("runs and persists"):
+   - **Automated:** `server/test/conventions.it.test.ts` drives the real `POST /repos/:id/conventions/extract` route against real PostgreSQL, with a mocked model and git. It checks the grounding drop, persisted candidates, decisions kept across ReScan, the `repo-conventions` draft and create-and-link.
+   - **Historical:** the 2026-10-14 post-migration smoke test on the development database persisted 9 candidates (the matrix records it).
+   - **During the walkthrough:** do not press ReScan on the disposable stack. It would call the real model.
+
+**Residual risk:** if the grader requires a live UI scan for row 38, that still needs one of the paid options below.
+
+**Paid alternatives (each needs separate authorization):**
+- **Disposable stack plus a small public repository:** import it (GitHub token, clone, index), then run one extraction. The call is bounded by the same preflight as the experiments.
+- **Existing evidence:** a read-only SQL check of the 2026-10-14 results in the development database. This needs authorization to read the development database.
 
 Until one is chosen, rows 38, 46, 47 and 49 stay *Pass (static)*.

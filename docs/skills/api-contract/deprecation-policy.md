@@ -5,7 +5,7 @@ Description: Flag the removal or incompatible change of a route, parameter or fi
 ## What to flag
 
 - A route, parameter or field removed or changed incompatibly without an earlier, documented deprecation.
-- A removal that happens before the announced sunset date or the minimum window (one minor release and at least 90 days).
+- A removal that happens before the announced sunset date, or before the end of the deprecation window that the project's documented policy sets, when it sets one (for example, a policy that requires one minor release and 90 days).
 - A new deprecation without `Deprecation` and `Sunset` headers, without documentation, or without the replacement clients should use.
 - A deprecated element whose usage is not logged or measured, so its removal cannot be judged safe.
 
@@ -31,8 +31,9 @@ reply.header('Link', '</v2/orders>; rel="successor-version"');
 
 ## Bad
 
-```ts
-// The v1 route disappears in the same release that introduces v2; clients get a 404 with no warning.
+The v1 route disappears in the same release that introduces v2; clients get a 404 with no warning.
+
+```diff
 - app.get('/v1/orders/:id', getOrderV1);
 + app.get('/v2/orders/:id', getOrderV2);
 ```

@@ -34,7 +34,8 @@ export async function dockerAvailable(): Promise<boolean> {
 
 export async function startPg(): Promise<PgFixture> {
   const container = await new PostgreSqlContainer('pgvector/pgvector:pg16')
-    .withDatabase('devdigest')
+    // A disposable name (db/disposable.ts): the dev database is `devdigest`.
+    .withDatabase('devdigest_test')
     .withUsername('devdigest')
     .withPassword('devdigest')
     .start();

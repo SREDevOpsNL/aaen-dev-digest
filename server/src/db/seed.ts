@@ -11,6 +11,7 @@ import {
 } from './seed-prompts.js';
 import { API_CONTRACT_SEED_SKILLS } from './seed-skills.js';
 import { EXPERIMENT_FIXTURES, patchStats } from './seed-fixtures.js';
+import { assertDisposableDatabase } from './disposable.js';
 import type { IntentAnalysis } from '@devdigest/shared';
 import { INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
 import { contextHash, identifyLinkedIssue, issueHash } from '../modules/intent/helpers.js';
@@ -28,13 +29,30 @@ const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
  * with a few findings, four reusable test-quality skills, three API Contract
  * skills, five built-in agents (General + Security + Performance + Test Quality
  * + API Contract), all on the default openrouter/deepseek-v4-flash
- * provider+model, and the two HW2 experiment fixture PRs (#501, #502).
+ * provider+model. With `experimentFixtures` (disposable databases only), also
+ * the two HW2 experiment fixture PRs (#501, #502).
  */
 
 export const DEFAULT_WORKSPACE_NAME = 'default';
 export const SYSTEM_USER_EMAIL = 'you@local';
 
-export async function seed(db: Db): Promise<{ workspaceId: string; userId: string }> {
+export interface SeedOptions {
+  /**
+   * Also seed the HW2 experiment fixture PRs #501 and #502. Opt-in, and only
+   * into a demonstrably disposable database (./disposable.ts): the plain
+   * `pnpm db:seed` never creates them. The CLI enables it with
+   * DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1.
+   */
+  experimentFixtures?: boolean;
+}
+
+export async function seed(
+  db: Db,
+  options: SeedOptions = {},
+): Promise<{ workspaceId: string; userId: string }> {
+  // Checked before any write, so a refused run changes nothing.
+  if (options.experimentFixtures) await assertDisposableDatabase(db);
+
   // ---- workspace + user (no-auth defaults) ----
   let [ws] = await db
     .select()
@@ -211,56 +229,8 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     filesExcerpted: 2,
   });
 
-  // ---- HW2 experiment fixtures: PRs #501 and #502 (see ./seed-fixtures.ts) ----
-  // Reviewed from their stored patches only; each gets a fresh cached intent so
-  // a review batch never derives one. Existing rows are left as they are.
-  for (const fixture of EXPERIMENT_FIXTURES) {
-    let [fixturePr] = await db
-      .select()
-      .from(t.pullRequests)
-      .where(and(eq(t.pullRequests.repoId, repoId), eq(t.pullRequests.number, fixture.number)));
-    if (!fixturePr) {
-      const stats = fixture.files.map((file) => ({ file, ...patchStats(file.patch) }));
-      [fixturePr] = await db
-        .insert(t.pullRequests)
-        .values({
-          workspaceId,
-          repoId,
-          number: fixture.number,
-          title: fixture.title,
-          author: fixture.author,
-          branch: fixture.branch,
-          base: 'main',
-          headSha: fixture.headSha,
-          additions: stats.reduce((sum, f) => sum + f.additions, 0),
-          deletions: stats.reduce((sum, f) => sum + f.deletions, 0),
-          filesCount: fixture.files.length,
-          status: 'needs_review',
-          body: fixture.body,
-        })
-        .returning();
-      await db.insert(t.prFiles).values(
-        stats.map(({ file, additions, deletions }) => ({
-          prId: fixturePr!.id,
-          path: file.path,
-          additions,
-          deletions,
-          patch: file.patch,
-        })),
-      );
-      await db.insert(t.prCommits).values({
-        prId: fixturePr!.id,
-        sha: fixture.headSha,
-        message: fixture.commitMessage,
-        author: fixture.author,
-      });
-    }
-    await seedFreshIntent(db, fixturePr!, {
-      intent: fixture.intent.summary,
-      analysis: fixture.intent.analysis,
-      filesExcerpted: fixture.files.length,
-    });
-  }
+  // ---- HW2 experiment fixtures: PRs #501 and #502 (opt-in, disposable only) ----
+  if (options.experimentFixtures) await seedExperimentFixtures(db, workspaceId, repoId);
 
   // ---- built-in skills (text configuration only; never executable) ----
   const seedSkills: Array<typeof t.skills.$inferInsert> = [
@@ -454,6 +424,62 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
 }
 
 /**
+ * Seed the HW2 experiment fixture PRs (./seed-fixtures.ts) into the demo
+ * repository. Only called after assertDisposableDatabase.
+ */
+async function seedExperimentFixtures(db: Db, workspaceId: string, repoId: string): Promise<void> {
+  // Reviewed from their stored patches only; each gets a fresh cached intent so
+  // a review batch never derives one. Existing rows are left as they are.
+  for (const fixture of EXPERIMENT_FIXTURES) {
+    let [fixturePr] = await db
+      .select()
+      .from(t.pullRequests)
+      .where(and(eq(t.pullRequests.repoId, repoId), eq(t.pullRequests.number, fixture.number)));
+    if (!fixturePr) {
+      const stats = fixture.files.map((file) => ({ file, ...patchStats(file.patch) }));
+      [fixturePr] = await db
+        .insert(t.pullRequests)
+        .values({
+          workspaceId,
+          repoId,
+          number: fixture.number,
+          title: fixture.title,
+          author: fixture.author,
+          branch: fixture.branch,
+          base: 'main',
+          headSha: fixture.headSha,
+          additions: stats.reduce((sum, f) => sum + f.additions, 0),
+          deletions: stats.reduce((sum, f) => sum + f.deletions, 0),
+          filesCount: fixture.files.length,
+          status: 'needs_review',
+          body: fixture.body,
+        })
+        .returning();
+      await db.insert(t.prFiles).values(
+        stats.map(({ file, additions, deletions }) => ({
+          prId: fixturePr!.id,
+          path: file.path,
+          additions,
+          deletions,
+          patch: file.patch,
+        })),
+      );
+      await db.insert(t.prCommits).values({
+        prId: fixturePr!.id,
+        sha: fixture.headSha,
+        message: fixture.commitMessage,
+        author: fixture.author,
+      });
+    }
+    await seedFreshIntent(db, fixturePr!, {
+      intent: fixture.intent.summary,
+      analysis: fixture.intent.analysis,
+      filesExcerpted: fixture.files.length,
+    });
+  }
+}
+
+/**
  * Store a cached intent for `pr`, fingerprinted exactly as IntentService does,
  * so it reads as fresh and a review batch reuses it instead of deriving one.
  * Never overwrites an existing intent row.
@@ -500,7 +526,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
   const handle = createDb(url);
-  seed(handle.db)
+  seed(handle.db, { experimentFixtures: process.env.DEVDIGEST_SEED_EXPERIMENT_FIXTURES === '1' })
     .then(async (r) => {
       console.log('✓ seeded', r);
       await handle.close();

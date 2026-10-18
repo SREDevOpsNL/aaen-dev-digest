@@ -22,15 +22,21 @@ Description: Flag a contract change whose version signal does not match its impa
 
 ## Good
 
+The package version and the changelog both announce the breaking rename.
+
 ```json
-// package.json and CHANGELOG agree with the impact: the response field rename is breaking.
 { "name": "@acme/payments-client", "version": "3.0.0" }
-// CHANGELOG: 3.0.0 — BREAKING: `Order.customer_id` renamed to `Order.customer.id`.
+```
+
+```markdown
+## 3.0.0
+- BREAKING: `Order.customer_id` is renamed to `Order.customer.id`.
 ```
 
 ## Bad
 
+The same breaking rename shipped as a patch release.
+
 ```json
-// The same breaking rename shipped as a patch release.
 { "name": "@acme/payments-client", "version": "2.4.1" }
 ```

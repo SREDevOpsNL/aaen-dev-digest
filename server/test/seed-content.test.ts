@@ -24,6 +24,11 @@ describe('API Contract skill documents', () => {
     }
   });
 
+  it.each(ALL_SKILLS)('%s: every json example is valid JSON', (name) => {
+    const blocks = [...skillDoc(name).matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => match[1]!);
+    for (const block of blocks) expect(() => JSON.parse(block)).not.toThrow();
+  });
+
   it('seeds exactly three of them, verbatim, and leaves deprecation-policy to a real import', () => {
     expect(API_CONTRACT_SEED_SKILLS.map((skill) => skill.name)).toEqual(['breaking-change', 'response-schema', 'semver-discipline']);
     for (const skill of API_CONTRACT_SEED_SKILLS) {
