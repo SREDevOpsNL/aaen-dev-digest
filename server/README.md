@@ -106,7 +106,7 @@ through `SecretsProvider` (`~/.devdigest/secrets.json`, mode `0600`, with
 
 Migrations are **not** applied on boot — run `pnpm db:migrate` (pgvector is
 enabled by migration `0000`). `pnpm db:seed` is idempotent demo data
-(`acme/payments-api`, PR #482, the two built-in agents).
+(`acme/payments-api`, PR #482, the built-in agents and skills, and the HW2 experiment fixture PRs #501 and #502).
 
 ## Review context (non-obvious)
 

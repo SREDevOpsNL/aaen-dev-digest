@@ -40,5 +40,6 @@ Expected result:
   its body equals this file, and `agent_skills` holds four rows for the agent
   in the order above.
 
-Run the setup on a disposable stack (`npm run e2e:hermetic` style), not on
-the development database, unless that is explicitly intended.
+Run the setup on a disposable stack (an isolated, freshly seeded database such
+as the one `scripts/e2e.sh` starts), not on the development database, unless
+that is explicitly intended.
