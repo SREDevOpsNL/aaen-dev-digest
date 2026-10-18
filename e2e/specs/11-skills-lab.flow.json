@@ -1,6 +1,6 @@
 {
   "name": "Skills Lab navigation, skill cards, preview, Add menu and delete confirmations",
-  "description": "Read-only: checks the SKILLS LAB sidebar section, opens a seeded skill card's side preview (from its preview button and from a pointer click on the card footer) and its Open details link, opens the Add skill menu and the Create dialog (with its Markdown body field) without submitting, and dismisses the skill and agent delete confirmations with Cancel and X. Nothing is created or deleted, and no model is called.",
+  "description": "Read-only: checks the SKILLS LAB sidebar section, opens a seeded skill card's side preview (from its preview button and from a pointer click on the card footer) and its Open details link, checks the Versioning tab, opens the Add skill menu and the Create dialog (with its Markdown body field) without submitting, and dismisses the skill and agent delete confirmations with Cancel and X. Nothing is created or deleted, and no model is called.",
   "steps": [
     { "cmd": ["open", "{BASE}/skills"], "label": "load the Skills page" },
     { "cmd": ["wait", "--url", "/skills"], "label": "skills route reached" },
@@ -13,7 +13,10 @@
     { "cmd": ["wait", "--url", "/skills"], "label": "preview did not leave the Skills page" },
     { "cmd": ["find", "role", "button", "click", "--name", "Open details"], "label": "open the full skill page" },
     { "cmd": ["wait", "--url", "tab=config"], "label": "skill detail page reached" },
-    { "cmd": ["wait", "--text", "Versions"], "label": "detail tabs render" },
+    { "cmd": ["wait", "--text", "Versioning"], "label": "detail tabs render, with the Versioning tab" },
+    { "cmd": ["find", "role", "button", "click", "--name", "Versioning"], "label": "open the Versioning tab" },
+    { "cmd": ["wait", "--text", "Version history"], "label": "version history renders" },
+    { "cmd": ["eval", "(() => { const rows = document.querySelectorAll('article[aria-label^=\"v\"]'); const labels = [...document.querySelectorAll('button')].map((b) => b.textContent.trim()); return rows.length === 1 && !labels.includes('Restore') && !labels.includes('Diff'); })()"], "assert": { "stdoutIncludes": "true" }, "label": "a seeded single-version skill offers no Diff or Restore on its current version" },
     { "cmd": ["open", "{BASE}/skills"], "label": "back to the Skills page" },
     { "cmd": ["wait", "--load", "networkidle"], "label": "skills fetch settles again" },
     { "cmd": ["click", "article:has([aria-label='Preview skill Behavioral Coverage']) > div:last-child"], "label": "pointer-click the card footer (not a control)" },

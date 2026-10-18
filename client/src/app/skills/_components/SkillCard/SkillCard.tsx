@@ -7,6 +7,7 @@ import type { SkillSummary } from "@devdigest/shared";
 import { useUpdateSkill } from "@/lib/hooks/skills";
 import { SKILL_TYPE_COLORS } from "../../constants";
 import { skillStyles as s } from "../../styles";
+import { SourceBadge } from "../SourceBadge";
 
 /** Clicks that start on a real control keep that control's own behaviour. */
 const CONTROL_SELECTOR = "button, a, input, select, textarea, label, [role=switch]";
@@ -57,6 +58,7 @@ export function SkillCard({
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: "auto" }}>
         <Badge color={SKILL_TYPE_COLORS[skill.type]}>{t(`listItem.type.${skill.type}`)}</Badge>
+        <SourceBadge source={skill.source} />
         <span className="mono" style={{ ...s.muted, fontSize: 11 }}>{t("card.version", { version: skill.version })}</span>
         <span style={{ ...s.muted, fontSize: 11, marginLeft: "auto" }}>{t("card.usedBy", { count: skill.used_by_count })}</span>
       </div>

@@ -25,7 +25,7 @@ const CreateSkillBody = z.object({
   name: Name,
   description: Description.default(''),
   type: SkillType,
-  source: z.enum(['manual', 'extracted']).optional(),
+  source: z.enum(['manual', 'imported_file', 'extracted']).optional(),
   body: Body,
   enabled: z.boolean().optional(),
   evidence_files: z.array(z.string().trim().min(1).max(1_000)).max(100).optional(),
@@ -130,6 +130,15 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
       );
       if (!version) throw new NotFoundError('Skill version not found');
       return version;
+    },
+  );
+
+  app.post(
+    '/skills/:id/versions/:version/restore',
+    { schema: { params: VersionParams, response: { 200: Skill } } },
+    async (request) => {
+      const { workspaceId } = await getContext(app.container, request);
+      return service.restoreVersion(workspaceId, request.params.id, request.params.version);
     },
   );
 
