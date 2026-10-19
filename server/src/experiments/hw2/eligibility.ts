@@ -74,22 +74,33 @@ export function evaluateSlot(trace: { experiment?: unknown; intent?: unknown } |
   const attempt = attempts[0]!;
   if (attempt.dispatch !== 'dispatched' || attempt.outcome !== 'valid') reasons.push(`attempt outcome ${attempt.outcome}`);
 
-  // Provenance problems are tracked apart: any one makes provenance unverified.
+  // Two separate facts must be shown by OpenRouter's own metadata, never assumed:
+  // (1) which provider served the request, (2) that exactly one upstream attempt
+  // happened. A missing field proves nothing; any disagreement is unverified.
   const provenanceIssues: string[] = [];
   if (attempt.servedModel !== frozen.model) provenanceIssues.push(`served model ${attempt.servedModel ?? 'unknown'} is not ${frozen.model}`);
+  let singleAttemptProven = false;
 
-  // Router metadata: exactly one selected endpoint on the frozen provider, one router attempt.
+  // Router metadata: exactly one selected endpoint on the frozen provider;
+  // `attempt` and `attempts` must both be present and both say one.
   const router = attempt.router ?? null;
   if (router) {
     const selected = router.selected ?? [];
     const before = provenanceIssues.length;
     if (selected.length !== 1) provenanceIssues.push(`router metadata selected ${selected.length} endpoints`);
     else if (selected[0]!.provider !== frozen.providerName) provenanceIssues.push(`router selected ${selected[0]!.provider}, not ${frozen.providerName}`);
-    if ((router.attempt ?? 1) !== 1 || (router.attemptsCount ?? 1) > 1) provenanceIssues.push('router metadata shows more than one upstream attempt');
     if (provenanceIssues.length === before) sources.push('router_metadata');
+    const attemptNo = router.attempt;
+    const attemptsCount = router.attemptsCount;
+    if ((typeof attemptNo === 'number' && attemptNo !== 1) || (typeof attemptsCount === 'number' && attemptsCount !== 1)) {
+      provenanceIssues.push('router metadata shows more than one upstream attempt');
+    } else if (attemptNo === 1 && attemptsCount === 1) {
+      singleAttemptProven = true;
+    }
   }
 
-  // Generation metadata: corroborates, or establishes provenance when router metadata is missing.
+  // Generation metadata: corroborates the provider; exactly one provider
+  // response proves a single generation, while none (empty or missing) proves nothing.
   const generation = attempt.generation ?? null;
   if (generation?.status === 'found') {
     const before = provenanceIssues.length;
@@ -97,10 +108,14 @@ export function evaluateSlot(trace: { experiment?: unknown; intent?: unknown } |
     if (generation.providerName !== frozen.providerName) provenanceIssues.push(`generation provider ${generation.providerName ?? 'unknown'} is not ${frozen.providerName}`);
     if (generation.model && generation.model !== frozen.model) provenanceIssues.push(`generation model ${generation.model} is not ${frozen.model}`);
     if (responses.length > 1) provenanceIssues.push(`generation shows ${responses.length} provider responses (fallback attempts)`);
-    if (provenanceIssues.length === before) sources.push('generation');
+    if (provenanceIssues.length === before) {
+      sources.push('generation');
+      if (responses.length === 1) singleAttemptProven = true;
+    }
   }
 
   if (sources.length === 0) provenanceIssues.push('no source established the serving provider');
+  if (!singleAttemptProven) provenanceIssues.push('a single upstream attempt is not proven (router attempt/attempts or exactly one generation provider response)');
   reasons.push(...provenanceIssues);
   return {
     eligible: reasons.length === 0,

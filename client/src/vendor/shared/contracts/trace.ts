@@ -85,6 +85,8 @@ export const ExperimentRunTrace = z.object({
   slot_id: z.string(),
   experiment: z.string(),
   condition: z.enum(['with', 'without']),
+  /** The separately authorized spending phase this slot ran under. */
+  phase: z.enum(['exploration', 'confirmatory']),
   manifest_fingerprint: z.string(),
   /** `refused` = stopped before any model request (zero cost). */
   dispatch_state: z.enum(['refused', 'dispatching', 'completed', 'failed']),
@@ -96,6 +98,8 @@ export const ExperimentRunTrace = z.object({
   non_skill_fingerprint: z.string().nullable(),
   /** sha256 of the Skill slot alone (the linked skill blocks, in order). */
   skill_fingerprint: z.string().nullable(),
+  /** The frozen non-Skill fingerprint this slot had to match (required in the confirmatory phase). */
+  expected_non_skill_fingerprint: z.string().nullable(),
   routing: z.object({ order: z.array(z.string()), only: z.array(z.string()), allow_fallbacks: z.literal(false) }),
   preflight: z
     .object({

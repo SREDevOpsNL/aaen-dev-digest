@@ -152,6 +152,15 @@ export class ReviewService {
     return { runs, reviews: [] };
   }
 
+  /** HW2: the slot checks, fingerprints and preflight for `agent` on `prId`, with no model request. */
+  async previewExperiment(workspaceId: string, prId: string, agent: AgentRow, experiment: ExperimentRunContext) {
+    const pull = await this.repo.getPull(workspaceId, prId);
+    if (!pull) throw new NotFoundError('Pull request not found');
+    const repo = await this.repo.getRepo(pull.repoId);
+    if (!repo) throw new NotFoundError('Repo not found');
+    return this.executor.previewExperiment(workspaceId, pull, repo, agent, experiment);
+  }
+
   private publish(runId: string, kind: RunEventKind, msg: string, data?: unknown) {
     return this.container.runBus.publish(runId, kind, msg, data);
   }

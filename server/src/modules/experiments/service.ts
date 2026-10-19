@@ -1,13 +1,21 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Container } from '../../platform/container.js';
 import type { ExperimentConfig } from '../../platform/config.js';
 import type { OpenRouterEndpointInfo } from '@devdigest/shared';
-import { ConflictError, NotFoundError, ValidationError } from '../../platform/errors.js';
+import { AppError, ConflictError, NotFoundError, ValidationError } from '../../platform/errors.js';
 import { assertDisposableDatabase, isDisposableDatabaseName } from '../../db/disposable.js';
 import { ReviewService } from '../reviews/service.js';
 import type { Logger } from '../reviews/run-executor.js';
-import type { ExperimentRunRequest } from '../_shared/experiment.js';
+import {
+  EXPERIMENT_CAPS,
+  PHASE_SLOT_PREFIX,
+  capabilityProblem,
+  experimentCharge,
+  type ExperimentCapability,
+  type ExperimentPhase,
+  type ExperimentRunRequest,
+} from '../_shared/experiment.js';
 import { ExperimentsRepository } from './repository.js';
 
 /** The demo repository the HW2 fixtures live in. */
@@ -90,9 +98,22 @@ export class ExperimentsService {
   async start(
     workspaceId: string,
     input: ExperimentRunRequest & { pr_id: string; agent_id: string },
+    capabilityToken: string | undefined,
     logger?: Logger,
   ): Promise<{ run_id: string; slot_id: string }> {
     const config = this.config();
+    // The spending capability is checked here, independently of any client:
+    // a direct request without the operator's token for this stack and phase
+    // is refused before anything else happens.
+    const capability = this.readCapability(config.capabilityPath);
+    const problem = capabilityProblem(capability, { stackId: config.stackId, phase: input.phase, token: capabilityToken, now: new Date() });
+    if (problem) throw new AppError('experiment_not_authorized', `Experiment slot refused: ${problem}`, 403);
+    if (!input.slot_id.startsWith(PHASE_SLOT_PREFIX[input.phase])) {
+      throw new ValidationError(`A ${input.phase} slot id must start with ${PHASE_SLOT_PREFIX[input.phase]}`);
+    }
+    if (input.phase === 'confirmatory' && !input.expected_non_skill_fingerprint) {
+      throw new ValidationError('Confirmatory slots need the frozen non-Skill fingerprint');
+    }
     // Isolation first: a non-disposable database or a stray clone refuses every slot.
     await assertDisposableDatabase(this.container.db).catch((err: Error) => {
       throw new ValidationError(err.message);
@@ -111,6 +132,16 @@ export class ExperimentsService {
       if ((await this.repo.runsForSlot(workspaceId, input.slot_id)).length > 0) {
         throw new ConflictError(`Experiment slot ${input.slot_id} was already used; slots are never replayed`);
       }
+      // Server-side budget, recomputed from the stored runs (known cost, zero
+      // for refusals, the full reservation for anything unknown).
+      const charged = await this.charged(workspaceId, config.stackId);
+      const phaseLimit = Math.min(EXPERIMENT_CAPS[input.phase], (capability as ExperimentCapability).budget_usd);
+      if (charged[input.phase] + input.reservation_usd > phaseLimit + 1e-12) {
+        throw new ConflictError(`${input.phase} budget: $${charged[input.phase].toFixed(6)} charged + $${input.reservation_usd} > $${phaseLimit}`);
+      }
+      if (charged.total + input.reservation_usd > EXPERIMENT_CAPS.total + 1e-12) {
+        throw new ConflictError(`total budget: $${charged.total.toFixed(6)} charged + $${input.reservation_usd} > $${EXPERIMENT_CAPS.total}`);
+      }
       const targets = await this.reviews.resolveTargets(workspaceId, { agentId: input.agent_id });
       const { runs } = await this.reviews.runReview(workspaceId, input.pr_id, targets, logger, {
         config,
@@ -118,6 +149,8 @@ export class ExperimentsService {
           slot_id: input.slot_id,
           experiment: input.experiment,
           condition: input.condition,
+          phase: input.phase,
+          expected_non_skill_fingerprint: input.expected_non_skill_fingerprint,
           manifest_fingerprint: input.manifest_fingerprint,
           reservation_usd: input.reservation_usd,
           expected_diff_sha256: input.expected_diff_sha256,
@@ -143,6 +176,57 @@ export class ExperimentsService {
     const lister = llm as Partial<{ listEndpoints(model: string): Promise<OpenRouterEndpointInfo[]> }>;
     if (typeof lister.listEndpoints !== 'function') throw new ValidationError('The OpenRouter provider cannot list endpoints');
     return { model: config.model, endpoints: await lister.listEndpoints(config.model) };
+  }
+
+  /**
+   * Free preview of a slot: the same checks, fingerprints and preflight a run
+   * performs, with no model request, no run row and no trace. The manifest
+   * freezes the non-Skill fingerprint it returns.
+   */
+  async preview(
+    workspaceId: string,
+    input: { pr_id: string; agent_id: string; experiment: string; condition: 'with' | 'without'; phase: ExperimentPhase; reservation_usd: number; expected_diff_sha256: string },
+  ) {
+    const config = this.config();
+    const [agent] = await this.reviews.resolveTargets(workspaceId, { agentId: input.agent_id });
+    return this.reviews.previewExperiment(workspaceId, input.pr_id, agent!, {
+      config,
+      request: {
+        slot_id: 'preview',
+        experiment: input.experiment,
+        condition: input.condition,
+        phase: input.phase,
+        manifest_fingerprint: '0'.repeat(64),
+        reservation_usd: input.reservation_usd,
+        expected_diff_sha256: input.expected_diff_sha256,
+        expected_non_skill_fingerprint: null,
+      },
+    });
+  }
+
+  private readCapability(path: string): unknown {
+    try {
+      return JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    } catch {
+      return null;
+    }
+  }
+
+  private async charged(workspaceId: string, stackId: string): Promise<Record<ExperimentPhase | 'total', number>> {
+    const totals = { exploration: 0, confirmatory: 0, total: 0 };
+    for (const run of await this.repo.runsForStack(workspaceId, stackId)) {
+      const block = (run.trace as { experiment?: { phase?: ExperimentPhase; dispatch_state?: string; usage_known?: boolean; preflight?: { reservation_usd?: number } | null } }).experiment;
+      if (!block?.phase) continue;
+      const charge = experimentCharge({
+        dispatchState: block.dispatch_state ?? null,
+        usageKnown: block.usage_known ?? null,
+        costUsd: run.costUsd,
+        reservationUsd: block.preflight?.reservation_usd ?? EXPERIMENT_CAPS[block.phase],
+      });
+      totals[block.phase] += charge;
+      totals.total += charge;
+    }
+    return totals;
   }
 
   /** Reconciliation lookup: every run recorded for a slot, with its experiment block. */

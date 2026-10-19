@@ -19,6 +19,8 @@ export interface SlotRun {
   manifestFingerprint: string;
   expectedDiffSha256: string;
   reservationUsd: number;
+  /** Frozen value in the confirmatory phase; null in exploration (the server then records, not checks). */
+  expectedNonSkillFingerprint: string | null;
 }
 
 interface SlotLookup {
@@ -30,6 +32,7 @@ interface SlotLookup {
       dispatch_state?: string;
       refusal_reason?: string | null;
       usage_known?: boolean;
+      non_skill_fingerprint?: string | null;
       attempts?: Array<{ outcome?: string }>;
     } | null;
   }>;
@@ -37,6 +40,8 @@ interface SlotLookup {
 
 export interface RunnerDeps {
   api: ExperimentApi;
+  /** The operator's spending capability token (`cli.ts authorize`), sent as x-hw2-capability. */
+  capabilityToken: string;
   ledger: Ledger;
   log: (message: string) => void;
   sleep?: (ms: number) => Promise<void>;
@@ -95,6 +100,8 @@ export type SlotResult = {
   reason: string | null;
   /** True for an HTTP/network failure or an ambiguous slot; a schema-invalid answer is an outcome, not infra. */
   infraFailure: boolean;
+  /** The settled run's non-Skill fingerprint differs from the expected one: stop. */
+  fingerprintMismatch?: boolean;
 };
 
 const INFRA_OUTCOMES = new Set(['http_error', 'network_error']);
@@ -112,16 +119,22 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
   await deps.api.post(`/agents/${run.agentId}/skills`, { skill_ids: run.skillIds });
   let runId: string;
   try {
-    ({ run_id: runId } = await deps.api.post<{ run_id: string }>('/experiments/runs', {
-      pr_id: run.prId,
-      agent_id: run.agentId,
-      slot_id: run.slot.slot_id,
-      experiment: run.slot.experiment,
-      condition: run.slot.condition,
-      manifest_fingerprint: run.manifestFingerprint,
-      reservation_usd: run.reservationUsd,
-      expected_diff_sha256: run.expectedDiffSha256,
-    }));
+    ({ run_id: runId } = await deps.api.post<{ run_id: string }>(
+      '/experiments/runs',
+      {
+        pr_id: run.prId,
+        agent_id: run.agentId,
+        slot_id: run.slot.slot_id,
+        experiment: run.slot.experiment,
+        condition: run.slot.condition,
+        phase: run.slot.phase,
+        manifest_fingerprint: run.manifestFingerprint,
+        reservation_usd: run.reservationUsd,
+        expected_diff_sha256: run.expectedDiffSha256,
+        expected_non_skill_fingerprint: run.expectedNonSkillFingerprint,
+      },
+      { 'x-hw2-capability': deps.capabilityToken },
+    ));
   } catch (err) {
     // 4xx: the server refused before creating a run (nothing dispatched). Anything else is unknown.
     if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
@@ -142,7 +155,10 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
     if (settled && current?.status !== 'running') {
       deps.ledger.append({ ...base, state: settled.state, run_id: runId, cost_usd: settled.cost });
       const outcome = current?.experiment?.attempts?.[0]?.outcome;
+      const fingerprint = current?.experiment?.non_skill_fingerprint ?? null;
       return {
+        fingerprintMismatch:
+          settled.state !== 'refused' && run.expectedNonSkillFingerprint !== null && fingerprint !== run.expectedNonSkillFingerprint,
         state: settled.state,
         runId,
         costUsd: settled.cost,
@@ -185,6 +201,7 @@ export async function runSchedule(
     deps.log(`${run.slot.slot_id}: ${result.state}${result.reason ? ` — ${result.reason}` : ''}`);
     if (result.state === 'refused' && result.runId === null && /budget/.test(result.reason ?? '')) return { results, stopped: result.reason };
     if (result.state === 'refused' && rules.stopOnRefusal) return { results, stopped: `guard refusal on ${run.slot.slot_id}: ${result.reason}` };
+    if (result.fingerprintMismatch) return { results, stopped: `${run.slot.slot_id} did not reproduce the frozen non-Skill fingerprint` };
     unknownCost = result.costUsd === null ? unknownCost + 1 : 0;
     if (unknownCost >= rules.maxConsecutiveUnknownCost) return { results, stopped: `${unknownCost} consecutive slots with unknown cost` };
     infra = result.infraFailure ? infra + 1 : 0;

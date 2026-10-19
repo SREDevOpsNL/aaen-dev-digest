@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import {
   REVIEW_SCHEMA_NAME,
   experimentRequestBody,
@@ -15,10 +15,19 @@ import type { ExperimentConfig } from '../../platform/config.js';
  */
 
 /** What the runner asks for one scheduled slot. */
+export type ExperimentPhase = 'exploration' | 'confirmatory';
+
 export interface ExperimentRunRequest {
   slot_id: string;
   experiment: string;
   condition: 'with' | 'without';
+  /** The separately authorized spending phase (checked against the server-side capability). */
+  phase: ExperimentPhase;
+  /**
+   * The frozen non-Skill fingerprint this slot must reproduce, from the manifest's
+   * free preview. Required in the confirmatory phase; the slot is refused on a mismatch.
+   */
+  expected_non_skill_fingerprint: string | null;
   manifest_fingerprint: string;
   /** The most this slot may cost; the preflight refuses a worst case above it. */
   reservation_usd: number;
@@ -169,6 +178,8 @@ export function preflight(args: {
   outputCap: number;
   limits: PriceLimits;
   reservationUsd: number;
+  /** Confirmatory slots need a known completion limit: an unknown one cannot be shown to hold the cap. */
+  requireMaxCompletionTokens: boolean;
 }): PreflightDecision {
   const { inputUpperBound: input, outputCap, limits, reservationUsd } = args;
   const worstCaseUsd =
@@ -177,6 +188,9 @@ export function preflight(args: {
   if (input + outputCap > limits.contextLength) {
     return { ok: false, worstCaseUsd, reason: `input bound ${input} + output cap ${outputCap} exceeds the context length ${limits.contextLength}` };
   }
+  if (limits.maxCompletionTokens === null && args.requireMaxCompletionTokens) {
+    return { ok: false, worstCaseUsd, reason: "the endpoint's max completion tokens are unknown (required for confirmatory slots)" };
+  }
   if (limits.maxCompletionTokens !== null && outputCap > limits.maxCompletionTokens) {
     return { ok: false, worstCaseUsd, reason: `output cap ${outputCap} exceeds the endpoint's max completion tokens ${limits.maxCompletionTokens}` };
   }
@@ -184,4 +198,61 @@ export function preflight(args: {
     return { ok: false, worstCaseUsd, reason: `worst case $${worstCaseUsd.toFixed(6)} exceeds the slot reservation $${reservationUsd}` };
   }
   return { ok: true, worstCaseUsd };
+}
+
+/** Spending caps (USD) per authorized phase and in total (plan rev. 4.3). */
+export const EXPERIMENT_CAPS = { exploration: 0.5, confirmatory: 1.0, total: 1.5 } as const;
+/** The gate that authorizes each phase. */
+export const PHASE_GATE: Record<ExperimentPhase, 3 | 4> = { exploration: 3, confirmatory: 4 };
+/** Slot ids carry their phase, so a slot cannot be moved to another phase. */
+export const PHASE_SLOT_PREFIX: Record<ExperimentPhase, string> = { exploration: 'x-', confirmatory: 'c-' };
+
+/**
+ * The server-side spending capability, written by the operator when a paid
+ * phase is authorized. It stores only a hash of the token the runner presents.
+ */
+export interface ExperimentCapability {
+  version: 1;
+  stack_id: string;
+  phase: ExperimentPhase;
+  gate: 3 | 4;
+  budget_usd: number;
+  expires_at: string;
+  token_sha256: string;
+  authorized_at: string;
+}
+
+/** Why a presented capability token does not authorize this slot, or null when it does. */
+export function capabilityProblem(
+  capability: unknown,
+  args: { stackId: string; phase: ExperimentPhase; token: string | undefined; now: Date },
+): string | null {
+  if (!capability || typeof capability !== 'object') return 'no spending capability is configured for this stack';
+  const c = capability as Partial<ExperimentCapability>;
+  if (c.version !== 1) return 'unsupported capability version';
+  if (c.stack_id !== args.stackId) return `the capability is for stack ${String(c.stack_id)}, not ${args.stackId}`;
+  if (c.phase !== args.phase) return `the capability authorizes the ${String(c.phase)} phase, not ${args.phase}`;
+  if (c.gate !== PHASE_GATE[args.phase]) return `the ${args.phase} phase needs Gate ${PHASE_GATE[args.phase]}`;
+  if (typeof c.budget_usd !== 'number' || !(c.budget_usd > 0) || c.budget_usd > EXPERIMENT_CAPS[args.phase]) {
+    return `the capability budget must be positive and at most $${EXPERIMENT_CAPS[args.phase]}`;
+  }
+  const expires = typeof c.expires_at === 'string' ? Date.parse(c.expires_at) : Number.NaN;
+  if (!Number.isFinite(expires) || expires <= args.now.getTime()) return 'the capability has expired';
+  if (!args.token) return 'no capability token was presented';
+  if (typeof c.token_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(c.token_sha256)) return 'the capability has no valid token hash';
+  const presented = Buffer.from(sha256(args.token), 'hex');
+  if (!timingSafeEqual(presented, Buffer.from(c.token_sha256, 'hex'))) return 'the capability token does not match';
+  return null;
+}
+
+/** What a recorded experiment run counts against the budget (same rule as the runner's ledger). */
+export function experimentCharge(run: {
+  dispatchState: string | null;
+  usageKnown: boolean | null;
+  costUsd: number | null;
+  reservationUsd: number;
+}): number {
+  if (run.dispatchState === 'refused') return 0;
+  if ((run.dispatchState === 'completed' || run.dispatchState === 'failed') && run.usageKnown && run.costUsd !== null) return run.costUsd;
+  return run.reservationUsd;
 }

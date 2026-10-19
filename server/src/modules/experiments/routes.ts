@@ -11,7 +11,8 @@ import { ExperimentsService } from './service.js';
  *
  *   GET  /experiments/identity        → stack, database and isolation facts
  *   GET  /experiments/endpoints       → live provider endpoints of the frozen model (free metadata)
- *   POST /experiments/runs            → start one scheduled slot (one review run)
+ *   POST /experiments/preview         → a slot's checks, fingerprints and preflight, no model request
+ *   POST /experiments/runs            → start one scheduled slot (needs the x-hw2-capability token)
  *   GET  /experiments/slots/:slotId   → runs recorded for a slot (reconciliation)
  */
 const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
@@ -21,10 +22,15 @@ const StartBody = z.object({
   slot_id: z.string().regex(/^[a-z0-9][a-z0-9-]{2,80}$/),
   experiment: z.enum(['17', '18']),
   condition: z.enum(['with', 'without']),
+  phase: z.enum(['exploration', 'confirmatory']),
   manifest_fingerprint: Sha256,
   reservation_usd: z.number().positive().max(1.5),
   expected_diff_sha256: Sha256,
+  expected_non_skill_fingerprint: Sha256.nullable(),
 });
+const PreviewBody = StartBody.omit({ slot_id: true, manifest_fingerprint: true, expected_non_skill_fingerprint: true });
+/** The operator's spending capability token (see `cli.ts authorize`); required by every slot. */
+const CAPABILITY_HEADER = 'x-hw2-capability';
 const SlotParams = z.object({ slotId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,80}$/) });
 
 export default async function experimentsRoutes(appBase: FastifyInstance) {
@@ -54,11 +60,17 @@ export default async function experimentsRoutes(appBase: FastifyInstance) {
     { schema: { body: StartBody }, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
     async (request, reply) => {
       const { workspaceId } = await getContext(app.container, request);
-      const started = await service.start(workspaceId, request.body, request.log);
+      const header = request.headers[CAPABILITY_HEADER];
+      const started = await service.start(workspaceId, request.body, typeof header === 'string' ? header : undefined, request.log);
       reply.status(202);
       return started;
     },
   );
+
+  app.post('/experiments/preview', { schema: { body: PreviewBody } }, async (request) => {
+    const { workspaceId } = await getContext(app.container, request);
+    return service.preview(workspaceId, request.body);
+  });
 
   app.get('/experiments/slots/:slotId', { schema: { params: SlotParams } }, async (request) => {
     const { workspaceId } = await getContext(app.container, request);

@@ -61,6 +61,7 @@ export function initialBlock(batch: ExperimentBatch): ExperimentRunTrace {
     slot_id: request.slot_id,
     experiment: request.experiment,
     condition: request.condition,
+    phase: request.phase,
     manifest_fingerprint: request.manifest_fingerprint,
     dispatch_state: 'refused',
     refusal_reason: null,
@@ -68,6 +69,7 @@ export function initialBlock(batch: ExperimentBatch): ExperimentRunTrace {
     expected_diff_sha256: request.expected_diff_sha256,
     non_skill_fingerprint: null,
     skill_fingerprint: null,
+    expected_non_skill_fingerprint: request.expected_non_skill_fingerprint,
     routing: { order: [config.provider], only: [config.provider], allow_fallbacks: false },
     preflight: null,
     usage_known: true,
@@ -85,6 +87,8 @@ export async function prepareExperimentSlot(args: {
   tokenizer: Tokenizer;
   promptInput: ReviewPromptInput;
   sessionId: string;
+  /** A free preview computes the fingerprint the manifest will freeze, so it skips the frozen-value check. */
+  preview?: boolean;
 }): Promise<ExperimentSlot> {
   const { batch, agent, repo, intent, llm } = args;
   const { config, request } = batch.ctx;
@@ -113,6 +117,12 @@ export async function prepareExperimentSlot(args: {
   const fingerprints = requestFingerprints(args.promptInput, config.model, options, args.sessionId);
   block.non_skill_fingerprint = fingerprints.nonSkill;
   block.skill_fingerprint = fingerprints.skill;
+  if (!args.preview && request.phase === 'confirmatory' && !request.expected_non_skill_fingerprint) {
+    refuse('confirmatory slots need the frozen non-Skill fingerprint');
+  }
+  if (request.expected_non_skill_fingerprint && fingerprints.nonSkill !== request.expected_non_skill_fingerprint) {
+    refuse(`non-Skill fingerprint ${fingerprints.nonSkill} does not equal the frozen ${request.expected_non_skill_fingerprint}`);
+  }
 
   let live: OpenRouterEndpointInfo[];
   try {
@@ -125,7 +135,13 @@ export async function prepareExperimentSlot(args: {
 
   const bodyJson = JSON.stringify(experimentBody(args.promptInput, config.model, options, args.sessionId));
   const bound = inputUpperBound(bodyJson, args.tokenizer.count(bodyJson));
-  const decision = preflight({ inputUpperBound: bound, outputCap: config.maxOutputTokens, limits, reservationUsd: request.reservation_usd });
+  const decision = preflight({
+    inputUpperBound: bound,
+    outputCap: config.maxOutputTokens,
+    limits,
+    reservationUsd: request.reservation_usd,
+    requireMaxCompletionTokens: request.phase === 'confirmatory',
+  });
   block.preflight = {
     input_upper_bound: bound,
     output_cap: config.maxOutputTokens,

@@ -75,7 +75,40 @@ pnpm exec tsx src/experiments/hw2/cli.ts manifest --api … --stack … --databa
   It is OpenRouter metadata, not a generation, but needs the key file.
 - `plan` prints the 20-slot balanced, seeded schedule.
 - `manifest` builds the canonical manifest and its fingerprint. It refuses
-  unless 20 × the per-slot reservation fits USD 1.00.
+  unless 20 × the per-slot reservation fits USD 1.00. The manifest freezes:
+  - the **implementation fingerprint**: committed blob ids of `server/src`,
+    `reviewer-core/src`, their package and lock files, and `scripts/e2e.sh`.
+    Unlike `HEAD`, it does not change when the preregistration is committed,
+    and it refuses uncommitted implementation changes;
+  - **each experiment's non-Skill fingerprint**, from the free
+    `POST /experiments/preview`. The preview performs a slot's checks and
+    preflight without a model request, a run or a trace.
+
+### Authorizing a paid phase (server-side capability)
+
+The server refuses every slot unless the operator's capability authorizes it. A
+direct API call therefore cannot bypass the gate. After a gate is explicitly
+authorized:
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget 0.50 --hours 12 \
+  --api … --stack … --database … --container …
+```
+
+- This writes `~/.devdigest/hw2-experiments/<stack-id>/capability.json`
+  (0600): the stack id, phase, gate, budget, expiry and the **sha256** of a
+  random token. The token itself goes to `capability.token` (0600), which
+  `run` sends as `x-hw2-capability`.
+- On every slot the server rereads the capability. It refuses (403):
+  - a missing, expired or wrong-stack capability;
+  - a phase or gate mismatch;
+  - a wrong token, compared timing-safe.
+- The server also enforces its own budget, recomputed from the stored
+  experiment runs: known cost, zero for refusals, the full reservation for
+  anything unknown. It caps each phase at min(phase cap, capability budget)
+  and the total at USD 1.50, and returns 409 when a slot would exceed either.
+- Slot ids carry their phase (`x-` exploration, `c-` confirmatory).
+- Deleting `capability.json` revokes the authorization.
 
 ## Paid
 
@@ -101,7 +134,7 @@ Fixtures and settings may be refined only here.
 1. Fill `docs/plans/HW2-experiment-preregistration.md`, paste the manifest into
    its ```` ```json manifest ```` block, and **commit** it.
 2. Restart the stack with the frozen values (`…_PROVIDER_NAME` set).
-3. Run:
+3. Authorize the confirmatory phase (`authorize --phase confirmatory --authorized-gate 4 --confirm-spend --budget 1.00 …`), then run:
 
 ```bash
 pnpm exec tsx src/experiments/hw2/cli.ts run --phase confirmatory --authorized-gate 4 --confirm-spend \
@@ -114,6 +147,29 @@ The run refuses unless:
 - its manifest fingerprint equals the one recomputed from the current code, stack and content.
 
 It runs the frozen 20 slots in order, one at a time, and never replays a slot.
+Each slot carries its experiment's frozen non-Skill fingerprint. The server
+refuses a confirmatory slot without it, or one that does not reproduce it,
+before any model request, and the runner stops on any mismatch.
+Confirmatory slots also need a known max-completion-tokens limit.
+
+### Report
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts report --prereg ../docs/plans/HW2-experiment-preregistration.md \
+  --api … --stack … --database … --container … --out report.md
+```
+
+The report covers **all 20 scheduled slots**, including those never
+dispatched. For each slot it retrieves the run's actual findings
+(`GET /pulls/:id/reviews`) and applies the frozen rules. It shows:
+- the raw finding titles, and the matching titles with their anchors;
+- whether the slot counts. A slot counts only when it is strict
+  single-generation evidence **and** reproduces the frozen non-Skill
+  fingerprint.
+
+Per experiment it gives the with and without detections and counts, and the
+outcome: success, negative, inconclusive, incomplete, or *invalid* when any
+otherwise eligible slot broke the frozen fingerprint.
 
 ## Safety rules the code enforces
 
@@ -164,6 +220,12 @@ A slot counts only if all of these hold:
 - exactly one upstream attempt, on the frozen provider and model, shown by router metadata and/or generation metadata with no conflict and no fallback;
 - the frozen intent and diff;
 - a valid outcome.
+
+A single upstream attempt must be **shown**, never assumed: either router
+metadata reporting `attempt` = 1 **and** `attempts` = 1, or exactly one
+generation `provider_responses` entry. Missing fields, or an empty list, prove
+nothing. `finish_reason: length` is always truncation, even when the JSON
+parses.
 
 Ineligible slots stay in the report.
 

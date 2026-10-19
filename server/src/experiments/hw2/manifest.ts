@@ -15,7 +15,10 @@ export async function fixtureDiffSha(fixture: ExperimentFixture): Promise<string
 }
 
 export interface ManifestInput {
-  codeSha: string;
+  /** implementationFingerprint(): independent of the pre-registration commit. */
+  implementationFingerprint: string;
+  /** Per experiment, the non-Skill fingerprint from the free preview; every counted slot must reproduce it. */
+  nonSkillFingerprints: Record<string, string>;
   stack: { database: string; provider: string; providerName: string | null; model: string; maxOutputTokens: number; prices: unknown; generationLookup: unknown };
   skills: Array<{ name: string; body: string }>;
   agents: Array<{ name: string; system_prompt: string; model: string; strategy: string; repo_intel: boolean }>;
@@ -40,8 +43,9 @@ export async function buildManifest(input: ManifestInput) {
     })),
   );
   return {
-    version: 1,
-    code_sha: input.codeSha,
+    version: 2,
+    implementation_fingerprint: input.implementationFingerprint,
+    non_skill_fingerprints: input.nonSkillFingerprints,
     stack: input.stack,
     retry: { transport: 0, structured: 0 },
     temperature: 0,

@@ -81,6 +81,11 @@ export interface ExperimentConfig {
   prices: { input: number; output: number; request: number };
   /** Generation-metadata polling, or null to skip the lookup. */
   generationLookup: { attempts: number; delayMs: number } | null;
+  /**
+   * The spending capability the operator writes when a paid phase is
+   * authorized (Gate 3 or 4). Without a valid one every slot is refused.
+   */
+  capabilityPath: string;
 }
 
 const EXPERIMENT_REQUIRED = [
@@ -102,6 +107,7 @@ const ExperimentEnv = z.object({
   DEVDIGEST_EXPERIMENT_PRICE_OUTPUT: z.coerce.number().positive(),
   DEVDIGEST_EXPERIMENT_PRICE_REQUEST: z.coerce.number().nonnegative().default(0),
   DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP: z.enum(['0', '1']).default('1'),
+  DEVDIGEST_EXPERIMENT_CAPABILITY_PATH: z.string().min(1).optional(),
 });
 
 /**
@@ -132,6 +138,9 @@ export function loadExperimentConfig(env: NodeJS.ProcessEnv): ExperimentConfig |
       request: e.DEVDIGEST_EXPERIMENT_PRICE_REQUEST,
     },
     generationLookup: e.DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP === '1' ? { attempts: 5, delayMs: 1_000 } : null,
+    capabilityPath:
+      e.DEVDIGEST_EXPERIMENT_CAPABILITY_PATH ??
+      join(homedir(), '.devdigest', 'hw2-experiments', e.DEVDIGEST_EXPERIMENT_STACK_ID, 'capability.json'),
   };
 }
 

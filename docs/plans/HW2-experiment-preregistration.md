@@ -14,7 +14,9 @@ manifest that does not match the current stack, code and content).
 
 ## Frozen inputs (from Gate 3)
 
-- Code SHA:
+- Implementation fingerprint (from `cli.ts manifest`; not `HEAD`, so committing this file does not invalidate it):
+- Frozen non-Skill fingerprints per experiment (from the free preview):
+- Commit of this file (informational):
 - Provider routing slug / serving display name / served model:
 - Endpoint (tag, quantization) where identifiable:
 - Prices (USD per input token, per output token, per request) and retrieval time:

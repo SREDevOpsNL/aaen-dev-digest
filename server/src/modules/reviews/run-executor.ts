@@ -230,57 +230,7 @@ export class ReviewRunExecutor {
         { kind: 'tool' },
       );
 
-      // Per-agent repo-intel toggle (Agent editor). When an agent opts out we
-      // skip all enrichment entirely so its prompt is identical to the
-      // repo-intel-off baseline — independent of the global REPO_INTEL_ENABLED
-      // flag, which still gates the facade internally.
-      const repoIntelOn = agent.repoIntel !== false;
-      if (!repoIntelOn) runLog.info('Repo intel disabled for this agent — skipping context enrichment');
-
-      // T1.3 — callers-in-prompt. Best-effort: when repo-intel is off the facade
-      // returns []; we omit the section and behavior is identical to the
-      // pre-T1.3 prompt (acceptance #10).
-      const callersDigest = repoIntelOn
-        ? await this.buildCallersDigest(pull.repoId, diff, runLog)
-        : undefined;
-
-      // T3 — repo skeleton + "changed files are top-5%" framing. Both best-
-      // effort: when repo-intel is off / unindexed the facade degrades and the
-      // prompt is identical to the pre-T3 shape.
-      const repoMap = repoIntelOn ? await this.buildRepoMapDigest(pull.repoId, runLog) : undefined;
-      const rankNote = repoIntelOn ? await this.buildRankNote(pull.repoId, diff, runLog) : '';
-
-      const task = taskLine(pull) + rankNote;
-
-      // User-editable skill text is resolved from the same workspace in link
-      // order. reviewer-core wraps every block as untrusted data before it can
-      // reach the model; it is guidance to evaluate, never executable content.
-      const skillBlocks = await this.buildSkillBlocks(agent.id, runLog);
-
-      // ---- Engine: assemble → single-pass → grounding -----------------------
-      // The pure review pipeline lives in @devdigest/reviewer-core (shared with
-      // the CI runner). The service owns only I/O: repo-intel context resolution
-      // above, and persistence + observability below.
-      // The prompt inputs, built once: the engine receives exactly these, and an
-      // experiment slot measures and fingerprints exactly these.
-      const promptInput = {
-        systemPrompt: agent.systemPrompt,
-        diff,
-        ...(skillBlocks.length > 0 ? { skills: skillBlocks } : {}),
-        // T1.3 — pass the callers digest only when we built one. assemblePrompt
-        // omits the section when this is empty/undefined.
-        ...(callersDigest ? { callers: callersDigest } : {}),
-        // T3 — repo skeleton, same omit-when-empty contract.
-        ...(repoMap ? { repoMap } : {}),
-        // PR author's description/body — untrusted; assemblePrompt wraps +
-        // truncates it. Omitted when the PR has no body.
-        ...(pull.body ? { prDescription: pull.body } : {}),
-        // L03 — validated intent as untrusted context plus the trusted scope
-        // policy; omitted → the prompt is identical to the no-intent shape.
-        ...(intent.analysis ? { intent: intent.analysis } : {}),
-        task,
-      };
-      const sessionId = `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`;
+      const { promptInput, sessionId, skillBlocks } = await this.buildPromptInput(pull, repo, diff, agent, intent, runLog);
 
       if (experiment) {
         slot = await prepareExperimentSlot({
@@ -451,6 +401,111 @@ export class ReviewRunExecutor {
       this.container.runBus.complete(runId);
       throw err;
     }
+  }
+
+  /**
+   * HW2 free preview: everything an experiment slot checks before dispatch
+   * (diff hash, cached intent, agent, clone, endpoints, preflight) and its
+   * fingerprints, without a model request, a run row or a trace. Never derives
+   * an intent. Returns the block a run would record, or the refusal.
+   */
+  async previewExperiment(
+    workspaceId: string,
+    pull: PullRow,
+    repo: typeof schema.repos.$inferSelect,
+    agent: AgentRow,
+    experiment: ExperimentRunContext,
+  ): Promise<{ ok: boolean; reason: string | null; block: ExperimentRunTrace }> {
+    const runLog = new RunLogger(this.container.runBus, [], undefined, { prId: pull.id });
+    const diff = await loadDiff(this.container, this.repo, workspaceId, pull, repo);
+    const intent = await this.intents.forReviewBatch(workspaceId, pull, repo, diff, undefined, { derive: false });
+    const llm = await this.container.llm(agent.provider as Provider);
+    const { promptInput, sessionId } = await this.buildPromptInput(pull, repo, diff, agent, intent, runLog);
+    try {
+      const slot = await prepareExperimentSlot({
+        batch: { ctx: experiment, diffSha256: sha256(diff.raw) },
+        agent,
+        repo,
+        cloneDir: this.container.config.cloneDir,
+        intent,
+        llm,
+        tokenizer: this.container.tokenizer,
+        promptInput,
+        sessionId,
+        preview: true,
+      });
+      return { ok: true, reason: null, block: slot.block };
+    } catch (err) {
+      if (err instanceof ExperimentRefusedError) return { ok: false, reason: err.reason, block: err.block };
+      throw err;
+    }
+  }
+
+  /**
+   * The review's prompt inputs, built once: the engine receives exactly these,
+   * and an experiment slot (or its free preview) measures and fingerprints
+   * exactly these.
+   */
+  private async buildPromptInput(
+    pull: PullRow,
+    repo: typeof schema.repos.$inferSelect,
+    diff: UnifiedDiff,
+    agent: AgentRow,
+    intent: IntentRunSnapshot,
+    runLog: RunLogger,
+  ) {
+    // Per-agent repo-intel toggle (Agent editor). When an agent opts out we
+    // skip all enrichment entirely so its prompt is identical to the
+    // repo-intel-off baseline — independent of the global REPO_INTEL_ENABLED
+    // flag, which still gates the facade internally.
+    const repoIntelOn = agent.repoIntel !== false;
+    if (!repoIntelOn) runLog.info('Repo intel disabled for this agent — skipping context enrichment');
+
+    // T1.3 — callers-in-prompt. Best-effort: when repo-intel is off the facade
+    // returns []; we omit the section and behavior is identical to the
+    // pre-T1.3 prompt (acceptance #10).
+    const callersDigest = repoIntelOn
+      ? await this.buildCallersDigest(pull.repoId, diff, runLog)
+      : undefined;
+
+    // T3 — repo skeleton + "changed files are top-5%" framing. Both best-
+    // effort: when repo-intel is off / unindexed the facade degrades and the
+    // prompt is identical to the pre-T3 shape.
+    const repoMap = repoIntelOn ? await this.buildRepoMapDigest(pull.repoId, runLog) : undefined;
+    const rankNote = repoIntelOn ? await this.buildRankNote(pull.repoId, diff, runLog) : '';
+
+    const task = taskLine(pull) + rankNote;
+
+    // User-editable skill text is resolved from the same workspace in link
+    // order. reviewer-core wraps every block as untrusted data before it can
+    // reach the model; it is guidance to evaluate, never executable content.
+    const skillBlocks = await this.buildSkillBlocks(agent.id, runLog);
+
+    // ---- Engine: assemble → single-pass → grounding -----------------------
+    // The pure review pipeline lives in @devdigest/reviewer-core (shared with
+    // the CI runner). The service owns only I/O: repo-intel context resolution
+    // above, and persistence + observability below.
+    // The prompt inputs, built once: the engine receives exactly these, and an
+    // experiment slot measures and fingerprints exactly these.
+    const promptInput = {
+      systemPrompt: agent.systemPrompt,
+      diff,
+      ...(skillBlocks.length > 0 ? { skills: skillBlocks } : {}),
+      // T1.3 — pass the callers digest only when we built one. assemblePrompt
+      // omits the section when this is empty/undefined.
+      ...(callersDigest ? { callers: callersDigest } : {}),
+      // T3 — repo skeleton, same omit-when-empty contract.
+      ...(repoMap ? { repoMap } : {}),
+      // PR author's description/body — untrusted; assemblePrompt wraps +
+      // truncates it. Omitted when the PR has no body.
+      ...(pull.body ? { prDescription: pull.body } : {}),
+      // L03 — validated intent as untrusted context plus the trusted scope
+      // policy; omitted → the prompt is identical to the no-intent shape.
+      ...(intent.analysis ? { intent: intent.analysis } : {}),
+      task,
+    };
+    const sessionId = `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`;
+    return { promptInput, sessionId, skillBlocks };
   }
 
   /** Whether at least one run of the batch is not cancelled (same signal as the checkpoint). */

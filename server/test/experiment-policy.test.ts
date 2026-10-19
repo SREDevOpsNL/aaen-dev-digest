@@ -3,6 +3,7 @@ import type { OpenRouterEndpointInfo } from '@devdigest/shared';
 import type { ExperimentConfig } from '../src/platform/config.js';
 import {
   CHAT_TEMPLATE_ALLOWANCE_TOKENS,
+  experimentCharge,
   canonicalJson,
   effectivePriceLimits,
   experimentOptions,
@@ -48,7 +49,7 @@ describe('preflight', () => {
   const limits = effectivePriceLimits(config, [endpoint()])!;
 
   it('computes the worst case with the contingency and accepts it within the reservation', () => {
-    const decision = preflight({ inputUpperBound: 10_000, outputCap: 4000, limits, reservationUsd: 0.01 });
+    const decision = preflight({ inputUpperBound: 10_000, outputCap: 4000, limits, reservationUsd: 0.01, requireMaxCompletionTokens: true });
     // (10000 × 1.4e-7 + 4000 × 2.8e-7) × 1.5 = 0.00378
     expect(decision).toEqual({ ok: true, worstCaseUsd: expect.closeTo(0.00378, 8) });
   });
@@ -58,11 +59,18 @@ describe('preflight', () => {
     ['beyond the context window', { inputUpperBound: 125_000, outputCap: 4000, reservationUsd: 1 }, /exceeds the context length/],
     ['beyond the max completion tokens', { inputUpperBound: 1000, outputCap: 20_000, reservationUsd: 1 }, /max completion tokens/],
   ])('refuses %s', (_label, args, reason) => {
-    expect(preflight({ ...args, limits })).toMatchObject({ ok: false, reason: expect.stringMatching(reason) });
+    expect(preflight({ ...args, limits, requireMaxCompletionTokens: false })).toMatchObject({ ok: false, reason: expect.stringMatching(reason) });
   });
 
   it('refuses when the context length is unknown', () => {
-    expect(preflight({ inputUpperBound: 1, outputCap: 1, limits: { ...limits, contextLength: null }, reservationUsd: 1 })).toMatchObject({ ok: false });
+    expect(preflight({ inputUpperBound: 1, outputCap: 1, limits: { ...limits, contextLength: null }, reservationUsd: 1, requireMaxCompletionTokens: false })).toMatchObject({ ok: false });
+  });
+
+  it('refuses a confirmatory slot when the max completion tokens are unknown, but not an exploratory one', () => {
+    const unknown = { ...limits, maxCompletionTokens: null };
+    const args = { inputUpperBound: 1000, outputCap: 1000, limits: unknown, reservationUsd: 1 };
+    expect(preflight({ ...args, requireMaxCompletionTokens: true })).toMatchObject({ ok: false, reason: expect.stringMatching(/max completion tokens are unknown/) });
+    expect(preflight({ ...args, requireMaxCompletionTokens: false })).toMatchObject({ ok: true });
   });
 });
 
@@ -104,5 +112,16 @@ describe('request fingerprints', () => {
 
   it('canonical JSON ignores key order', () => {
     expect(canonicalJson({ b: 1, a: { d: 2, c: 3 } })).toBe(canonicalJson({ a: { c: 3, d: 2 }, b: 1 }));
+  });
+});
+
+describe('server-side charge rule', () => {
+  it('charges known cost, nothing for refusals, and the reservation for anything unknown', () => {
+    expect(experimentCharge({ dispatchState: 'refused', usageKnown: true, costUsd: null, reservationUsd: 0.05 })).toBe(0);
+    expect(experimentCharge({ dispatchState: 'completed', usageKnown: true, costUsd: 0.001, reservationUsd: 0.05 })).toBe(0.001);
+    expect(experimentCharge({ dispatchState: 'failed', usageKnown: true, costUsd: 0.002, reservationUsd: 0.05 })).toBe(0.002);
+    expect(experimentCharge({ dispatchState: 'failed', usageKnown: false, costUsd: null, reservationUsd: 0.05 })).toBe(0.05);
+    expect(experimentCharge({ dispatchState: 'dispatching', usageKnown: true, costUsd: null, reservationUsd: 0.05 })).toBe(0.05);
+    expect(experimentCharge({ dispatchState: 'completed', usageKnown: false, costUsd: 0.001, reservationUsd: 0.05 })).toBe(0.05);
   });
 });

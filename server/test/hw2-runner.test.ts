@@ -4,14 +4,16 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApiError, ExperimentApi } from '../src/experiments/hw2/api.js';
 import { CAPS, charge, fits, scheduleFits, spent } from '../src/experiments/hw2/budget.js';
-import { assertPaidAuthorization, parseArgs } from '../src/experiments/hw2/cli.js';
+import { assertPaidAuthorization, parseArgs, writeCapability } from '../src/experiments/hw2/cli.js';
+import { buildReport, renderReport, type SlotRunData } from '../src/experiments/hw2/report.js';
 import { evaluateSlot, fingerprintsAgree, type FrozenExpectations } from '../src/experiments/hw2/eligibility.js';
 import { identityProblems, type StackIdentity } from '../src/experiments/hw2/identity.js';
 import { Ledger } from '../src/experiments/hw2/ledger.js';
 import { detection, experimentOutcome, matchesRule } from '../src/experiments/hw2/rules.js';
 import { reconcile, runSchedule, runSlot, type RunnerDeps, type SlotRun } from '../src/experiments/hw2/runner.js';
 import { buildSchedule } from '../src/experiments/hw2/schedule.js';
-import { canonicalJson, sha256 } from '../src/modules/_shared/experiment.js';
+import { canonicalJson, capabilityProblem, sha256 } from '../src/modules/_shared/experiment.js';
+import { readFileSync, statSync } from 'node:fs';
 
 describe('schedule', () => {
   it('builds 20 unique slots, 5 per experiment and condition, in a balanced interleave', () => {
@@ -225,7 +227,7 @@ describe('paid-run authorization flags', () => {
 
 /** In-memory stand-in for the disposable API. */
 class FakeApi extends ExperimentApi {
-  calls: Array<{ method: string; path: string; body?: unknown }> = [];
+  calls: Array<{ method: string; path: string; body?: unknown; headers?: Record<string, string> }> = [];
   slots = new Map<string, unknown>();
   postError: Error | null = null;
   settle: (slotId: string, runId: string) => unknown = (slotId, runId) => ({
@@ -234,8 +236,8 @@ class FakeApi extends ExperimentApi {
   constructor() {
     super('http://127.0.0.1:1');
   }
-  override async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<T> {
-    this.calls.push({ method, path, body });
+  override async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+    this.calls.push({ method, path, body, headers });
     if (method === 'POST' && path === '/experiments/runs') {
       if (this.postError) throw this.postError;
       const slotId = (body as { slot_id: string }).slot_id;
@@ -261,14 +263,14 @@ describe('runner orchestration (fake API, no network)', () => {
     ledger = new Ledger(dir);
     ledger.acquire({ pid: 1, stackId: 'hw2f-test' });
     api = new FakeApi();
-    deps = { api, ledger, log: (m) => logs.push(m), sleep: async () => {}, pollIntervalMs: 0, pollTimeoutMs: 1_000 };
+    deps = { api, ledger, log: (m) => logs.push(m), capabilityToken: 'tok-123', sleep: async () => {}, pollIntervalMs: 0, pollTimeoutMs: 1_000 };
   });
   afterEach(() => {
     ledger.release();
     rmSync(dir, { recursive: true, force: true });
   });
 
-  const slotRun = (id: string, phase: 'exploration' | 'confirmatory' = 'confirmatory', reservationUsd = 0.05): SlotRun => ({
+  const slotRun = (id: string, phase: 'exploration' | 'confirmatory' = 'confirmatory', reservationUsd = 0.05, expected: string | null = null): SlotRun => ({
     slot: { slot_id: id, index: 0, phase, experiment: '18', condition: 'with', trial: 1 },
     prId: 'pr',
     agentId: 'agent',
@@ -276,6 +278,7 @@ describe('runner orchestration (fake API, no network)', () => {
     manifestFingerprint: 'f'.repeat(64),
     expectedDiffSha256: 'd'.repeat(64),
     reservationUsd,
+    expectedNonSkillFingerprint: expected,
   });
 
   it('reserves on disk before the request, sets the condition, posts once and records the known cost', async () => {
@@ -332,5 +335,153 @@ describe('runner orchestration (fake API, no network)', () => {
     api.settle = (slotId, runId) => ({ runs: [{ run_id: runId, status: 'failed', cost_usd: 0, experiment: { slot_id: slotId, dispatch_state: 'refused', refusal_reason: 'diff mismatch' } }] });
     const { stopped } = await runSchedule(deps, [slotRun('c-1'), slotRun('c-2')]);
     expect(stopped).toMatch(/guard refusal on c-1: diff mismatch/);
+  });
+});
+
+describe('runner: capability header and frozen fingerprint', () => {
+  let dir: string;
+  let ledger: Ledger;
+  let api: FakeApi;
+  let deps: RunnerDeps;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'hw2-fp-'));
+    ledger = new Ledger(dir);
+    ledger.acquire({ pid: 1, stackId: 'hw2f-test' });
+    api = new FakeApi();
+    deps = { api, ledger, log: () => {}, capabilityToken: 'tok-123', sleep: async () => {}, pollIntervalMs: 0, pollTimeoutMs: 1_000 };
+  });
+  afterEach(() => {
+    ledger.release();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const run = (id: string, expected: string | null): SlotRun => ({
+    slot: { slot_id: id, index: 0, phase: 'confirmatory', experiment: '18', condition: 'with', trial: 1 },
+    prId: 'pr', agentId: 'agent', skillIds: [], manifestFingerprint: 'f'.repeat(64), expectedDiffSha256: 'd'.repeat(64), reservationUsd: 0.05,
+    expectedNonSkillFingerprint: expected,
+  });
+
+  it('sends the capability token, the phase and the frozen fingerprint with every slot', async () => {
+    await runSlot(deps, run('c-1', 'a'.repeat(64)));
+    const post = api.calls.find((c) => c.path === '/experiments/runs')!;
+    expect(post.headers).toMatchObject({ 'x-hw2-capability': 'tok-123' });
+    expect(post.body).toMatchObject({ phase: 'confirmatory', expected_non_skill_fingerprint: 'a'.repeat(64) });
+  });
+
+  it('stops when a settled run does not reproduce the frozen non-Skill fingerprint', async () => {
+    api.settle = (slotId, runId) => ({ runs: [{ run_id: runId, status: 'done', cost_usd: 0.0002, experiment: { slot_id: slotId, dispatch_state: 'completed', usage_known: true, non_skill_fingerprint: 'b'.repeat(64) } }] });
+    const { stopped, results } = await runSchedule(deps, [run('c-1', 'a'.repeat(64)), run('c-2', 'a'.repeat(64))]);
+    expect(results).toHaveLength(1);
+    expect(stopped).toMatch(/did not reproduce the frozen non-Skill fingerprint/);
+  });
+});
+
+describe('strict single-attempt proof (negative cases)', () => {
+  const routerOnly = (router: Record<string, unknown>) => ({ ...okAttempt, router, generation: { status: 'not_found' } });
+  it.each([
+    ['router attempt and attempts both missing', routerOnly({ selected: okAttempt.router.selected, attempt: null, attemptsCount: null })],
+    ['router attempts count missing', routerOnly({ selected: okAttempt.router.selected, attempt: 1, attemptsCount: null })],
+    ['router attempt number missing', routerOnly({ selected: okAttempt.router.selected, attempt: null, attemptsCount: 1 })],
+    ['empty generation provider responses and no router metadata', { ...okAttempt, router: null, generation: { ...okAttempt.generation, providerResponses: [] } }],
+    ['missing generation provider responses and no router metadata', { ...okAttempt, router: null, generation: { status: 'found', providerName: 'DeepInfra', model: 'deepseek/deepseek-v4-flash' } }],
+  ])('is ineligible when %s', (_label, attempt) => {
+    const verdict = evaluateSlot(traceWith(attempt), frozen);
+    expect(verdict.eligible).toBe(false);
+    expect(verdict.reasons.join(' ')).toMatch(/single upstream attempt is not proven/);
+  });
+
+  it('accepts a single attempt proven by either source alone', () => {
+    expect(evaluateSlot(traceWith(routerOnly(okAttempt.router)), frozen).eligible).toBe(true);
+    expect(evaluateSlot(traceWith({ ...okAttempt, router: null }), frozen).eligible).toBe(true);
+  });
+});
+
+describe('experiment report', () => {
+  const schedule = buildSchedule({ seed: 3, phase: 'confirmatory', experiments: ['17', '18'], trials: 5 }).map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition }));
+  const rules = {
+    '17': { anchors: [{ file: 'src/billing/discount.test.ts', start_line: 4, end_line: 8 }], keywords: ['edge|error|expired|unknown'] },
+    '18': { anchors: [{ file: 'src/api/payments.ts', start_line: 18, end_line: 18 }], keywords: ['breaking'] },
+  };
+  const frozenNonSkill = { '17': 'f17'.padEnd(64, '0'), '18': 'f18'.padEnd(64, '0') };
+  const hit = { '17': { file: 'src/billing/discount.test.ts', start_line: 5, end_line: 7, title: 'Unknown and expired coupons untested', rationale: 'error paths' }, '18': { file: 'src/api/payments.ts', start_line: 18, end_line: 18, title: 'Breaking change to v1 response', rationale: 'clients break' } };
+  const runData = (experiment: '17' | '18', detected: boolean, fingerprint = frozenNonSkill[experiment]): SlotRunData => ({
+    run_id: `run-${Math.random()}`,
+    cost_usd: 0.0002,
+    experiment: { ...traceWith(okAttempt).experiment, non_skill_fingerprint: fingerprint },
+    intent: traceWith(okAttempt).intent,
+    findings: detected ? [hit[experiment], { file: 'x.ts', start_line: 1, end_line: 1, title: 'Style nit', rationale: 'naming' }] : [{ file: 'x.ts', start_line: 1, end_line: 1, title: 'Style nit', rationale: 'naming' }],
+  });
+  const expectations = () => frozen;
+
+  it('lists every scheduled slot, including slots never dispatched', () => {
+    const report = buildReport({ schedule, ledger: new Map(), runs: new Map(), rules, frozenNonSkill, expectations });
+    expect(report.rows).toHaveLength(20);
+    expect(report.rows.every((r) => r.state === 'not dispatched' && !r.counted)).toBe(true);
+    expect(report.summaries.map((s) => s.outcome)).toEqual(['incomplete', 'incomplete']);
+    expect(renderReport(report)).toContain('not dispatched');
+  });
+
+  it('applies the frozen rules to the actual findings and the pre-registered success rule', () => {
+    const runs = new Map<string, SlotRunData | null>();
+    for (const slot of schedule) runs.set(slot.slot_id, runData(slot.experiment as '17' | '18', slot.condition === 'with' || slot.experiment === '18'));
+    const report = buildReport({ schedule, ledger: new Map(), runs, rules, frozenNonSkill, expectations });
+    const byExp = Object.fromEntries(report.summaries.map((s) => [s.experiment, s]));
+    expect(byExp['17']).toMatchObject({ with: { counted: 5, detected: 5 }, without: { counted: 5, detected: 0 }, outcome: 'success', fingerprints_agree: true });
+    expect(byExp['18']).toMatchObject({ with: { detected: 5 }, without: { detected: 5 }, outcome: 'negative' });
+    const row = report.rows.find((r) => r.experiment === '18')!;
+    expect(row.finding_titles).toEqual(['Breaking change to v1 response', 'Style nit']);
+    expect(row.matched).toEqual([{ title: 'Breaking change to v1 response', file: 'src/api/payments.ts', lines: '18-18' }]);
+    expect(renderReport(report)).toContain('Breaking change to v1 response (src/api/payments.ts:18-18)');
+  });
+
+  it('marks an experiment invalid when an otherwise eligible slot does not reproduce the frozen fingerprint', () => {
+    const runs = new Map<string, SlotRunData | null>();
+    schedule.forEach((slot, i) => runs.set(slot.slot_id, runData(slot.experiment as '17' | '18', true, i === 0 ? 'x'.repeat(64) : undefined)));
+    const report = buildReport({ schedule, ledger: new Map(), runs, rules, frozenNonSkill, expectations });
+    const broken = report.summaries.find((s) => s.experiment === schedule[0]!.experiment)!;
+    expect(broken).toMatchObject({ outcome: 'invalid', fingerprints_agree: false });
+    expect(report.rows[0]).toMatchObject({ counted: false, fingerprint_ok: false });
+  });
+
+  it('does not count ineligible slots (e.g. unproven single attempt)', () => {
+    const runs = new Map<string, SlotRunData | null>();
+    for (const slot of schedule) {
+      const data = runData(slot.experiment as '17' | '18', true);
+      data.experiment = { ...data.experiment, attempts: [{ ...okAttempt, router: { ...okAttempt.router, attemptsCount: null }, generation: { status: 'not_found' } }] };
+      runs.set(slot.slot_id, data);
+    }
+    const report = buildReport({ schedule, ledger: new Map(), runs, rules, frozenNonSkill, expectations });
+    expect(report.rows.every((r) => !r.counted)).toBe(true);
+    expect(report.summaries.every((s) => s.outcome === 'incomplete')).toBe(true);
+  });
+});
+
+describe('spending capability', () => {
+  let home: string;
+  beforeEach(() => (home = mkdtempSync(join(tmpdir(), 'hw2-cap-'))));
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+  const now = new Date('2026-10-19T12:00:00Z');
+
+  it('stores only the token hash, with 0600 files, and validates for its own stack and phase', () => {
+    const capability = writeCapability({ stackId: 'hw2f-abcd', phase: 'exploration', budgetUsd: 0.5, hours: 2, home, now });
+    const dir = join(home, '.devdigest', 'hw2-experiments', 'hw2f-abcd');
+    const token = readFileSync(join(dir, 'capability.token'), 'utf8');
+    expect(JSON.stringify(capability)).not.toContain(token);
+    expect(statSync(join(dir, 'capability.token')).mode & 0o777).toBe(0o600);
+    expect(statSync(join(dir, 'capability.json')).mode & 0o777).toBe(0o600);
+    const ok = { stackId: 'hw2f-abcd', phase: 'exploration' as const, token, now };
+    expect(capabilityProblem(capability, ok)).toBeNull();
+    expect(capabilityProblem(capability, { ...ok, phase: 'confirmatory' })).toMatch(/authorizes the exploration phase/);
+    expect(capabilityProblem(capability, { ...ok, stackId: 'hw2f-other' })).toMatch(/is for stack/);
+    expect(capabilityProblem(capability, { ...ok, token: 'wrong' })).toMatch(/does not match/);
+    expect(capabilityProblem(capability, { ...ok, token: undefined })).toMatch(/no capability token/);
+    expect(capabilityProblem(capability, { ...ok, now: new Date('2026-10-19T15:00:00Z') })).toMatch(/expired/);
+    expect(capabilityProblem(null, ok)).toMatch(/no spending capability/);
+    expect(capabilityProblem({ ...capability, gate: 4 }, ok)).toMatch(/needs Gate 3/);
+    expect(capabilityProblem({ ...capability, budget_usd: 0.6 }, ok)).toMatch(/at most \$0.5/);
+  });
+
+  it('refuses a budget above the phase cap or an excessive lifetime', () => {
+    expect(() => writeCapability({ stackId: 'hw2f-abcd', phase: 'confirmatory', budgetUsd: 1.01, hours: 2, home, now })).toThrow(/at most \$1/);
+    expect(() => writeCapability({ stackId: 'hw2f-abcd', phase: 'exploration', budgetUsd: 0.1, hours: 100, home, now })).toThrow(/hours/);
   });
 });

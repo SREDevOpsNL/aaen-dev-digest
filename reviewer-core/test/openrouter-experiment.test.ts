@@ -141,6 +141,15 @@ describe('OpenRouter experiment mode', () => {
     expect(attempts[0]!.outcome).toBe('truncated');
   });
 
+  it('treats finish_reason length as truncation even when the JSON parses', async () => {
+    const { provider, attempts, request } = setup(
+      [completion('{"ok":true}', { choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'length' }] })],
+      [{ status: 200, body: generation }],
+    );
+    await expect(provider.completeStructured(request())).rejects.toThrow(/finish_reason=length/);
+    expect(attempts).toEqual([expect.objectContaining({ outcome: 'truncated', tokensIn: 120, costUsd: 0.0001 })]);
+  });
+
   it('reports HTTP and network errors with one request and rethrows', async () => {
     const http = setup([new OpenAI.RateLimitError(429, { message: 'slow down' }, 'slow down', {})]);
     await expect(http.provider.completeStructured(http.request())).rejects.toThrow();

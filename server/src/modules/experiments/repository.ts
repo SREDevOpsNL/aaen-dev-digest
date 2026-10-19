@@ -44,4 +44,16 @@ export class ExperimentsRepository {
       .where(and(eq(t.agentRuns.workspaceId, workspaceId), sql`${t.runTraces.trace}->'experiment'->>'slot_id' = ${slotId}`));
     return rows;
   }
+
+  /** Every experiment run recorded for a stack: what the server-side budget charges. */
+  async runsForStack(
+    workspaceId: string,
+    stackId: string,
+  ): Promise<Array<{ costUsd: number | null; trace: unknown }>> {
+    return this.db
+      .select({ costUsd: t.agentRuns.costUsd, trace: t.runTraces.trace })
+      .from(t.runTraces)
+      .innerJoin(t.agentRuns, eq(t.agentRuns.id, t.runTraces.runId))
+      .where(and(eq(t.agentRuns.workspaceId, workspaceId), sql`${t.runTraces.trace}->'experiment'->>'stack_id' = ${stackId}`));
+  }
 }

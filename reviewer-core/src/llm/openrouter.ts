@@ -290,11 +290,17 @@ export class OpenRouterProvider implements LLMProvider {
       throw new Error(reason);
     }
     const raw = choice.message?.content ?? '';
+    // A length stop is truncation even if what arrived happens to parse: the
+    // answer was cut at the output cap, so it is not a complete review.
+    if (choice.finish_reason === 'length') {
+      const reason = `output reached the max_tokens cap (finish_reason=length) for ${req.schemaName}; experiment mode does not reprompt`;
+      report({ ...dispatched, outcome: 'truncated', failureReason: reason });
+      throw new Error(reason);
+    }
     const parsed = parseWithRepair(req.schema, raw);
     if (!parsed.ok) {
-      const truncated = choice.finish_reason === 'length';
       const reason = `structured output failed schema validation for ${req.schemaName} (finish_reason=${choice.finish_reason ?? 'unknown'}; experiment mode does not reprompt)`;
-      report({ ...dispatched, outcome: truncated ? 'truncated' : 'schema_invalid', failureReason: reason });
+      report({ ...dispatched, outcome: 'schema_invalid', failureReason: reason });
       throw new Error(reason);
     }
     report({ ...dispatched, outcome: 'valid' });

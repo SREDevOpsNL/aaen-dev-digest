@@ -15,10 +15,11 @@ export class ExperimentApi {
     private readonly fetchImpl: typeof fetch = (...args) => fetch(...args),
   ) {}
 
-  async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<T> {
+  async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
-      ...(body !== undefined ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}),
+      headers: { ...headers, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const text = await res.text();
     const parsed = text ? (JSON.parse(text) as unknown) : null;
@@ -32,8 +33,8 @@ export class ExperimentApi {
   get<T>(path: string) {
     return this.request<T>('GET', path);
   }
-  post<T>(path: string, body: unknown) {
-    return this.request<T>('POST', path, body);
+  post<T>(path: string, body: unknown, headers: Record<string, string> = {}) {
+    return this.request<T>('POST', path, body, headers);
   }
   put<T>(path: string, body: unknown) {
     return this.request<T>('PUT', path, body);

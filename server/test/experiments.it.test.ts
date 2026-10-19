@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -20,6 +20,7 @@ import { loadConfig } from '../src/platform/config.js';
 import { diffFromPrFiles } from '../src/modules/reviews/diff-loader.js';
 import type { ReviewRepository } from '../src/modules/reviews/repository.js';
 import { sha256 } from '../src/modules/_shared/experiment.js';
+import { writeCapability } from '../src/experiments/hw2/cli.js';
 import { dockerAvailable, startPg, type PgFixture } from './helpers/pg.js';
 
 const hasDocker = await dockerAvailable();
@@ -119,6 +120,13 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
   let pg: PgFixture;
   let workspaceId: string;
   let cloneDir: string;
+  let capHome: string;
+  let token = '';
+  /** Write the operator's capability for a phase (what `cli.ts authorize` does after a gate is authorized). */
+  const authorize = (phase: 'exploration' | 'confirmatory', budgetUsd = phase === 'exploration' ? 0.5 : 1, hours = 2) => {
+    writeCapability({ stackId: 'hw2f-itest1', phase, budgetUsd, hours, home: capHome });
+    token = readFileSync(join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1', 'capability.token'), 'utf8');
+  };
   const llm = new FakeExperimentProvider();
   let app: Awaited<ReturnType<typeof buildApp>>;
   let pr502: string;
@@ -131,8 +139,17 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     pg = await startPg();
     ({ workspaceId } = await seed(pg.handle.db, { experimentFixtures: true }));
     cloneDir = mkdtempSync(join(tmpdir(), 'hw2f-clones-'));
+    capHome = mkdtempSync(join(tmpdir(), 'hw2f-home-'));
+    const capabilityPath = join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1', 'capability.json');
+    authorize('exploration');
     app = await buildApp({
-      config: loadConfig({ ...process.env, NODE_ENV: 'test', DEVDIGEST_CLONE_DIR: cloneDir, ...EXPERIMENT_ENV } as NodeJS.ProcessEnv),
+      config: loadConfig({
+        ...process.env,
+        NODE_ENV: 'test',
+        DEVDIGEST_CLONE_DIR: cloneDir,
+        ...EXPERIMENT_ENV,
+        DEVDIGEST_EXPERIMENT_CAPABILITY_PATH: capabilityPath,
+      } as NodeJS.ProcessEnv),
       db: pg.handle.db,
       // No git diff: like the disposable stack (no clone), the review uses the stored patches.
       overrides: { git: new MockGitClient({ diff: '' }), github: new MockGitHubClient(), llm: { openrouter: llm } },
@@ -148,13 +165,15 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     await app?.close();
     await pg?.stop();
     rmSync(cloneDir, { recursive: true, force: true });
+    rmSync(capHome, { recursive: true, force: true });
   });
 
-  const nextSlot = () => `itest-slot-${++slotSeq}`;
-  async function start(patch: Record<string, unknown> = {}) {
+  const nextSlot = (phase: 'x' | 'c' = 'x') => `${phase}-itest-${++slotSeq}`;
+  async function start(patch: Record<string, unknown> = {}, headers: Record<string, string> | null = null) {
     return app.inject({
       method: 'POST',
       url: '/experiments/runs',
+      headers: headers ?? { 'x-hw2-capability': token },
       payload: {
         pr_id: pr502,
         agent_id: apiAgent,
@@ -164,6 +183,8 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
         manifest_fingerprint: 'a'.repeat(64),
         reservation_usd: 0.05,
         expected_diff_sha256: await fixtureDiffSha(502),
+        phase: 'exploration',
+        expected_non_skill_fingerprint: null,
         ...patch,
       },
     });
@@ -367,6 +388,91 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     const lookup = (await app.inject({ url: `/experiments/slots/${slot}` })).json();
     expect(lookup.runs).toHaveLength(1);
     expect(lookup.runs[0].experiment.slot_id).toBe(slot);
+  });
+
+  it('refuses a direct request without a valid capability for this stack and phase (no run created)', async () => {
+    const runsBefore = (await pg.handle.db.select().from(t.agentRuns)).length;
+    const refused = [
+      await start({}, {}),
+      await start({}, { 'x-hw2-capability': 'not-the-token' }),
+      await start({ phase: 'confirmatory', slot_id: nextSlot('c'), expected_non_skill_fingerprint: 'a'.repeat(64) }),
+    ];
+    for (const response of refused) {
+      expect(response.statusCode).toBe(403);
+      expect(response.json().error.code).toBe('experiment_not_authorized');
+    }
+    authorize('exploration', 0.5, 0.000001); // expires immediately
+    await new Promise((r) => setTimeout(r, 20));
+    expect((await start()).json().error.message).toMatch(/expired/);
+    rmSync(join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1', 'capability.json'));
+    expect((await start()).json().error.message).toMatch(/no spending capability/);
+    authorize('exploration');
+    expect((await pg.handle.db.select().from(t.agentRuns)).length).toBe(runsBefore);
+  });
+
+  it('keeps slot ids in their phase', async () => {
+    const response = await start({ slot_id: nextSlot('c') });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.message).toMatch(/must start with x-/);
+  });
+
+  it('enforces the phase budget on the server, from the stored runs', async () => {
+    // Earlier in this stack, the dispatched failure with unknown usage is charged at
+    // its full $0.05 reservation (plus small known costs): a $0.06 capability then
+    // has no room for another $0.05 slot, whatever the client claims.
+    authorize('exploration', 0.06);
+    const runsBefore = (await pg.handle.db.select().from(t.agentRuns)).length;
+    const over = await start();
+    expect(over.statusCode).toBe(409);
+    expect(over.json().error.message).toMatch(/exploration budget: \$0\.05\d* charged \+ \$0\.05 > \$0\.06/);
+    expect((await pg.handle.db.select().from(t.agentRuns)).length).toBe(runsBefore); // refused before a run row
+    authorize('exploration');
+  });
+
+  it('previews a slot for free: fingerprints and preflight, no model request, no run', async () => {
+    const before = modelCalls();
+    const runsBefore = (await pg.handle.db.select().from(t.agentRuns)).length;
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/experiments/preview',
+      payload: { pr_id: pr502, agent_id: apiAgent, experiment: '18', condition: 'without', phase: 'confirmatory', reservation_usd: 0.05, expected_diff_sha256: await fixtureDiffSha(502) },
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({ ok: true, reason: null, block: { non_skill_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) } });
+    expect(modelCalls()).toBe(before);
+    expect((await pg.handle.db.select().from(t.agentRuns)).length).toBe(runsBefore);
+  });
+
+  it('confirmatory slots must reproduce the frozen non-Skill fingerprint and know the completion limit', async () => {
+    authorize('confirmatory');
+    const preview = (
+      await app.inject({
+        method: 'POST',
+        url: '/experiments/preview',
+        payload: { pr_id: pr502, agent_id: apiAgent, experiment: '18', condition: 'with', phase: 'confirmatory', reservation_usd: 0.05, expected_diff_sha256: await fixtureDiffSha(502) },
+      })
+    ).json();
+    const frozen = preview.block.non_skill_fingerprint as string;
+    const confirmatory = (patch: Record<string, unknown>) => start({ phase: 'confirmatory', slot_id: nextSlot('c'), ...patch });
+
+    const missing = await confirmatory({ expected_non_skill_fingerprint: null });
+    expect(missing.statusCode).toBe(422);
+
+    const before = modelCalls();
+    const wrong = await confirmatory({ expected_non_skill_fingerprint: 'b'.repeat(64) });
+    expect((await settledTrace(wrong.json().run_id)).trace.experiment.refusal_reason).toMatch(/does not equal the frozen/);
+
+    llm.endpoints = [{ ...ENDPOINT, maxCompletionTokens: null }];
+    const unknownLimit = await confirmatory({ expected_non_skill_fingerprint: frozen });
+    expect((await settledTrace(unknownLimit.json().run_id)).trace.experiment.refusal_reason).toMatch(/max completion tokens are unknown/);
+    llm.endpoints = [ENDPOINT];
+    expect(modelCalls()).toBe(before); // both refused before any model request
+
+    const ok = await confirmatory({ expected_non_skill_fingerprint: frozen });
+    const { trace } = await settledTrace(ok.json().run_id);
+    expect(trace.experiment).toMatchObject({ phase: 'confirmatory', dispatch_state: 'completed', non_skill_fingerprint: frozen, expected_non_skill_fingerprint: frozen });
+    expect(modelCalls()).toBe(before + 1);
+    authorize('exploration');
   });
 
   it('refuses to start when a clone of the fixture repo exists, or another repository is present', async () => {
