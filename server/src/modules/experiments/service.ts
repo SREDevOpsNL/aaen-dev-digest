@@ -241,6 +241,9 @@ export class ExperimentsService {
         tokens_out: run.tokensOut,
         experiment: (run.trace as { experiment?: unknown }).experiment ?? null,
         intent: (run.trace as { intent?: unknown }).intent ?? null,
+        // What actually ran: the reviewer and PR, and the Skills section the model received.
+        config: (run.trace as { config?: { agent?: string; pr?: number | null } }).config ?? null,
+        skills_block: (run.trace as { prompt_assembly?: { skills?: string | null } }).prompt_assembly?.skills ?? null,
       })),
     };
   }

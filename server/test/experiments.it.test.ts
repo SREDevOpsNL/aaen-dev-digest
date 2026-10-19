@@ -418,6 +418,10 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     const lookup = (await app.inject({ url: `/experiments/slots/${slot}` })).json();
     expect(lookup.runs).toHaveLength(1);
     expect(lookup.runs[0].experiment.slot_id).toBe(slot);
+    // What actually ran, for the report's identity and Skills checks.
+    expect(lookup.runs[0].config).toMatchObject({ agent: 'API Contract Reviewer', pr: 502 });
+    expect(lookup.runs[0].skills_block).toMatch(/<untrusted source="skill-0">/);
+    expect(lookup.runs[0].experiment).toMatchObject({ condition: 'with', phase: 'exploration' });
   });
 
   it('refuses a direct request without a valid capability for this stack and phase (no run created)', async () => {

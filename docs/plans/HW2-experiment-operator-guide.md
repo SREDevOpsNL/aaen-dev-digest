@@ -167,9 +167,21 @@ dispatched. For each slot it retrieves the run's actual findings
   single-generation evidence **and** reproduces the frozen non-Skill
   fingerprint.
 
+It never infers what ran from the scheduled label. Before counting a slot, it
+checks its persisted trace against the preregistration:
+- slot id, experiment, condition, phase and manifest fingerprint;
+- the expected reviewer and fixture PR;
+- the **actual Skills section**: none for *without*; exactly the target skill
+  for *with*, by structure and by the Skill fingerprint of the frozen skill
+  body.
+
+A mismatch makes the slot ineligible and the experiment *invalid*, with the
+reason in the report.
+
 Per experiment it gives the with and without detections and counts, and the
 outcome: success, negative, inconclusive, incomplete, or *invalid* when any
-otherwise eligible slot broke the frozen fingerprint.
+otherwise eligible slot broke the frozen fingerprint or did not execute its
+preregistered slot, condition or Skills.
 
 ## Safety rules the code enforces
 
@@ -187,6 +199,16 @@ The **preflight** works like this:
 - **Input upper bound:** the larger of the tokenizer count and the UTF-8 bytes of the exact serialized request, plus a 512-token template allowance.
 - **Prices:** the more expensive of the frozen and live ones; the context and completion limits are respected.
 - **Worst case:** ×1.5.
+
+### One door to paid generation
+
+In experiment mode every LLM provider is wrapped at the shared boundary
+(`container.llm`). Generation is refused **before it reaches the provider**
+unless it is the experiment request of the one slot the experiments service
+opened after its capability, budget and isolation checks, and then only once.
+That covers ordinary reviews, intent derivation, conventions extraction,
+free-text completions and embeddings. Model and endpoint listing, and the
+preview, are free metadata and still work. Normal mode is unaffected.
 
 ### One request
 

@@ -20,10 +20,54 @@ export interface SlotRunData {
   cost_usd: number | null;
   experiment: { non_skill_fingerprint?: string | null } & Record<string, unknown>;
   intent: unknown;
+  /** The persisted trace's reviewer and PR: what actually ran. */
+  config: { agent?: string; pr?: number | null } | null;
+  /** The persisted Skills section the model received (null = none). */
+  skills_block: string | null;
   findings: FindingLike[];
 }
 
+/** What a slot's trace must show it executed (never inferred from the scheduled label). */
+export interface ExpectedExecution {
+  manifestFingerprint: string;
+  phase: 'confirmatory' | 'exploration';
+  fixture: (experiment: string) => { reviewer: string; prNumber: number; targetSkill: string };
+  /** sha256 of the Skill slot for the condition: [] without, [the target skill block] with. */
+  skillFingerprint: (experiment: string, condition: 'with' | 'without') => string;
+}
+
+/** Every way the persisted trace disagrees with what this scheduled slot was meant to execute. */
+export function executionIssues(slot: ScheduledSlot, run: SlotRunData, expected: ExpectedExecution): string[] {
+  const issues: string[] = [];
+  const block = run.experiment as Record<string, unknown>;
+  const check = (field: string, actual: unknown, want: unknown) => {
+    if (actual !== want) issues.push(`trace ${field} is ${JSON.stringify(actual ?? null)}, expected ${JSON.stringify(want)}`);
+  };
+  check('slot_id', block.slot_id, slot.slot_id);
+  check('experiment', block.experiment, slot.experiment);
+  check('condition', block.condition, slot.condition);
+  check('phase', block.phase, expected.phase);
+  check('manifest_fingerprint', block.manifest_fingerprint, expected.manifestFingerprint);
+  const fixture = expected.fixture(slot.experiment);
+  check('reviewer', run.config?.agent, fixture.reviewer);
+  check('fixture PR', run.config?.pr, fixture.prNumber);
+
+  // The Skills section actually sent, by structure and by fingerprint.
+  const skillCount = (run.skills_block?.match(/<untrusted source="skill-\d+">/g) ?? []).length;
+  if (slot.condition === 'without' && (run.skills_block ?? '') !== '') {
+    issues.push(`a "without" slot sent ${skillCount} skill(s) in its Skills section`);
+  }
+  if (slot.condition === 'with') {
+    if (skillCount !== 1) issues.push(`a "with" slot sent ${skillCount} skills instead of exactly the target skill`);
+    else if (!run.skills_block!.includes(`### ${fixture.targetSkill}\n`)) issues.push(`the one skill sent is not the target skill ${fixture.targetSkill}`);
+  }
+  check('skill_fingerprint', block.skill_fingerprint, expected.skillFingerprint(slot.experiment, slot.condition));
+  return issues;
+}
+
 export interface SlotRow {
+  /** Disagreements between the persisted trace and this slot's preregistered execution. */
+  execution_issues: string[];
   slot_id: string;
   experiment: string;
   condition: 'with' | 'without';
@@ -54,6 +98,7 @@ export function buildReport(input: {
   rules: Record<string, ExpectedRule>;
   frozenNonSkill: Record<string, string>;
   expectations: (experiment: string) => FrozenExpectations;
+  execution: ExpectedExecution;
 }): { rows: SlotRow[]; summaries: ExperimentSummary[] } {
   const rows: SlotRow[] = input.schedule.map((slot) => {
     const record = input.ledger.get(slot.slot_id) ?? null;
@@ -70,8 +115,10 @@ export function buildReport(input: {
         detected: null,
         finding_titles: [],
         matched: [],
+        execution_issues: [],
       };
     }
+    const issues = executionIssues(slot, run, input.execution);
     const eligibility = evaluateSlot(run, input.expectations(slot.experiment));
     const fingerprintOk = run.experiment.non_skill_fingerprint === input.frozenNonSkill[slot.experiment];
     const rule = input.rules[slot.experiment];
@@ -86,7 +133,8 @@ export function buildReport(input: {
       cost_usd: run.cost_usd,
       eligibility,
       fingerprint_ok: fingerprintOk,
-      counted: eligibility.eligible && fingerprintOk,
+      counted: eligibility.eligible && fingerprintOk && issues.length === 0,
+      execution_issues: issues,
       detected: found.detected,
       finding_titles: run.findings.map((f) => f.title),
       matched,
@@ -108,6 +156,18 @@ export function buildReport(input: {
     const mismatched = rows.filter((r) => r.experiment === experiment && r.eligibility?.eligible && !r.fingerprint_ok).length;
     if (!agree || mismatched > 0) {
       return { experiment, with: withT, without: withoutT, fingerprints_agree: false, outcome: 'invalid', note: `${mismatched} otherwise eligible slot(s) did not reproduce the frozen non-Skill fingerprint` };
+    }
+    // A slot that did not execute what was scheduled breaks the comparison itself.
+    const wrong = rows.filter((r) => r.experiment === experiment && r.execution_issues.length > 0);
+    if (wrong.length > 0) {
+      return {
+        experiment,
+        with: withT,
+        without: withoutT,
+        fingerprints_agree: true,
+        outcome: 'invalid',
+        note: `${wrong.length} slot(s) did not execute their preregistered slot, condition or Skills: ${wrong.map((r) => `${r.slot_id} (${r.execution_issues[0]})`).join('; ')}`,
+      };
     }
     return {
       experiment,
@@ -147,7 +207,11 @@ export function renderReport(report: { rows: SlotRow[]; summaries: ExperimentSum
         r.matched.map((m) => `${m.title} (${m.file}:${m.lines})`).join('; ') || '—',
         r.finding_titles.join('; ') || '—',
         r.cost_usd === null ? 'unknown' : String(r.cost_usd),
-        r.counted ? '—' : r.eligibility ? [...r.eligibility.reasons, ...(r.fingerprint_ok ? [] : ['non-Skill fingerprint differs from the frozen one'])].join('; ') || '—' : r.state,
+        r.counted
+          ? '—'
+          : r.eligibility
+            ? [...r.execution_issues, ...r.eligibility.reasons, ...(r.fingerprint_ok ? [] : ['non-Skill fingerprint differs from the frozen one'])].join('; ') || '—'
+            : r.state,
       ]
         .map((v) => cell(String(v)))
         .join(' | '),

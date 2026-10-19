@@ -22,6 +22,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
 import { EXPERIMENT_FIXTURES } from '../../db/seed-fixtures.js';
+import { toSkillPromptBlock } from '../../modules/reviews/helpers.js';
 import { EXPERIMENT_CAPS, PHASE_GATE, canonicalJson, sha256, type ExperimentCapability } from '../../modules/_shared/experiment.js';
 import { ExperimentApi } from './api.js';
 import { CAPS, scheduleFits, spent } from './budget.js';
@@ -314,7 +315,16 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       const { prId } = await lookupIds(stack.api);
       const runs = new Map<string, SlotRunData | null>();
       for (const slot of frozen.schedule.slots) {
-        const lookup = await stack.api.get<{ runs: Array<{ run_id: string; cost_usd: number | null; experiment: Record<string, unknown> | null; intent: unknown }> }>(`/experiments/slots/${slot.slot_id}`);
+        const lookup = await stack.api.get<{
+          runs: Array<{
+            run_id: string;
+            cost_usd: number | null;
+            experiment: Record<string, unknown> | null;
+            intent: unknown;
+            config: { agent?: string; pr?: number | null } | null;
+            skills_block: string | null;
+          }>;
+        }>(`/experiments/slots/${slot.slot_id}`);
         const found = lookup.runs[0];
         if (!found?.experiment) {
           runs.set(slot.slot_id, null);
@@ -326,10 +336,30 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
           cost_usd: found.cost_usd,
           experiment: found.experiment,
           intent: found.intent,
+          config: found.config,
+          skills_block: found.skills_block,
           findings: reviews.find((r) => r.run_id === found.run_id)?.findings ?? [],
         });
       }
+      // The target skills as frozen: their current bodies must still hash to the manifest's.
+      const { skills } = await lookupIds(stack.api);
+      const targetBlock = (experiment: string) => {
+        const name = fixtureFor(experiment).targetSkill;
+        const skill = skills.find((s) => s.name === name);
+        const frozenSha = frozen.skills.find((s) => s.name === name)?.body_sha;
+        if (!skill || !frozenSha || sha256(skill.body) !== frozenSha) throw new Error(`Target skill ${name} is missing or differs from the manifest`);
+        return toSkillPromptBlock(skill);
+      };
       const report = buildReport({
+        execution: {
+          manifestFingerprint: manifestFingerprint(frozen),
+          phase: 'confirmatory',
+          fixture: (experiment) => {
+            const fixture = fixtureFor(experiment);
+            return { reviewer: fixture.reviewer, prNumber: fixture.number, targetSkill: fixture.targetSkill };
+          },
+          skillFingerprint: (experiment, condition) => sha256(canonicalJson(condition === 'with' ? [targetBlock(experiment)] : [])),
+        },
         schedule: frozen.schedule.slots,
         ledger: ledger.slots(),
         runs,

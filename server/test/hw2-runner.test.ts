@@ -408,56 +408,118 @@ describe('experiment report', () => {
     '18': { anchors: [{ file: 'src/api/payments.ts', start_line: 18, end_line: 18 }], keywords: ['breaking'] },
   };
   const frozenNonSkill = { '17': 'f17'.padEnd(64, '0'), '18': 'f18'.padEnd(64, '0') };
+  const fixtures = {
+    '17': { reviewer: 'Test Quality Reviewer', prNumber: 501, targetSkill: 'Edge Cases and Error Paths' },
+    '18': { reviewer: 'API Contract Reviewer', prNumber: 502, targetSkill: 'breaking-change' },
+  } as const;
+  const skillBlock = (experiment: '17' | '18') => `### ${fixtures[experiment].targetSkill}\nthe rule`;
+  const MANIFEST = 'm'.repeat(64);
+  const execution = {
+    manifestFingerprint: MANIFEST,
+    phase: 'confirmatory' as const,
+    fixture: (experiment: string) => fixtures[experiment as '17' | '18'],
+    skillFingerprint: (experiment: string, condition: 'with' | 'without') =>
+      sha256(canonicalJson(condition === 'with' ? [skillBlock(experiment as '17' | '18')] : [])),
+  };
   const hit = { '17': { file: 'src/billing/discount.test.ts', start_line: 5, end_line: 7, title: 'Unknown and expired coupons untested', rationale: 'error paths' }, '18': { file: 'src/api/payments.ts', start_line: 18, end_line: 18, title: 'Breaking change to v1 response', rationale: 'clients break' } };
-  const runData = (experiment: '17' | '18', detected: boolean, fingerprint = frozenNonSkill[experiment]): SlotRunData => ({
-    run_id: `run-${Math.random()}`,
-    cost_usd: 0.0002,
-    experiment: { ...traceWith(okAttempt).experiment, non_skill_fingerprint: fingerprint },
-    intent: traceWith(okAttempt).intent,
-    findings: detected ? [hit[experiment], { file: 'x.ts', start_line: 1, end_line: 1, title: 'Style nit', rationale: 'naming' }] : [{ file: 'x.ts', start_line: 1, end_line: 1, title: 'Style nit', rationale: 'naming' }],
-  });
-  const expectations = () => frozen;
+  const nit = { file: 'x.ts', start_line: 1, end_line: 1, title: 'Style nit', rationale: 'naming' };
+
+  /** What a correct run of `slot` persists. */
+  const runFor = (slot: { slot_id: string; experiment: string; condition: 'with' | 'without' }, detected: boolean): SlotRunData => {
+    const experiment = slot.experiment as '17' | '18';
+    return {
+      run_id: `run-${slot.slot_id}`,
+      cost_usd: 0.0002,
+      experiment: {
+        ...traceWith(okAttempt).experiment,
+        slot_id: slot.slot_id,
+        experiment,
+        condition: slot.condition,
+        phase: 'confirmatory',
+        manifest_fingerprint: MANIFEST,
+        non_skill_fingerprint: frozenNonSkill[experiment],
+        skill_fingerprint: execution.skillFingerprint(experiment, slot.condition),
+      },
+      intent: traceWith(okAttempt).intent,
+      config: { agent: fixtures[experiment].reviewer, pr: fixtures[experiment].prNumber },
+      skills_block: slot.condition === 'with' ? `<untrusted source="skill-0">\n${skillBlock(experiment)}\n</untrusted>` : null,
+      findings: detected ? [hit[experiment], nit] : [nit],
+    };
+  };
+  const report = (runs: Map<string, SlotRunData | null>) =>
+    buildReport({ schedule, ledger: new Map(), runs, rules, frozenNonSkill, expectations: () => frozen, execution });
+  const allRuns = (detected: (slot: (typeof schedule)[number]) => boolean, tweak?: (slot: (typeof schedule)[number], run: SlotRunData) => SlotRunData) => {
+    const runs = new Map<string, SlotRunData | null>();
+    for (const slot of schedule) {
+      const run = runFor(slot, detected(slot));
+      runs.set(slot.slot_id, tweak ? tweak(slot, run) : run);
+    }
+    return runs;
+  };
 
   it('lists every scheduled slot, including slots never dispatched', () => {
-    const report = buildReport({ schedule, ledger: new Map(), runs: new Map(), rules, frozenNonSkill, expectations });
-    expect(report.rows).toHaveLength(20);
-    expect(report.rows.every((r) => r.state === 'not dispatched' && !r.counted)).toBe(true);
-    expect(report.summaries.map((s) => s.outcome)).toEqual(['incomplete', 'incomplete']);
-    expect(renderReport(report)).toContain('not dispatched');
+    const result = report(new Map());
+    expect(result.rows).toHaveLength(20);
+    expect(result.rows.every((r) => r.state === 'not dispatched' && !r.counted)).toBe(true);
+    expect(result.summaries.map((s) => s.outcome)).toEqual(['incomplete', 'incomplete']);
+    expect(renderReport(result)).toContain('not dispatched');
   });
 
   it('applies the frozen rules to the actual findings and the pre-registered success rule', () => {
-    const runs = new Map<string, SlotRunData | null>();
-    for (const slot of schedule) runs.set(slot.slot_id, runData(slot.experiment as '17' | '18', slot.condition === 'with' || slot.experiment === '18'));
-    const report = buildReport({ schedule, ledger: new Map(), runs, rules, frozenNonSkill, expectations });
-    const byExp = Object.fromEntries(report.summaries.map((s) => [s.experiment, s]));
+    const result = report(allRuns((slot) => slot.condition === 'with' || slot.experiment === '18'));
+    const byExp = Object.fromEntries(result.summaries.map((s) => [s.experiment, s]));
     expect(byExp['17']).toMatchObject({ with: { counted: 5, detected: 5 }, without: { counted: 5, detected: 0 }, outcome: 'success', fingerprints_agree: true });
     expect(byExp['18']).toMatchObject({ with: { detected: 5 }, without: { detected: 5 }, outcome: 'negative' });
-    const row = report.rows.find((r) => r.experiment === '18')!;
+    const row = result.rows.find((r) => r.experiment === '18')!;
     expect(row.finding_titles).toEqual(['Breaking change to v1 response', 'Style nit']);
     expect(row.matched).toEqual([{ title: 'Breaking change to v1 response', file: 'src/api/payments.ts', lines: '18-18' }]);
-    expect(renderReport(report)).toContain('Breaking change to v1 response (src/api/payments.ts:18-18)');
+    expect(renderReport(result)).toContain('Breaking change to v1 response (src/api/payments.ts:18-18)');
   });
 
   it('marks an experiment invalid when an otherwise eligible slot does not reproduce the frozen fingerprint', () => {
-    const runs = new Map<string, SlotRunData | null>();
-    schedule.forEach((slot, i) => runs.set(slot.slot_id, runData(slot.experiment as '17' | '18', true, i === 0 ? 'x'.repeat(64) : undefined)));
-    const report = buildReport({ schedule, ledger: new Map(), runs, rules, frozenNonSkill, expectations });
-    const broken = report.summaries.find((s) => s.experiment === schedule[0]!.experiment)!;
-    expect(broken).toMatchObject({ outcome: 'invalid', fingerprints_agree: false });
-    expect(report.rows[0]).toMatchObject({ counted: false, fingerprint_ok: false });
+    const first = schedule[0]!;
+    const result = report(allRuns(() => true, (slot, run) => (slot === first ? { ...run, experiment: { ...run.experiment, non_skill_fingerprint: 'x'.repeat(64) } } : run)));
+    expect(result.summaries.find((s) => s.experiment === first.experiment)).toMatchObject({ outcome: 'invalid', fingerprints_agree: false });
+    expect(result.rows[0]).toMatchObject({ counted: false, fingerprint_ok: false });
   });
 
   it('does not count ineligible slots (e.g. unproven single attempt)', () => {
-    const runs = new Map<string, SlotRunData | null>();
-    for (const slot of schedule) {
-      const data = runData(slot.experiment as '17' | '18', true);
-      data.experiment = { ...data.experiment, attempts: [{ ...okAttempt, router: { ...okAttempt.router, attemptsCount: null }, generation: { status: 'not_found' } }] };
-      runs.set(slot.slot_id, data);
-    }
-    const report = buildReport({ schedule, ledger: new Map(), runs, rules, frozenNonSkill, expectations });
-    expect(report.rows.every((r) => !r.counted)).toBe(true);
-    expect(report.summaries.every((s) => s.outcome === 'incomplete')).toBe(true);
+    const result = report(
+      allRuns(() => true, (_slot, run) => ({ ...run, experiment: { ...run.experiment, attempts: [{ ...okAttempt, router: { ...okAttempt.router, attemptsCount: null }, generation: { status: 'not_found' } }] } })),
+    );
+    expect(result.rows.every((r) => !r.counted)).toBe(true);
+    expect(result.summaries.every((s) => s.outcome === 'incomplete')).toBe(true);
+  });
+
+  describe('never infers what ran from the scheduled label', () => {
+    const withSlot = schedule.find((s) => s.condition === 'with')!;
+    const withoutSlot = schedule.find((s) => s.condition === 'without' && s.experiment === withSlot.experiment)!;
+    const broken = (target: (typeof schedule)[number], change: (run: SlotRunData) => SlotRunData) => {
+      const result = report(allRuns(() => true, (slot, run) => (slot === target ? change(run) : run)));
+      const row = result.rows.find((r) => r.slot_id === target.slot_id)!;
+      const summary = result.summaries.find((s) => s.experiment === target.experiment)!;
+      return { row, summary, rendered: renderReport(result) };
+    };
+
+    it.each([
+      ['a mislabeled condition', withSlot, (run: SlotRunData) => ({ ...run, experiment: { ...run.experiment, condition: 'without' } }), /trace condition is "without", expected "with"/],
+      ['a mismatched manifest', withSlot, (run: SlotRunData) => ({ ...run, experiment: { ...run.experiment, manifest_fingerprint: 'z'.repeat(64) } }), /trace manifest_fingerprint/],
+      ['a swapped slot (the trace belongs to another slot)', withSlot, (run: SlotRunData) => ({ ...run, experiment: { ...run.experiment, slot_id: withoutSlot.slot_id } }), /trace slot_id is ".*", expected/],
+      ['the wrong phase', withSlot, (run: SlotRunData) => ({ ...run, experiment: { ...run.experiment, phase: 'exploration' } }), /trace phase/],
+      ['the wrong reviewer', withSlot, (run: SlotRunData) => ({ ...run, config: { ...run.config, agent: 'General Reviewer' } }), /trace reviewer/],
+      ['the wrong fixture PR', withSlot, (run: SlotRunData) => ({ ...run, config: { ...run.config, pr: 482 } }), /trace fixture PR/],
+      ['a skill attached to a "without" slot', withoutSlot, (run: SlotRunData) => ({ ...run, skills_block: `<untrusted source="skill-0">\n### other\nx\n</untrusted>` }), /"without" slot sent 1 skill/],
+      ['two skills on a "with" slot', withSlot, (run: SlotRunData) => ({ ...run, skills_block: `${run.skills_block}\n\n<untrusted source="skill-1">\n### Behavioral Coverage\nx\n</untrusted>` }), /sent 2 skills instead of exactly the target skill/],
+      ['another skill instead of the target', withSlot, (run: SlotRunData) => ({ ...run, skills_block: `<untrusted source="skill-0">\n### Behavioral Coverage\nx\n</untrusted>` }), /not the target skill/],
+      ['an unexpected Skill fingerprint', withSlot, (run: SlotRunData) => ({ ...run, experiment: { ...run.experiment, skill_fingerprint: 'q'.repeat(64) } }), /trace skill_fingerprint/],
+    ])('%s makes the slot ineligible and the experiment invalid, with the reason', (_label, target, change, reason) => {
+      const { row, summary, rendered } = broken(target, change);
+      expect(row.counted).toBe(false);
+      expect(row.execution_issues.join(' ')).toMatch(reason);
+      expect(summary.outcome).toBe('invalid');
+      expect(summary.note).toMatch(new RegExp(target.slot_id));
+      expect(rendered).toMatch(reason);
+    });
   });
 });
 
