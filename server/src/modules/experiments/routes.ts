@@ -10,6 +10,7 @@ import { ExperimentsService } from './service.js';
  * `scripts/e2e.sh --serve`); ordinary deployments never expose them.
  *
  *   GET  /experiments/identity        → stack, database and isolation facts
+ *   GET  /experiments/endpoints       → live provider endpoints of the frozen model (free metadata)
  *   POST /experiments/runs            → start one scheduled slot (one review run)
  *   GET  /experiments/slots/:slotId   → runs recorded for a slot (reconciliation)
  */
@@ -41,6 +42,11 @@ export default async function experimentsRoutes(appBase: FastifyInstance) {
   app.get('/experiments/identity', async (request) => {
     const { workspaceId } = await getContext(app.container, request);
     return service.identity(workspaceId);
+  });
+
+  app.get('/experiments/endpoints', async (request) => {
+    await getContext(app.container, request);
+    return service.endpoints();
   });
 
   app.post(

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Container } from '../../platform/container.js';
 import type { ExperimentConfig } from '../../platform/config.js';
+import type { OpenRouterEndpointInfo } from '@devdigest/shared';
 import { ConflictError, NotFoundError, ValidationError } from '../../platform/errors.js';
 import { assertDisposableDatabase, isDisposableDatabaseName } from '../../db/disposable.js';
 import { ReviewService } from '../reviews/service.js';
@@ -126,6 +127,19 @@ export class ExperimentsService {
     }
   }
 
+  /**
+   * Live per-provider endpoints of the frozen model (prices, limits, tags):
+   * OpenRouter metadata, not a generation, so it costs nothing. Used to choose
+   * and freeze the provider during exploration.
+   */
+  async endpoints() {
+    const config = this.config();
+    const llm = await this.container.llm('openrouter');
+    const lister = llm as Partial<{ listEndpoints(model: string): Promise<OpenRouterEndpointInfo[]> }>;
+    if (typeof lister.listEndpoints !== 'function') throw new ValidationError('The OpenRouter provider cannot list endpoints');
+    return { model: config.model, endpoints: await lister.listEndpoints(config.model) };
+  }
+
   /** Reconciliation lookup: every run recorded for a slot, with its experiment block. */
   async slot(workspaceId: string, slotId: string) {
     this.config();
@@ -135,7 +149,11 @@ export class ExperimentsService {
       runs: runs.map((run) => ({
         run_id: run.runId,
         status: run.status,
+        cost_usd: run.costUsd,
+        tokens_in: run.tokensIn,
+        tokens_out: run.tokensOut,
         experiment: (run.trace as { experiment?: unknown }).experiment ?? null,
+        intent: (run.trace as { intent?: unknown }).intent ?? null,
       })),
     };
   }

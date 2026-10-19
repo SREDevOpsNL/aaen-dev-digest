@@ -217,6 +217,13 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     });
   });
 
+  it('lists the live endpoints of the frozen model without a generation', async () => {
+    const before = modelCalls();
+    const body = (await app.inject({ url: '/experiments/endpoints' })).json();
+    expect(body).toEqual({ model: MODEL, endpoints: [ENDPOINT] });
+    expect(modelCalls()).toBe(before);
+  });
+
   it('runs one slot: one request with the frozen routing, preflight, fingerprints and telemetry on record', async () => {
     const before = modelCalls();
     const response = await start();

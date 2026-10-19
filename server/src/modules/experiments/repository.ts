@@ -26,9 +26,19 @@ export class ExperimentsRepository {
   }
 
   /** Runs whose stored trace carries this experiment slot id (written before dispatch). */
-  async runsForSlot(workspaceId: string, slotId: string): Promise<Array<{ runId: string; status: string | null; trace: unknown }>> {
+  async runsForSlot(
+    workspaceId: string,
+    slotId: string,
+  ): Promise<Array<{ runId: string; status: string | null; costUsd: number | null; tokensIn: number | null; tokensOut: number | null; trace: unknown }>> {
     const rows = await this.db
-      .select({ runId: t.agentRuns.id, status: t.agentRuns.status, trace: t.runTraces.trace })
+      .select({
+        runId: t.agentRuns.id,
+        status: t.agentRuns.status,
+        costUsd: t.agentRuns.costUsd,
+        tokensIn: t.agentRuns.tokensIn,
+        tokensOut: t.agentRuns.tokensOut,
+        trace: t.runTraces.trace,
+      })
       .from(t.runTraces)
       .innerJoin(t.agentRuns, eq(t.agentRuns.id, t.runTraces.runId))
       .where(and(eq(t.agentRuns.workspaceId, workspaceId), sql`${t.runTraces.trace}->'experiment'->>'slot_id' = ${slotId}`));
