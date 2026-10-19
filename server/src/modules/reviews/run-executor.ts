@@ -1,5 +1,5 @@
 import type { Container } from '../../platform/container.js';
-import type { IntentRunSnapshot, Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
+import type { ExperimentRunTrace, IntentRunSnapshot, Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
 import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
@@ -9,6 +9,15 @@ import { REVIEW_STRATEGY } from './constants.js';
 import { skillsSectionTokens, taskLine, toSkillPromptBlock } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
 import { IntentService, noneSnapshot } from '../intent/service.js';
+import { sha256, type ExperimentRunContext } from '../_shared/experiment.js';
+import {
+  ExperimentRefusedError,
+  attemptTotals,
+  finishBlock,
+  prepareExperimentSlot,
+  type ExperimentBatch,
+  type ExperimentSlot,
+} from './experiment-run.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -63,6 +72,22 @@ export class ReviewRunExecutor {
     repo: typeof schema.repos.$inferSelect,
     jobs: { agent: AgentRow; runId: string }[],
     logger?: Logger,
+    experiment?: ExperimentRunContext,
+  ): Promise<void> {
+    try {
+      await this.executeBatch(workspaceId, pull, repo, jobs, logger, experiment);
+    } finally {
+      experiment?.onSettled?.();
+    }
+  }
+
+  private async executeBatch(
+    workspaceId: string,
+    pull: PullRow,
+    repo: typeof schema.repos.$inferSelect,
+    jobs: { agent: AgentRow; runId: string }[],
+    logger?: Logger,
+    experiment?: ExperimentRunContext,
   ): Promise<void> {
     // ONE logger fanned out over every queued run: shared pre-work (diff +
     // intent) is streamed into each target agent's Live Log and persisted into
@@ -112,6 +137,11 @@ export class ReviewRunExecutor {
       return;
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
+    // HW2 experiment: the hash of the exact diff text this review uses; the
+    // slot is refused unless it equals the frozen fixture hash.
+    const experimentBatch: ExperimentBatch | undefined = experiment
+      ? { ctx: experiment, diffSha256: sha256(diff.raw) }
+      : undefined;
 
     // L03 — one PR intent per batch, shared by every agent: a fresh cached
     // intent is reused, a missing or stale one is refreshed once, and if that
@@ -121,10 +151,18 @@ export class ReviewRunExecutor {
     // cancelled through its own checkpoint below.
     const anyActive = await this.anyRunActive(jobs.map((j) => j.runId));
     const intent = anyActive
-      ? await this.intents.forReviewBatch(workspaceId, pull, repo, diff, {
-          info: (msg) => runLog.info(msg),
-          warn: (msg) => runLog.info(msg),
-        })
+      ? await this.intents.forReviewBatch(
+          workspaceId,
+          pull,
+          repo,
+          diff,
+          {
+            info: (msg) => runLog.info(msg),
+            warn: (msg) => runLog.info(msg),
+          },
+          // Experiment runs never derive (a paid call): a cached intent or none.
+          { derive: !experiment },
+        )
       : noneSnapshot('not_started', 'all runs were cancelled before intent derivation');
     if (!anyActive) runLog.info('All runs were cancelled before PR intent — skipping it');
 
@@ -135,7 +173,7 @@ export class ReviewRunExecutor {
         `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
       );
       try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intent);
+        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intent, experimentBatch);
         logger?.info(
           {
             runId,
@@ -168,8 +206,11 @@ export class ReviewRunExecutor {
     runId: string,
     parentLog: RunLogger,
     intent: IntentRunSnapshot,
+    experiment?: ExperimentBatch,
   ): Promise<RunOutcome> {
     const start = Date.now();
+    // HW2 experiment slot state; set once its checks pass (see experiment-run.ts).
+    let slot: ExperimentSlot | undefined;
     // Narrow the fanned-out pre-work logger to THIS run; the shared diff/intent
     // events are already in this run's buffer, so the persisted trace below
     // (built from the buffer) includes them too.
@@ -220,14 +261,11 @@ export class ReviewRunExecutor {
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
       // above, and persistence + observability below.
-      const outcome = await reviewPullRequest({
+      // The prompt inputs, built once: the engine receives exactly these, and an
+      // experiment slot measures and fingerprints exactly these.
+      const promptInput = {
         systemPrompt: agent.systemPrompt,
-        model: agent.model,
         diff,
-        llm,
-        // Per-agent review strategy (configured in the Agent editor); falls back
-        // to the studio default. single-pass = whole diff in one call.
-        strategy: agent.strategy ?? REVIEW_STRATEGY,
         ...(skillBlocks.length > 0 ? { skills: skillBlocks } : {}),
         // T1.3 — pass the callers digest only when we built one. assemblePrompt
         // omits the section when this is empty/undefined.
@@ -241,9 +279,43 @@ export class ReviewRunExecutor {
         // policy; omitted → the prompt is identical to the no-intent shape.
         ...(intent.analysis ? { intent: intent.analysis } : {}),
         task,
-        sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
+      };
+      const sessionId = `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`;
+
+      if (experiment) {
+        slot = await prepareExperimentSlot({
+          batch: experiment,
+          agent,
+          repo,
+          cloneDir: this.container.config.cloneDir,
+          intent,
+          llm,
+          tokenizer: this.container.tokenizer,
+          promptInput,
+          sessionId,
+        });
+        // Durable before dispatch: a crash after this point leaves the slot on record.
+        await this.repo.saveRunTrace(runId, {
+          ...this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, intent),
+          experiment: slot.block,
+        });
+        runLog.info(`Experiment slot ${slot.block.slot_id} (${slot.block.condition}): checks passed, dispatching one request`);
+      }
+      const activeSlot = slot;
+
+      const outcome = await reviewPullRequest({
+        ...promptInput,
+        model: agent.model,
+        llm,
+        // Per-agent review strategy (configured in the Agent editor); falls back
+        // to the studio default. single-pass = whole diff in one call.
+        strategy: agent.strategy ?? REVIEW_STRATEGY,
+        sessionId,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
         checkCancelled: () => this.checkpoint(runId),
+        ...(activeSlot
+          ? { experiment: activeSlot.options, onAttempt: (attempt) => activeSlot.attempts.push(attempt) }
+          : {}),
       });
       const { tokensIn, tokensOut, grounding } = outcome;
 
@@ -331,6 +403,7 @@ export class ReviewRunExecutor {
         log: runLog.logFor(runId),
         // Immutable copy of the intent this run used; a later Recompute never changes it.
         intent,
+        ...(slot ? { experiment: finishBlock(slot, 'completed') } : {}),
       };
       runLog.info('Run complete; trace persisted');
       await this.repo.saveRunTrace(runId, trace);
@@ -344,23 +417,36 @@ export class ReviewRunExecutor {
       const status = cancelled ? 'cancelled' : 'failed';
       const msg = cancelled ? 'Cancelled by user' : (err as Error).message;
       runLog.error(cancelled ? 'Run cancelled by user' : `Run failed: ${msg}`);
+      // HW2 experiment: a refusal cost nothing; a dispatched failure records
+      // only what the provider reported, never a synthesized zero.
+      let experimentBlock: ExperimentRunTrace | undefined;
+      let usage: { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } = {
+        tokensIn: 0,
+        tokensOut: 0,
+        costUsd: null,
+      };
+      if (err instanceof ExperimentRefusedError) {
+        experimentBlock = err.block;
+        usage = { tokensIn: 0, tokensOut: 0, costUsd: 0 };
+      } else if (slot) {
+        experimentBlock = finishBlock(slot, 'failed', msg);
+        usage = attemptTotals(slot.attempts);
+      }
       await this.repo
         .completeAgentRun(runId, {
           status,
           durationMs: Date.now() - start,
-          tokensIn: 0,
-          tokensOut: 0,
-          costUsd: null,
+          ...usage,
           findingsCount: 0,
           grounding: '0/0 passed',
           error: msg,
         })
         .catch(() => undefined);
       await this.repo
-        .saveRunTrace(
-          runId,
-          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, intent),
-        )
+        .saveRunTrace(runId, {
+          ...this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, intent),
+          ...(experimentBlock ? { experiment: experimentBlock } : {}),
+        })
         .catch(() => undefined);
       this.container.runBus.complete(runId);
       throw err;

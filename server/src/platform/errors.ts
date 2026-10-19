@@ -46,3 +46,10 @@ export class SkillLimitError extends AppError {
     super('skill_limit_reached', `An agent can have at most ${max} skills. Unlink one before adding another.`, 422, { max });
   }
 }
+
+/** The request conflicts with current state (e.g. an experiment slot already used or in flight). */
+export class ConflictError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super('conflict', message, 409, details);
+  }
+}
