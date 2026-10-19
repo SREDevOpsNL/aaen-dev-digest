@@ -140,6 +140,12 @@ describe('strict single-generation eligibility', () => {
     expect(evaluateSlot(traceWith(attempt), frozen)).toMatchObject({ eligible: false, provenance: 'unverified' });
   });
 
+  it('names a missing provenance source as the reason (the report shows reasons)', () => {
+    const verdict = evaluateSlot(traceWith({ ...okAttempt, router: null, generation: { status: 'unavailable' } }), frozen);
+    expect(verdict.reasons).toContain('no source established the serving provider');
+    expect(verdict.sources).toEqual([]);
+  });
+
   it('is ineligible when the intent, the diff or the outcome is not the frozen one', () => {
     expect(evaluateSlot(traceWith(okAttempt, {}, { source: 'derived' }), frozen).eligible).toBe(false);
     expect(evaluateSlot(traceWith(okAttempt, {}, { analysis: { claimed_purpose: 'other' } }), frozen).eligible).toBe(false);
