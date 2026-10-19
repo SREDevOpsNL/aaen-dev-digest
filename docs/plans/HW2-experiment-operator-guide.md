@@ -7,7 +7,7 @@ against the development database or demo PR #3.
 | Gate | What it authorizes | Spend |
 | --- | --- | --- |
 | 1 | Implementation and unpaid checks (this tooling) | none |
-| 2 | You create the **dedicated** OpenRouter key, set its spending limit (~USD 2) in the OpenRouter dashboard, and confirm it | none |
+| 2 | You create the **dedicated** OpenRouter key, set its spending limit (~USD 2) in the OpenRouter dashboard, and confirm it ([checklist](HW2-gate2-checklist.md)) | none |
 | 3 | Paid exploration on the disposable stack | ≤ USD 0.50 |
 | 4 | Confirmatory runs, after the preregistration is committed | ≤ USD 1.00 |
 | 5 | Acceptance walkthrough (reuses a Gate 4 trace for the token label) | none planned |
@@ -21,13 +21,11 @@ Each gate needs its own explicit authorization. The runner enforces the caps
 
 An experiment stack reads **only** `~/.devdigest/hw2-experiments/secrets.json`
 (mode 0600) and never falls back to `process.env`, so it cannot use the
-everyday key in `~/.devdigest/secrets.json`.
+everyday key in `~/.devdigest/secrets.json`. The server reads the file once at
+startup, so create it **before** starting the stack.
 
-```bash
-mkdir -p ~/.devdigest/hw2-experiments && chmod 700 ~/.devdigest/hw2-experiments
-printf '{ "OPENROUTER_API_KEY": "<dedicated key>" }\n' > ~/.devdigest/hw2-experiments/secrets.json
-chmod 600 ~/.devdigest/hw2-experiments/secrets.json
-```
+The key requirements, the commands that write the file without exposing the
+key, and the checks are in the [Gate 2 checklist](HW2-gate2-checklist.md).
 
 ### 2. Start a disposable stack
 
@@ -62,8 +60,10 @@ pnpm exec tsx src/experiments/hw2/cli.ts check --api http://127.0.0.1:3251 --sta
 `check` verifies the stack identity and fails closed on any mismatch: stack id,
 disposable database name, a single repository, fixtures present, no PR #3, no
 clone of the fixture repo, container labels, a loopback non-development API
-port, and the dedicated key file. It also confirms both fixture intents are
-fresh and prints the frozen diff hashes.
+port, and that the stack reads the dedicated key file. It checks the file's
+path only: whether a key is present is the `openrouter_key_configured` flag of
+`GET /experiments/identity`, and `run` refuses without one. It also confirms
+both fixture intents are fresh and prints the frozen diff hashes.
 
 ```bash
 pnpm exec tsx src/experiments/hw2/cli.ts endpoints --api http://127.0.0.1:3251
