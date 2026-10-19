@@ -31,7 +31,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DATABASE_URL: postgres://devdigest:devdigest@localhost:5432/devdigest
+  # A separate disposable database in the compose Postgres (created below). Its
+  # name lets the seed prove isolation before adding the HW2 experiment fixtures.
+  DATABASE_URL: postgres://devdigest:devdigest@localhost:5432/devdigest_e2e
   NEXT_PUBLIC_API_BASE: http://localhost:3001
   E2E_BASE_URL: http://localhost:3000
 
@@ -61,6 +63,7 @@ jobs:
             sleep 2
           done
           [ "$(docker inspect -f '{{.State.Health.Status}}' devdigest-postgres)" = "healthy" ]
+          docker exec devdigest-postgres createdb -U devdigest devdigest_e2e
 
       # --- API: install, migrate, seed, then start in the background ---
       - name: Install + migrate + seed (server)
@@ -68,7 +71,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm db:migrate
-          pnpm db:seed
+          DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 pnpm db:seed
 
       # The API imports @devdigest/reviewer-core's RAW source at runtime (tsx
       # resolves the tsconfig alias to ../reviewer-core/src), and that source

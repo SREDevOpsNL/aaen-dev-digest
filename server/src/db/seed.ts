@@ -7,7 +7,11 @@ import {
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
   TEST_QUALITY_REVIEWER_PROMPT,
+  API_CONTRACT_REVIEWER_PROMPT,
 } from './seed-prompts.js';
+import { API_CONTRACT_SEED_SKILLS } from './seed-skills.js';
+import { EXPERIMENT_FIXTURES, patchStats } from './seed-fixtures.js';
+import { assertDisposableDatabase } from './disposable.js';
 
 /** Default provider/model for the built-in reviewer agents. */
 const DEFAULT_PROVIDER = 'openrouter' as const;
@@ -19,15 +23,33 @@ const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
  *
  * Seeds: default workspace + system user + membership, default settings,
  * demo repo (acme/payments-api), PR #482 with files/commits, a sample review
- * with a few findings, four reusable test-quality skills, and four built-in
- * agents (General + Security + Performance + Test Quality), all on the default
- * openrouter/deepseek-v4-flash provider+model.
+ * with a few findings, four reusable test-quality skills, three API Contract
+ * skills, five built-in agents (General + Security + Performance + Test Quality
+ * + API Contract), all on the default openrouter/deepseek-v4-flash
+ * provider+model. With `experimentFixtures` (disposable databases only), also
+ * the two HW2 experiment fixture PRs (#501, #502).
  */
 
 export const DEFAULT_WORKSPACE_NAME = 'default';
 export const SYSTEM_USER_EMAIL = 'you@local';
 
-export async function seed(db: Db): Promise<{ workspaceId: string; userId: string }> {
+export interface SeedOptions {
+  /**
+   * Also seed the HW2 experiment fixture PRs #501 and #502. Opt-in, and only
+   * into a demonstrably disposable database (./disposable.ts): the plain
+   * `pnpm db:seed` never creates them. The CLI enables it with
+   * DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1.
+   */
+  experimentFixtures?: boolean;
+}
+
+export async function seed(
+  db: Db,
+  options: SeedOptions = {},
+): Promise<{ workspaceId: string; userId: string }> {
+  // Checked before any write, so a refused run changes nothing.
+  if (options.experimentFixtures) await assertDisposableDatabase(db);
+
   // ---- workspace + user (no-auth defaults) ----
   let [ws] = await db
     .select()
@@ -174,6 +196,9 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     ]);
   }
 
+  // ---- HW2 experiment fixtures: PRs #501 and #502 (opt-in, disposable only) ----
+  if (options.experimentFixtures) await seedExperimentFixtures(db, workspaceId, repoId);
+
   // ---- built-in skills (text configuration only; never executable) ----
   const seedSkills: Array<typeof t.skills.$inferInsert> = [
     {
@@ -237,7 +262,27 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       .onConflictDoNothing();
   }
 
-  // ---- built-in agents (the starter presets + Test Quality Reviewer) ----
+  // ---- API Contract skills (three seeded; deprecation-policy is imported) ----
+  const apiContractSkillIds: string[] = [];
+  for (const content of API_CONTRACT_SEED_SKILLS) {
+    let [stored] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, content.name)));
+    if (!stored) {
+      [stored] = await db
+        .insert(t.skills)
+        .values({ workspaceId, ...content, type: 'rubric', source: 'manual', enabled: true, version: 1 })
+        .returning();
+    }
+    apiContractSkillIds.push(stored!.id);
+    await db
+      .insert(t.skillVersions)
+      .values({ skillId: stored!.id, version: 1, body: stored!.body })
+      .onConflictDoNothing();
+  }
+
+  // ---- built-in agents (the starter presets + Test Quality + API Contract) ----
   // Prompt bodies live in ./seed-prompts.ts (mirrored in docs/agent-prompts/*.md).
   const seedAgents: Array<typeof t.agents.$inferInsert> = [
     {
@@ -284,15 +329,35 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       version: 1,
       createdBy: userId,
     },
+    {
+      workspaceId,
+      name: 'API Contract Reviewer',
+      description: 'Flags breaking route, schema, versioning and deprecation changes for existing API clients.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: API_CONTRACT_REVIEWER_PROMPT,
+      // Fixed review shape: one whole-diff call and no repo-intel context, so
+      // runs differ only in their inputs (the fixtures have no clone anyway).
+      strategy: 'single-pass',
+      repoIntel: false,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
   ];
-  let testQualityAgentId: string | undefined;
+  // Seeded links per agent (order = index). Within the 4-skill limit.
+  const linkedSkills: Record<string, string[]> = {
+    'Test Quality Reviewer': skillIds,
+    'API Contract Reviewer': apiContractSkillIds,
+  };
+  const agentIds: Record<string, string> = {};
   for (const a of seedAgents) {
     let [existing] = await db
       .select()
       .from(t.agents)
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, a.name)));
     if (!existing) [existing] = await db.insert(t.agents).values(a).returning();
-    if (a.name === 'Test Quality Reviewer') testQualityAgentId = existing!.id;
+    agentIds[a.name] = existing!.id;
 
     await db
       .insert(t.agentVersions)
@@ -307,20 +372,72 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
           strategy: existing!.strategy,
           ci_fail_on: existing!.ciFailOn,
           repo_intel: existing!.repoIntel,
-          skills: a.name === 'Test Quality Reviewer' ? skillIds : [],
+          skills: linkedSkills[a.name] ?? [],
         },
       })
       .onConflictDoNothing();
   }
 
-  if (testQualityAgentId) {
+  for (const [agentName, ids] of Object.entries(linkedSkills)) {
+    const agentId = agentIds[agentName];
+    if (!agentId || ids.length === 0) continue;
     await db
       .insert(t.agentSkills)
-      .values(skillIds.map((skillId, order) => ({ agentId: testQualityAgentId!, skillId, order })))
+      .values(ids.map((skillId, order) => ({ agentId, skillId, order })))
       .onConflictDoNothing();
   }
 
   return { workspaceId, userId };
+}
+
+/**
+ * Seed the HW2 experiment fixture PRs (./seed-fixtures.ts) into the demo
+ * repository. Only called after assertDisposableDatabase.
+ */
+async function seedExperimentFixtures(db: Db, workspaceId: string, repoId: string): Promise<void> {
+  // Reviewed from their stored patches only. Existing rows are left as they are.
+  for (const fixture of EXPERIMENT_FIXTURES) {
+    let [fixturePr] = await db
+      .select()
+      .from(t.pullRequests)
+      .where(and(eq(t.pullRequests.repoId, repoId), eq(t.pullRequests.number, fixture.number)));
+    if (!fixturePr) {
+      const stats = fixture.files.map((file) => ({ file, ...patchStats(file.patch) }));
+      [fixturePr] = await db
+        .insert(t.pullRequests)
+        .values({
+          workspaceId,
+          repoId,
+          number: fixture.number,
+          title: fixture.title,
+          author: fixture.author,
+          branch: fixture.branch,
+          base: 'main',
+          headSha: fixture.headSha,
+          additions: stats.reduce((sum, f) => sum + f.additions, 0),
+          deletions: stats.reduce((sum, f) => sum + f.deletions, 0),
+          filesCount: fixture.files.length,
+          status: 'needs_review',
+          body: fixture.body,
+        })
+        .returning();
+      await db.insert(t.prFiles).values(
+        stats.map(({ file, additions, deletions }) => ({
+          prId: fixturePr!.id,
+          path: file.path,
+          additions,
+          deletions,
+          patch: file.patch,
+        })),
+      );
+      await db.insert(t.prCommits).values({
+        prId: fixturePr!.id,
+        sha: fixture.headSha,
+        message: fixture.commitMessage,
+        author: fixture.author,
+      });
+    }
+  }
 }
 
 // CLI entrypoint
@@ -331,7 +448,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
   const handle = createDb(url);
-  seed(handle.db)
+  seed(handle.db, { experimentFixtures: process.env.DEVDIGEST_SEED_EXPERIMENT_FIXTURES === '1' })
     .then(async (r) => {
       console.log('✓ seeded', r);
       await handle.close();
