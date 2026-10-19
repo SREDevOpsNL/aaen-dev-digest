@@ -259,11 +259,29 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
   });
 
   it('refuses intent derivation in experiment mode without reaching the provider', async () => {
+    // The intent feature defaults to the openai provider: inject one, so the
+    // derivation really reaches the shared LLM boundary (and is refused there).
+    const openai = new FakeExperimentProvider();
+    const withOpenai = await buildApp({
+      config: loadConfig({
+        ...process.env,
+        NODE_ENV: 'test',
+        DEVDIGEST_CLONE_DIR: cloneDir,
+        ...EXPERIMENT_ENV,
+        DEVDIGEST_EXPERIMENT_CAPABILITY_PATH: join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1', 'capability.json'),
+      } as NodeJS.ProcessEnv),
+      db: pg.handle.db,
+      overrides: { git: new MockGitClient({ diff: '' }), github: new MockGitHubClient(), llm: { openrouter: llm, openai: openai as unknown as LLMProvider } },
+    });
     const before = modelCalls();
-    await app.inject({ method: 'POST', url: `/pulls/${pr501}/intent/recompute` });
-    expect(modelCalls()).toBe(before); // the derivation never reached the provider
+    await withOpenai.inject({ method: 'POST', url: `/pulls/${pr501}/intent/recompute` });
+    expect(openai.requests).toHaveLength(0); // the derivation never reached the provider
+    expect(modelCalls()).toBe(before);
+    const [row] = await pg.handle.db.select().from(t.prIntent).where(eq(t.prIntent.prId, pr501));
+    expect(row!.lastError ?? '').toMatch(/Refused in experiment mode/);
     // The seeded cached intent is still the one the experiment slots use.
-    expect((await app.inject({ url: `/pulls/${pr501}/intent` })).json()).toMatchObject({ state: 'ready', stale: false, provider: 'seed' });
+    expect((await withOpenai.inject({ url: `/pulls/${pr501}/intent` })).json()).toMatchObject({ state: 'ready', stale: false, provider: 'seed' });
+    await withOpenai.close();
   });
 
   it('reports the stack identity: disposable database, fixtures present, no PR #3, no fixture clone', async () => {
