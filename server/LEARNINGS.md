@@ -84,6 +84,18 @@ correction. Repo-intel remains server-scoped;
   `review_intent.defaultProvider`), `server/src/modules/intent/service.ts`
   (`runDerivation`), `server/test/experiments.it.test.ts` (intent refusal).
 
+- **2026-10-19** — `LocalSecretsProvider` reads its key file once per process
+  and keeps the result, including an empty result when the file is missing or
+  is not valid JSON. A key written after the API started is therefore invisible
+  until a restart: an experiment stack started before its
+  `~/.devdigest/hw2-experiments/secrets.json` existed reports
+  `openrouter_key_configured: false`. Deleting the file does not remove a key
+  from a running server either. Create the key file before starting the server,
+  and to revoke a key, restart the server or revoke the key at the provider.
+  Nothing checks the file's mode. Evidence:
+  `server/src/adapters/secrets/local.ts:25,33` (`LocalSecretsProvider.load`),
+  `server/src/platform/container.ts:87` (one provider per container).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
