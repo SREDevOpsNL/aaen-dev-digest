@@ -154,6 +154,7 @@ describe('OpenRouter experiment mode', () => {
 
   it.each([
     ['two providers', experiment({ routing: { order: ['a', 'b'], only: ['a', 'b'], allowFallbacks: false } })],
+    ['two providers in order only', experiment({ routing: { order: ['a', 'b'], only: ['a'], allowFallbacks: false } })],
     ['only differs from order', experiment({ routing: { order: ['a'], only: ['b'], allowFallbacks: false } })],
     ['fallbacks on', experiment({ routing: { order: ['a'], only: ['a'], allowFallbacks: true as unknown as false } })],
     ['transport retries', experiment({ transportMaxRetries: 1 as unknown as 0 })],
