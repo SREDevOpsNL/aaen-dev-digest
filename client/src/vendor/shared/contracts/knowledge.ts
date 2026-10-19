@@ -242,6 +242,9 @@ export const Agent = z.object({
   // Inject repo-intel context (repo skeleton + callers + rank note) into this
   // agent's review prompt. Default on; gated again by the global flag.
   repo_intel: z.boolean().default(true),
+  // Linked skills in the agent's workspace, enabled or not (the "N / 4 attached"
+  // count). Returned by the list (`GET /agents`); absent from single-agent responses.
+  skill_count: z.number().int().nonnegative().optional(),
 });
 export type Agent = z.infer<typeof Agent>;
 

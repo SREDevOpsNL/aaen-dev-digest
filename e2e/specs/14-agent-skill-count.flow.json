@@ -1,0 +1,82 @@
+{
+  "name": "Agent cards show each agent's linked-skill count from the API",
+  "description": "Read-only: the Agents page and the agent editor's agent list both show each seeded agent's linked-skill count as returned by GET /agents (Test Quality Reviewer 4, API Contract Reviewer 3, the other reviewers 0). Nothing is linked, saved or reviewed, and no model is called.",
+  "steps": [
+    {
+      "cmd": [
+        "open",
+        "{BASE}/agents"
+      ],
+      "label": "load the Agents page"
+    },
+    {
+      "cmd": [
+        "wait",
+        "--load",
+        "networkidle"
+      ],
+      "label": "agents fetch settles"
+    },
+    {
+      "cmd": [
+        "wait",
+        "--text",
+        "4 skills"
+      ],
+      "label": "a count is rendered"
+    },
+    {
+      "cmd": [
+        "eval",
+        "(() => ['General Reviewer', 'Security Reviewer', 'Performance Reviewer', 'Test Quality Reviewer', 'API Contract Reviewer'].map((n) => { const del = document.querySelector('[aria-label=\"Delete agent ' + n + '\"]'); const card = del && del.closest('div').parentElement; const m = card && card.innerText.match(/(\\d+) skills?\\b/); return n + '=' + (m ? m[1] : 'none'); }).join('|'))()"
+      ],
+      "assert": {
+        "stdoutIncludes": "General Reviewer=0|Security Reviewer=0|Performance Reviewer=0|Test Quality Reviewer=4|API Contract Reviewer=3"
+      },
+      "label": "every agent card on the list shows its count"
+    },
+    {
+      "cmd": [
+        "find",
+        "text",
+        "Test Quality Reviewer",
+        "click"
+      ],
+      "label": "open the Test Quality Reviewer"
+    },
+    {
+      "cmd": [
+        "wait",
+        "--url",
+        "tab=config"
+      ],
+      "label": "agent editor reached"
+    },
+    {
+      "cmd": [
+        "wait",
+        "--load",
+        "networkidle"
+      ],
+      "label": "editor fetches settle"
+    },
+    {
+      "cmd": [
+        "wait",
+        "--text",
+        "3 skills"
+      ],
+      "label": "the editor's agent list renders counts"
+    },
+    {
+      "cmd": [
+        "eval",
+        "(() => ['General Reviewer', 'Security Reviewer', 'Performance Reviewer', 'Test Quality Reviewer', 'API Contract Reviewer'].map((n) => { const del = document.querySelector('[aria-label=\"Delete agent ' + n + '\"]'); const card = del && del.closest('div').parentElement; const m = card && card.innerText.match(/(\\d+) skills?\\b/); return n + '=' + (m ? m[1] : 'none'); }).join('|'))()"
+      ],
+      "assert": {
+        "stdoutIncludes": "General Reviewer=0|Security Reviewer=0|Performance Reviewer=0|Test Quality Reviewer=4|API Contract Reviewer=3"
+      },
+      "label": "every agent card in the editor's list shows its count"
+    }
+  ]
+}

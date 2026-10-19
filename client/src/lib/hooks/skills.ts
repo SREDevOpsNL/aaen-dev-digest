@@ -83,6 +83,9 @@ export function useDeleteSkill() {
       queryClient.invalidateQueries({ queryKey: ["skills"] });
       queryClient.removeQueries({ queryKey: ["skill", id] });
       queryClient.removeQueries({ queryKey: ["skill-versions", id] });
+      // Deleting a skill unlinks it from every agent: refresh their links and counts.
+      queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
 }
@@ -131,6 +134,8 @@ export function useSetAgentSkills() {
       queryClient.setQueryData(["agent-skills", variables.agentId], links);
       queryClient.invalidateQueries({ queryKey: ["skills"] });
       queryClient.invalidateQueries({ queryKey: ["agent", variables.agentId] });
+      // The agents list carries each agent's linked-skill count.
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
 }

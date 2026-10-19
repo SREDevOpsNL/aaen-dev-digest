@@ -96,6 +96,20 @@ correction. Repo-intel remains server-scoped;
   `server/src/adapters/secrets/local.ts:25,33` (`LocalSecretsProvider.load`),
   `server/src/platform/container.ts:87` (one provider per container).
 
+- **2026-10-20** — In a single-table Drizzle select, column references inside
+  a `sql` template are rendered **unqualified** (`"id"`, `"workspace_id"`).
+  Inside a correlated subquery they then bind to the subquery's own tables, not
+  to the outer row. The first linked-skill count for `GET /agents` rendered
+  `… on "id" = "skill_id" and "workspace_id" = "workspace_id" where "agent_id" =
+  "id"`, typechecked, and returned 0 for every agent. Build the subquery with
+  the query builder (a joined select qualifies its own columns) and qualify the
+  outer columns explicitly with
+  `` sql`${table}.${sql.identifier(column.name)}` ``. Print the SQL with
+  `new QueryBuilder()…toSQL()` to check it. Evidence:
+  `server/src/modules/agents/repository.ts` (`AgentsRepository.list`),
+  `server/test/agent-skill-count.it.test.ts` (four count tests failed on the
+  unqualified version).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
