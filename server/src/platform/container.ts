@@ -82,7 +82,8 @@ export class Container {
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
     this.db = db;
-    this.secrets = overrides.secrets ?? new LocalSecretsProvider(config.secretsPath);
+    // Experiment mode: the dedicated key file only, never a process.env fallback.
+    this.secrets = overrides.secrets ?? new LocalSecretsProvider(config.secretsPath, config.experiment ? {} : process.env);
     this.auth = overrides.auth ?? new LocalNoAuthProvider(db);
     this.runBus = runBus;
     this.jobs = new JobRunner(db);

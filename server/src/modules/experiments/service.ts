@@ -35,6 +35,9 @@ export interface ExperimentIdentity {
   prices: ExperimentConfig['prices'];
   generation_lookup: ExperimentConfig['generationLookup'];
   in_flight_slot: string | null;
+  /** The dedicated experiment key file, and whether it holds an OpenRouter key (never the key). */
+  secrets_path: string;
+  openrouter_key_configured: boolean;
 }
 
 /**
@@ -79,6 +82,8 @@ export class ExperimentsService {
       prices: config.prices,
       generation_lookup: config.generationLookup,
       in_flight_slot: inFlight.get(this.container) ?? null,
+      secrets_path: this.container.config.secretsPath,
+      openrouter_key_configured: Boolean(await this.container.secrets.get('OPENROUTER_API_KEY')),
     };
   }
 

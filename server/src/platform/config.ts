@@ -140,17 +140,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const cloneDirRaw =
     parsed.DEVDIGEST_CLONE_DIR ?? join(homedir(), '.devdigest', 'workspace');
   const cloneDir = isAbsolute(cloneDirRaw) ? cloneDirRaw : resolve(process.cwd(), cloneDirRaw);
+  const experiment = loadExperimentConfig(env);
   return {
     databaseUrl: parsed.DATABASE_URL,
     apiPort: parsed.API_PORT,
     webPort: parsed.WEB_PORT,
     cloneDir,
-    secretsPath: join(homedir(), '.devdigest', 'secrets.json'),
+    // An experiment stack reads only its dedicated key file (no env fallback, see
+    // container.ts), so it can never spend through the everyday key.
+    secretsPath: experiment
+      ? join(homedir(), '.devdigest', 'hw2-experiments', 'secrets.json')
+      : join(homedir(), '.devdigest', 'secrets.json'),
     nodeEnv: parsed.NODE_ENV,
     logLevel: parsed.LOG_LEVEL ?? (parsed.NODE_ENV === 'test' ? 'silent' : 'info'),
     webOrigin: `http://localhost:${parsed.WEB_PORT}`,
     embeddingsEnabled: parsed.EMBEDDINGS_ENABLED === 'true',
     repoIntelEnabled: parsed.REPO_INTEL_ENABLED !== 'false',
-    experiment: loadExperimentConfig(env),
+    experiment,
   };
 }

@@ -196,6 +196,23 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     await plain.close();
   });
 
+  it('never falls back to an environment OpenRouter key', async () => {
+    const previous = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = 'sk-env-everyday-key';
+    try {
+      const fresh = await buildApp({
+        config: loadConfig({ ...process.env, NODE_ENV: 'test', DEVDIGEST_CLONE_DIR: cloneDir, ...EXPERIMENT_ENV } as NodeJS.ProcessEnv),
+        db: pg.handle.db,
+        overrides: { git: new MockGitClient({ diff: '' }), github: new MockGitHubClient() },
+      });
+      expect(await fresh.container.secrets.get('OPENROUTER_API_KEY')).not.toBe('sk-env-everyday-key');
+      await fresh.close();
+    } finally {
+      if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = previous;
+    }
+  });
+
   it('rejects a partial experiment configuration at startup', () => {
     expect(() => loadConfig({ NODE_ENV: 'test', DEVDIGEST_EXPERIMENT_STACK_ID: 'hw2f-abcd' } as NodeJS.ProcessEnv)).toThrow(/Partial experiment configuration/);
   });
@@ -215,6 +232,10 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
       max_output_tokens: 4000,
       in_flight_slot: null,
     });
+    // The dedicated key file only (no env fallback); the key itself is never returned.
+    expect(identity.secrets_path).toMatch(/\/\.devdigest\/hw2-experiments\/secrets\.json$/);
+    expect(typeof identity.openrouter_key_configured).toBe('boolean');
+    expect(JSON.stringify(identity)).not.toMatch(/sk-or-/);
   });
 
   it('lists the live endpoints of the frozen model without a generation', async () => {

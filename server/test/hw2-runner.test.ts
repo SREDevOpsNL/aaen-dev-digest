@@ -188,6 +188,8 @@ describe('stack identity', () => {
     model: 'm',
     max_output_tokens: 4000,
     in_flight_slot: null,
+    secrets_path: '/home/op/.devdigest/hw2-experiments/secrets.json',
+    openrouter_key_configured: false,
   };
   const labels = { 'devdigest.disposable': 'true', 'devdigest.stack-id': 'hw2f-abcd1234', 'devdigest.database': 'devdigest_hw2f_abcd1234' };
   const expected = { stackId: 'hw2f-abcd1234', database: 'devdigest_hw2f_abcd1234', container: 'c', apiUrl: 'http://127.0.0.1:3251' };
@@ -206,6 +208,7 @@ describe('stack identity', () => {
     ['an unlabelled container', identity, {}, expected],
     ['a development API port', identity, labels, { ...expected, apiUrl: 'http://127.0.0.1:3001' }],
     ['a non-loopback API', identity, labels, { ...expected, apiUrl: 'http://10.0.0.5:3251' }],
+    ['the everyday key file', { ...identity, secrets_path: '/home/op/.devdigest/secrets.json' }, labels, expected],
   ])('fails closed on %s', (_label, id, lbl, exp) => {
     expect(identityProblems(id as StackIdentity, lbl as Record<string, string>, exp).length).toBeGreaterThan(0);
   });

@@ -26,7 +26,12 @@ export interface StackIdentity {
   model: string;
   max_output_tokens: number;
   in_flight_slot: string | null;
+  secrets_path: string;
+  openrouter_key_configured: boolean;
 }
+
+/** The only key file an experiment stack may read (see platform/config.ts). */
+export const DEDICATED_SECRETS_SUFFIX = '/.devdigest/hw2-experiments/secrets.json';
 
 /** Every disagreement between the stack and the expectation; empty = isolated as expected. */
 export function identityProblems(identity: StackIdentity, labels: Record<string, string>, expected: ExpectedStack): string[] {
@@ -41,6 +46,7 @@ export function identityProblems(identity: StackIdentity, labels: Record<string,
   if (identity.fixture_pulls.join(',') !== '501,502') problems.push('fixture PRs #501 and #502 are not both present');
   if (identity.demo_pr_3_present) problems.push('demo PR #3 is present');
   if (identity.fixture_clone_present) problems.push('a clone of acme/payments-api exists in the clone directory');
+  if (!identity.secrets_path.endsWith(DEDICATED_SECRETS_SUFFIX)) problems.push(`secrets file ${identity.secrets_path} is not the dedicated experiment key file`);
   if (labels['devdigest.disposable'] !== 'true') problems.push(`container ${expected.container} is not labelled devdigest.disposable=true`);
   if (labels['devdigest.stack-id'] !== expected.stackId) problems.push(`container label devdigest.stack-id is ${labels['devdigest.stack-id'] ?? 'missing'}`);
   if (labels['devdigest.database'] !== expected.database) problems.push(`container label devdigest.database is ${labels['devdigest.database'] ?? 'missing'}`);

@@ -207,6 +207,9 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
     case 'run': {
       const phase = assertPaidAuthorization(flags);
       const stack = await verifiedStack(flags);
+      if (!stack.identity.openrouter_key_configured) {
+        throw new Error(`No OpenRouter key in ${stack.identity.secrets_path}; Gate 2 (the dedicated key and its limit) comes first`);
+      }
       const ledger = new Ledger(ledgerDir(stack.stackId));
       ledger.acquire({ pid: process.pid, stackId: stack.stackId });
       try {
