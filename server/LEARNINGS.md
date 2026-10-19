@@ -101,6 +101,17 @@ correction. Repo-intel remains server-scoped;
   `server/test/agent-skill-count.it.test.ts` (four count tests failed on the
   unqualified version).
 
+- **2026-10-19** — `new MockGitClient()` returns a canned one-file diff
+  (`src/config.ts` with a fake `sk_live_` key) from `diff()`, so in a test
+  `loadDiff` takes it and never reaches the `pr_files` fallback: a test that
+  means to review a seeded PR's stored patches silently reviews that canned
+  diff instead. Pass `new MockGitClient({ diff: '' })` (no files → fallback)
+  when the stored patches are what is under test. Evidence:
+  `server/src/adapters/mocks.ts:284` (`MockGitClient.diff`),
+  `server/src/modules/reviews/diff-loader.ts` (`loadDiff`); every slot in
+  `server/test/experiments.it.test.ts` was refused for a diff-hash mismatch
+  until the test used the empty diff.
+
 ## Decisions
 
 ## Recurring Errors & Fixes

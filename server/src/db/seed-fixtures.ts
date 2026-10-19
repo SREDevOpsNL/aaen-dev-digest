@@ -135,3 +135,61 @@ export function patchStats(patch: string): { additions: number; deletions: numbe
   }
   return { additions, deletions };
 }
+
+/**
+ * Label carried by every synthetic convention candidate. The final Conventions
+ * walkthrough may use these instead of a live (paid) extraction; they are not a
+ * model extraction and must never be presented as one. The real extraction path
+ * is covered by `server/test/conventions.it.test.ts` (mocked model).
+ */
+export const SYNTHETIC_CONVENTION_LABEL = 'Synthetic fixture — not a model extraction.';
+
+export interface SyntheticConvention {
+  category: 'naming' | 'structure' | 'errors' | 'testing' | 'imports' | 'typing' | 'api' | 'general';
+  rule: string;
+  rationale: string;
+  evidencePath: string;
+  evidenceLine: number;
+  evidenceSnippet: string;
+  confidence: number;
+}
+
+/** Pending candidates for `acme/payments-api`, citing lines of the fixture patches. */
+export const SYNTHETIC_CONVENTIONS: readonly SyntheticConvention[] = [
+  {
+    category: 'api',
+    rule: "Answer a missing resource with HTTP 404 and the body { error: 'not_found' }",
+    rationale: `${SYNTHETIC_CONVENTION_LABEL} Clients branch on the error code.`,
+    evidencePath: 'src/api/payments.ts',
+    evidenceLine: 14,
+    evidenceSnippet: "    if (!payment) return reply.code(404).send({ error: 'not_found' });",
+    confidence: 0.82,
+  },
+  {
+    category: 'errors',
+    rule: 'Throw an Error whose message names the rejected input',
+    rationale: `${SYNTHETIC_CONVENTION_LABEL} Callers log the message as is.`,
+    evidencePath: 'src/billing/discount.ts',
+    evidenceLine: 11,
+    evidenceSnippet: '  if (!coupon) throw new Error(`Unknown coupon: ${code}`);',
+    confidence: 0.74,
+  },
+  {
+    category: 'naming',
+    rule: 'Suffix integer money amounts with Cents',
+    rationale: `${SYNTHETIC_CONVENTION_LABEL} Amounts are kept as integer cents.`,
+    evidencePath: 'src/billing/discount.ts',
+    evidenceLine: 9,
+    evidenceSnippet: 'export function applyDiscount(totalCents: number, code: string, now: Date): number {',
+    confidence: 0.66,
+  },
+  {
+    category: 'testing',
+    rule: 'Keep unit tests next to the module as <name>.test.ts',
+    rationale: `${SYNTHETIC_CONVENTION_LABEL} Tests sit beside the code they cover.`,
+    evidencePath: 'src/billing/discount.test.ts',
+    evidenceLine: 2,
+    evidenceSnippet: "import { applyDiscount } from './discount';",
+    confidence: 0.7,
+  },
+];

@@ -464,6 +464,7 @@ calls GitHub and does not persist a second local comment copy.
 | Agents | Agent CRUD, versions, model lists, and ordered skill links (`GET/POST /agents/:id/skills`; at most 4 per agent, enforced under the agent row lock, `422 skill_limit_reached`) under `/agents` and `/providers`; `GET /agents` adds each agent's `skill_count` (linked skills in its workspace, enabled or not, from one query) |
 | Skills | `GET/POST /skills` (`link_agent_id` creates and links in one transaction), `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions` (restore a previous body as a new version with `POST /skills/:id/versions/:version/restore`), and `GET /skills/:id/agents` |
 | Conventions | `GET /repos/:id/conventions`, `POST /repos/:id/conventions/extract`, `POST /repos/:id/conventions/skill`, `PATCH/DELETE /conventions/:id` |
+| Experiments (HW2, opt-in) | `GET /experiments/identity`, `GET /experiments/endpoints`, `POST /experiments/runs`, `GET /experiments/slots/:slotId`; 404 unless the server runs with a complete experiment configuration (disposable stack only) |
 | Reviews | `POST /pulls/:id/review`, review/finding reads and actions |
 | Runs | Active/history reads, cancel/delete, SSE events, and persisted trace |
 

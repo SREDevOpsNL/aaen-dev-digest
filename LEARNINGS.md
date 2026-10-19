@@ -115,6 +115,19 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   removed afterwards; `scripts/verify-agent-instructions.mjs` (requires Git
   mode 120000 and the exact stored target).
 
+- **2026-10-19** — A committed document cannot freeze the commit it lives in.
+  The first PR-F2 runner refused a confirmatory run unless the
+  pre-registration's frozen `git rev-parse HEAD` equalled the current `HEAD`,
+  but committing the pre-registration creates a new `HEAD`, so the check
+  could never pass. Freeze a fingerprint of the implementation instead: the
+  committed blob ids (`git ls-tree -r HEAD -- <paths>`) of the paths that
+  determine behaviour, which a docs-only commit leaves unchanged, and refuse
+  uncommitted changes in those paths so the fingerprint describes the running
+  code. Evidence: `server/src/experiments/hw2/source.ts`
+  (`implementationFingerprint`), `server/test/hw2-source.test.ts` (a real Git
+  lifecycle: HEAD moves when the pre-registration is committed, the
+  fingerprint does not; a mutation back to HEAD fails it).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source
