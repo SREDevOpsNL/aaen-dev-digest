@@ -10,7 +10,7 @@ import {
   API_CONTRACT_REVIEWER_PROMPT,
 } from './seed-prompts.js';
 import { API_CONTRACT_SEED_SKILLS } from './seed-skills.js';
-import { EXPERIMENT_FIXTURES, patchStats } from './seed-fixtures.js';
+import { EXPERIMENT_FIXTURES, SYNTHETIC_CONVENTIONS, patchStats } from './seed-fixtures.js';
 import { assertDisposableDatabase } from './disposable.js';
 import type { IntentAnalysis } from '@devdigest/shared';
 import { INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
@@ -44,6 +44,12 @@ export interface SeedOptions {
    * DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1.
    */
   experimentFixtures?: boolean;
+  /**
+   * Also seed synthetic, labelled convention candidates for the demo repo, for
+   * the final Conventions walkthrough without a paid extraction. Opt-in and
+   * disposable-only like the fixtures (CLI: DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS=1).
+   */
+  syntheticConventions?: boolean;
 }
 
 export async function seed(
@@ -51,7 +57,7 @@ export async function seed(
   options: SeedOptions = {},
 ): Promise<{ workspaceId: string; userId: string }> {
   // Checked before any write, so a refused run changes nothing.
-  if (options.experimentFixtures) await assertDisposableDatabase(db);
+  if (options.experimentFixtures || options.syntheticConventions) await assertDisposableDatabase(db);
 
   // ---- workspace + user (no-auth defaults) ----
   let [ws] = await db
@@ -231,6 +237,7 @@ export async function seed(
 
   // ---- HW2 experiment fixtures: PRs #501 and #502 (opt-in, disposable only) ----
   if (options.experimentFixtures) await seedExperimentFixtures(db, workspaceId, repoId);
+  if (options.syntheticConventions) await seedSyntheticConventions(db, workspaceId, repoId);
 
   // ---- built-in skills (text configuration only; never executable) ----
   const seedSkills: Array<typeof t.skills.$inferInsert> = [
@@ -480,6 +487,18 @@ async function seedExperimentFixtures(db: Db, workspaceId: string, repoId: strin
 }
 
 /**
+ * Seed the labelled synthetic convention candidates (./seed-fixtures.ts), once:
+ * nothing is added when the repository already has candidates.
+ */
+async function seedSyntheticConventions(db: Db, workspaceId: string, repoId: string): Promise<void> {
+  const existing = await db.select({ id: t.conventions.id }).from(t.conventions).where(eq(t.conventions.repoId, repoId));
+  if (existing.length > 0) return;
+  await db.insert(t.conventions).values(
+    SYNTHETIC_CONVENTIONS.map((candidate) => ({ workspaceId, repoId, status: 'pending' as const, ...candidate })),
+  );
+}
+
+/**
  * Store a cached intent for `pr`, fingerprinted exactly as IntentService does,
  * so it reads as fresh and a review batch reuses it instead of deriving one.
  * Never overwrites an existing intent row.
@@ -526,7 +545,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
   const handle = createDb(url);
-  seed(handle.db, { experimentFixtures: process.env.DEVDIGEST_SEED_EXPERIMENT_FIXTURES === '1' })
+  seed(handle.db, {
+    experimentFixtures: process.env.DEVDIGEST_SEED_EXPERIMENT_FIXTURES === '1',
+    syntheticConventions: process.env.DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS === '1',
+  })
     .then(async (r) => {
       console.log('✓ seeded', r);
       await handle.close();

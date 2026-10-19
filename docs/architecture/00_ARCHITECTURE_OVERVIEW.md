@@ -474,6 +474,7 @@ calls GitHub and does not persist a second local comment copy.
 | Skills | `GET/POST /skills` (`link_agent_id` creates and links in one transaction), `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions` (restore a previous body as a new version with `POST /skills/:id/versions/:version/restore`), and `GET /skills/:id/agents` |
 | Conventions | `GET /repos/:id/conventions`, `POST /repos/:id/conventions/extract`, `POST /repos/:id/conventions/skill`, `PATCH/DELETE /conventions/:id` |
 | PR intent | `GET /pulls/:id/intent` (cache only), `POST /pulls/:id/intent` (first-open generation), `POST /pulls/:id/intent/recompute`; the POSTs are rate-limited |
+| Experiments (HW2, opt-in) | `GET /experiments/identity`, `GET /experiments/endpoints`, `POST /experiments/runs`, `GET /experiments/slots/:slotId`; 404 unless the server runs with a complete experiment configuration (disposable stack only) |
 | Reviews | `POST /pulls/:id/review`, review/finding reads and actions |
 | Runs | Active/history reads, cancel/delete, SSE events, and persisted trace |
 

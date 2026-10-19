@@ -22,6 +22,20 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# --serve: start a HW2 experiment stack instead of running the flows. It gets a
+# fresh stack id, a database and container named after it, Docker labels the
+# experiment runner checks, an empty per-stack clone directory, and the server
+# in experiment mode (DEVDIGEST_EXPERIMENT_* must be set by the operator; see
+# docs/plans/HW2-experiment-operator-guide.md). It blocks until Ctrl-C, then
+# tears down like a normal run. No model is called by this script.
+SERVE=0
+for arg in "$@"; do
+  case "$arg" in
+    --serve) SERVE=1 ;;
+    *) echo "unknown argument: $arg (only --serve is supported)"; exit 2 ;;
+  esac
+done
+
 # --- config (all overridable; defaults dodge the dev stack on 5432/3000/3001) ---
 PG_CONTAINER="${E2E_PG_CONTAINER:-devdigest-e2e-postgres}"
 PG_PORT="${E2E_PG_PORT:-5433}"
@@ -32,6 +46,28 @@ PG_USER="${E2E_PG_USER:-devdigest}"
 PG_PASS="${E2E_PG_PASS:-devdigest}"
 API_PORT="${E2E_API_PORT:-3101}"
 WEB_PORT="${E2E_WEB_PORT:-3100}"
+PG_LABELS=(--label devdigest.disposable=true)
+
+if [ "$SERVE" -eq 1 ]; then
+  NONCE="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+  STACK_ID="hw2f-${NONCE}"
+  PG_CONTAINER="devdigest-hw2f-${NONCE}"
+  PG_DB="devdigest_hw2f_${NONCE}"
+  PG_PORT="${E2E_PG_PORT:-5450}"
+  API_PORT="${E2E_API_PORT:-3251}"
+  WEB_PORT="${E2E_WEB_PORT:-3250}"
+  PG_LABELS+=(--label "devdigest.stack-id=${STACK_ID}" --label "devdigest.database=${PG_DB}")
+  for var in DEVDIGEST_EXPERIMENT_PROVIDER DEVDIGEST_EXPERIMENT_MODEL DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS \
+             DEVDIGEST_EXPERIMENT_PRICE_INPUT DEVDIGEST_EXPERIMENT_PRICE_OUTPUT; do
+    [ -n "${!var:-}" ] || { echo "--serve needs $var (see docs/plans/HW2-experiment-operator-guide.md)"; exit 2; }
+  done
+  export DEVDIGEST_EXPERIMENT_STACK_ID="$STACK_ID"
+  # Empty per-stack clone directory: a clone would replace the frozen fixture patches.
+  EXPERIMENT_DIR="${HOME}/.devdigest/hw2-experiments/${STACK_ID}"
+  mkdir -p "${EXPERIMENT_DIR}/clones"
+  chmod 700 "${HOME}/.devdigest/hw2-experiments" "${EXPERIMENT_DIR}"
+  export DEVDIGEST_CLONE_DIR="${EXPERIMENT_DIR}/clones"
+fi
 
 # Exported BEFORE any tsx/next spawn. dotenv (used by migrate/seed/config) does
 # not override already-set env, so these win over server/.env's :5432 / :3001
@@ -85,7 +121,7 @@ trap cleanup EXIT INT TERM
 # --- fresh isolated Postgres (ephemeral: --rm, no named volume) --------------
 log "starting isolated Postgres '$PG_CONTAINER' on :$PG_PORT (ephemeral)"
 docker rm -f "$PG_CONTAINER" >/dev/null 2>&1 || true
-docker run -d --rm --name "$PG_CONTAINER" \
+docker run -d --rm --name "$PG_CONTAINER" "${PG_LABELS[@]}" \
   -e POSTGRES_USER="$PG_USER" \
   -e POSTGRES_PASSWORD="$PG_PASS" \
   -e POSTGRES_DB="$PG_DB" \
@@ -128,7 +164,11 @@ log "applying migrations (isolated db)"
 log "seeding demo data + HW2 experiment fixtures (isolated db)"
 # The fixtures (PRs #501/#502, flow 13) are opt-in, and the seed refuses unless
 # the database is demonstrably disposable.
-(cd server && DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 pnpm db:seed)
+# --serve also seeds the labelled synthetic convention candidates for the final
+# Conventions walkthrough; the flow run does not (flow 09 expects no candidates).
+SYNTHETIC=0
+[ "$SERVE" -eq 1 ] && SYNTHETIC=1
+(cd server && DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS="$SYNTHETIC" pnpm db:seed)
 
 # --- API on :$API_PORT -------------------------------------------------------
 # tsx directly (not `pnpm start`, which needs a build; not `tsx watch`, to avoid
@@ -159,6 +199,23 @@ for _ in $(seq 1 60); do
 done
 [ "$web_up" -eq 1 ] || { echo "web never became reachable on :$WEB_PORT"; exit 1; }
 log "web up"
+
+# --- --serve: print the identity the runner checks, then wait ---------------
+if [ "$SERVE" -eq 1 ]; then
+  log "HW2 experiment stack is up (Ctrl-C tears it down)"
+  cat <<IDENTITY
+  stack id   ${STACK_ID}
+  database   ${PG_DB}  (127.0.0.1:${PG_PORT})
+  container  ${PG_CONTAINER}
+  api        http://127.0.0.1:${API_PORT}
+  web        http://localhost:${WEB_PORT}
+  clones     ${DEVDIGEST_CLONE_DIR}
+  ledger     ${EXPERIMENT_DIR}
+  key file   ${HOME}/.devdigest/hw2-experiments/secrets.json
+IDENTITY
+  wait "$SERVER_PID"
+  exit $?
+fi
 
 # --- run the flows; propagate the exit code through the trap -----------------
 log "running e2e flows against $E2E_BASE_URL"

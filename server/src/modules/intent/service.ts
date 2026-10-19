@@ -118,6 +118,7 @@ export class IntentService {
     repo: RepoRow,
     diff: UnifiedDiff,
     log?: IntentLog,
+    options: { derive?: boolean } = {},
   ): Promise<IntentRunSnapshot> {
     try {
       const ctx = await this.contextFor(workspaceId, pull, repo);
@@ -138,6 +139,12 @@ export class IntentService {
         log?.info('PR intent: the linked issue changed — refreshing');
       } else {
         log?.info(row?.analysis ? 'PR intent: cached intent is stale — refreshing' : 'PR intent: deriving');
+      }
+      // Experiment runs never pay for a derivation: without a fresh cached
+      // intent they get none, and the executor refuses the run.
+      if (options.derive === false) {
+        log?.warn('PR intent: no fresh cached intent and derivation is disabled for this batch');
+        return noneSnapshot('not_started', 'derivation disabled (experiment run)');
       }
       const result = await this.derive(ctx, diff, issue);
       if (result.ok) {

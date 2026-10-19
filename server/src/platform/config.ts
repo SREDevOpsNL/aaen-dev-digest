@@ -59,23 +59,112 @@ export type AppConfig = {
    * EXACTLY like the ripgrep-only baseline.
    */
   repoIntelEnabled: boolean;
+  /**
+   * HW2 controlled-experiment mode, or null (the default). Set only on a
+   * disposable experiment stack (`scripts/e2e.sh --serve`); see
+   * `docs/plans/HW2-experiment-operator-guide.md`.
+   */
+  experiment: ExperimentConfig | null;
 };
+
+/** Frozen experiment settings; every field comes from DEVDIGEST_EXPERIMENT_* variables. */
+export interface ExperimentConfig {
+  /** Disposable stack identity, e.g. `hw2f-1a2b3c4d`; the runner must see the same id. */
+  stackId: string;
+  /** The one OpenRouter routing slug (`provider.order` and `provider.only`). */
+  provider: string;
+  /** Expected serving-provider display name; null until exploration freezes it. */
+  providerName: string | null;
+  model: string;
+  maxOutputTokens: number;
+  /** Frozen prices: USD per input token, per output token, per request. */
+  prices: { input: number; output: number; request: number };
+  /** Generation-metadata polling, or null to skip the lookup. */
+  generationLookup: { attempts: number; delayMs: number } | null;
+  /**
+   * The spending capability the operator writes when a paid phase is
+   * authorized (Gate 3 or 4). Without a valid one every slot is refused.
+   */
+  capabilityPath: string;
+}
+
+const EXPERIMENT_REQUIRED = [
+  'DEVDIGEST_EXPERIMENT_STACK_ID',
+  'DEVDIGEST_EXPERIMENT_PROVIDER',
+  'DEVDIGEST_EXPERIMENT_MODEL',
+  'DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS',
+  'DEVDIGEST_EXPERIMENT_PRICE_INPUT',
+  'DEVDIGEST_EXPERIMENT_PRICE_OUTPUT',
+] as const;
+
+const ExperimentEnv = z.object({
+  DEVDIGEST_EXPERIMENT_STACK_ID: z.string().regex(/^hw2f-[a-z0-9]{4,32}$/),
+  DEVDIGEST_EXPERIMENT_PROVIDER: z.string().regex(/^[a-z0-9][a-z0-9._/-]*$/),
+  DEVDIGEST_EXPERIMENT_PROVIDER_NAME: z.string().min(1).optional(),
+  DEVDIGEST_EXPERIMENT_MODEL: z.string().min(1),
+  DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(200_000),
+  DEVDIGEST_EXPERIMENT_PRICE_INPUT: z.coerce.number().positive(),
+  DEVDIGEST_EXPERIMENT_PRICE_OUTPUT: z.coerce.number().positive(),
+  DEVDIGEST_EXPERIMENT_PRICE_REQUEST: z.coerce.number().nonnegative().default(0),
+  DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP: z.enum(['0', '1']).default('1'),
+  DEVDIGEST_EXPERIMENT_CAPABILITY_PATH: z.string().min(1).optional(),
+});
+
+/**
+ * Experiment mode is all-or-nothing: no variable set → null; some set but a
+ * required one missing or invalid → a startup error, never a half-enabled mode.
+ */
+export function loadExperimentConfig(env: NodeJS.ProcessEnv): ExperimentConfig | null {
+  const present = Object.keys(env).filter((key) => key.startsWith('DEVDIGEST_EXPERIMENT_') && env[key] !== '');
+  if (present.length === 0) return null;
+  const missing = EXPERIMENT_REQUIRED.filter((key) => !env[key]);
+  if (missing.length > 0) {
+    throw new Error(`Partial experiment configuration: missing ${missing.join(', ')}`);
+  }
+  const parsed = ExperimentEnv.safeParse(env);
+  if (!parsed.success) {
+    throw new Error(`Invalid experiment configuration: ${parsed.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; ')}`);
+  }
+  const e = parsed.data;
+  return {
+    stackId: e.DEVDIGEST_EXPERIMENT_STACK_ID,
+    provider: e.DEVDIGEST_EXPERIMENT_PROVIDER,
+    providerName: e.DEVDIGEST_EXPERIMENT_PROVIDER_NAME ?? null,
+    model: e.DEVDIGEST_EXPERIMENT_MODEL,
+    maxOutputTokens: e.DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS,
+    prices: {
+      input: e.DEVDIGEST_EXPERIMENT_PRICE_INPUT,
+      output: e.DEVDIGEST_EXPERIMENT_PRICE_OUTPUT,
+      request: e.DEVDIGEST_EXPERIMENT_PRICE_REQUEST,
+    },
+    generationLookup: e.DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP === '1' ? { attempts: 5, delayMs: 1_000 } : null,
+    capabilityPath:
+      e.DEVDIGEST_EXPERIMENT_CAPABILITY_PATH ??
+      join(homedir(), '.devdigest', 'hw2-experiments', e.DEVDIGEST_EXPERIMENT_STACK_ID, 'capability.json'),
+  };
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.parse(env);
   const cloneDirRaw =
     parsed.DEVDIGEST_CLONE_DIR ?? join(homedir(), '.devdigest', 'workspace');
   const cloneDir = isAbsolute(cloneDirRaw) ? cloneDirRaw : resolve(process.cwd(), cloneDirRaw);
+  const experiment = loadExperimentConfig(env);
   return {
     databaseUrl: parsed.DATABASE_URL,
     apiPort: parsed.API_PORT,
     webPort: parsed.WEB_PORT,
     cloneDir,
-    secretsPath: join(homedir(), '.devdigest', 'secrets.json'),
+    // An experiment stack reads only its dedicated key file (no env fallback, see
+    // container.ts), so it can never spend through the everyday key.
+    secretsPath: experiment
+      ? join(homedir(), '.devdigest', 'hw2-experiments', 'secrets.json')
+      : join(homedir(), '.devdigest', 'secrets.json'),
     nodeEnv: parsed.NODE_ENV,
     logLevel: parsed.LOG_LEVEL ?? (parsed.NODE_ENV === 'test' ? 'silent' : 'info'),
     webOrigin: `http://localhost:${parsed.WEB_PORT}`,
     embeddingsEnabled: parsed.EMBEDDINGS_ENABLED === 'true',
     repoIntelEnabled: parsed.REPO_INTEL_ENABLED !== 'false',
+    experiment,
   };
 }

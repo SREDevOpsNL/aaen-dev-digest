@@ -60,6 +60,30 @@ correction. Repo-intel remains server-scoped;
   `server/src/platform/run-logger.ts:94` (`RunLogger.logFor`),
   `server/test/run-lifecycle.it.test.ts`.
 
+- **2026-10-19** — `new MockGitClient()` returns a canned one-file diff
+  (`src/config.ts` with a fake `sk_live_` key) from `diff()`, so in a test
+  `loadDiff` takes it and never reaches the `pr_files` fallback: a test that
+  means to review a seeded PR's stored patches silently reviews that canned
+  diff instead. Pass `new MockGitClient({ diff: '' })` (no files → fallback)
+  when the stored patches are what is under test. Evidence:
+  `server/src/adapters/mocks.ts:284` (`MockGitClient.diff`),
+  `server/src/modules/reviews/diff-loader.ts` (`loadDiff`); every slot in
+  `server/test/experiments.it.test.ts` was refused for a diff-hash mismatch
+  until the test used the empty diff.
+
+- **2026-10-19** — Intent derivation resolves its own provider: the
+  `review_intent` feature model defaults to **openai**, while the seeded
+  reviewers use openrouter. A test that injects only an openrouter provider
+  and asserts "no provider call" around an intent path passes without the
+  intent call ever reaching `container.llm` (it stops at `skipped_no_key`). In
+  PR #22 the experiment-mode intent guard test was vacuous until it injected
+  an openai provider; a mutation that disabled the guard proved it. Inject the
+  provider the path actually resolves (`resolveFeatureModel`), and confirm a
+  "nothing was called" test with a mutation. Evidence:
+  `server/src/vendor/shared/contracts/platform.ts` (`FEATURE_MODELS`,
+  `review_intent.defaultProvider`), `server/src/modules/intent/service.ts`
+  (`runDerivation`), `server/test/experiments.it.test.ts` (intent refusal).
+
 ## Decisions
 
 ## Recurring Errors & Fixes

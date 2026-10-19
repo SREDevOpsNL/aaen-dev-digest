@@ -4,7 +4,7 @@ import type { Review } from '@devdigest/shared';
 import { buildApp } from '../src/app.js';
 import { MockGitClient, MockGitHubClient, MockLLMProvider } from '../src/adapters/mocks.js';
 import { seed } from '../src/db/seed.js';
-import { EXPERIMENT_FIXTURES } from '../src/db/seed-fixtures.js';
+import { EXPERIMENT_FIXTURES, SYNTHETIC_CONVENTIONS, SYNTHETIC_CONVENTION_LABEL } from '../src/db/seed-fixtures.js';
 import * as t from '../src/db/schema.js';
 import { loadConfig } from '../src/platform/config.js';
 import { createDb } from '../src/db/client.js';
@@ -145,12 +145,24 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
     expect(reviewsOnFixtures.every((review) => review.model !== 'seed')).toBe(true); // the seed adds no fixture reviews
   });
 
+  it('adds labelled synthetic convention candidates only when asked, once', async () => {
+    const [repo] = await db().select().from(t.repos).where(eq(t.repos.fullName, 'acme/payments-api'));
+    expect(await db().select().from(t.conventions).where(eq(t.conventions.repoId, repo!.id))).toEqual([]);
+    await seed(db(), { syntheticConventions: true });
+    await seed(db(), { syntheticConventions: true });
+    const candidates = await db().select().from(t.conventions).where(eq(t.conventions.repoId, repo!.id));
+    expect(candidates).toHaveLength(SYNTHETIC_CONVENTIONS.length);
+    expect(candidates.every((c) => c.status === 'pending' && c.rationale!.startsWith(SYNTHETIC_CONVENTION_LABEL))).toBe(true);
+    await db().delete(t.conventions).where(eq(t.conventions.repoId, repo!.id));
+  });
+
   it('refuses fixtures on a database named like the dev database, before any write', async () => {
     await pg.handle.sql.unsafe('create database devdigest');
     const devNamed = createDb(pg.url.replace(/\/devdigest_test(\?|$)/, '/devdigest$1'), { max: 1 });
     try {
       // No migrations ran there: a write would fail differently, so this proves the check comes first.
       await expect(seed(devNamed.db, { experimentFixtures: true })).rejects.toThrow(/"devdigest" is not a disposable database/);
+      await expect(seed(devNamed.db, { syntheticConventions: true })).rejects.toThrow(/"devdigest" is not a disposable database/);
       await expect(seed(devNamed.db)).rejects.toThrow(); // and the default seed, unguarded, would try to write
     } finally {
       await devNamed.close();

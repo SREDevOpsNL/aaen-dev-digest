@@ -174,8 +174,8 @@ export async function createAgentRun(
 export type RunCompletion = {
   status: 'done' | 'failed' | 'cancelled';
   durationMs: number;
-  tokensIn: number;
-  tokensOut: number;
+  tokensIn: number | null;
+  tokensOut: number | null;
   /** Authoritative provider-reported USD cost; null when unavailable. */
   costUsd: number | null;
   findingsCount: number;
