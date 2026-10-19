@@ -164,7 +164,11 @@ log "applying migrations (isolated db)"
 log "seeding demo data + HW2 experiment fixtures (isolated db)"
 # The fixtures (PRs #501/#502, flow 13) are opt-in, and the seed refuses unless
 # the database is demonstrably disposable.
-(cd server && DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 pnpm db:seed)
+# --serve also seeds the labelled synthetic convention candidates for the final
+# Conventions walkthrough; the flow run does not (flow 09 expects no candidates).
+SYNTHETIC=0
+[ "$SERVE" -eq 1 ] && SYNTHETIC=1
+(cd server && DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS="$SYNTHETIC" pnpm db:seed)
 
 # --- API on :$API_PORT -------------------------------------------------------
 # tsx directly (not `pnpm start`, which needs a build; not `tsx watch`, to avoid
