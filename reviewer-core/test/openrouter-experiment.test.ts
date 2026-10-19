@@ -9,6 +9,7 @@ import { reviewPullRequest, singlePassMessages } from '../src/review/run.js';
 const Result = z.object({ ok: z.boolean() });
 
 const experiment = (patch: Partial<StructuredExperimentOptions> = {}): StructuredExperimentOptions => ({
+  slotId: 'x-test-1',
   transportMaxRetries: 0,
   maxRetries: 0,
   routing: { order: ['deepinfra'], only: ['deepinfra'], allowFallbacks: false },
@@ -169,6 +170,7 @@ describe('OpenRouter experiment mode', () => {
     ['transport retries', experiment({ transportMaxRetries: 1 as unknown as 0 })],
     ['structured retries', experiment({ maxRetries: 2 as unknown as 0 })],
     ['no output bound', experiment({ maxTokens: 0 })],
+    ['no slot id', experiment({ slotId: '' })],
   ])('refuses before dispatch when %s', async (_label, options) => {
     const { provider, create, attempts, request } = setup([completion('{"ok":true}')]);
     await expect(provider.completeStructured(request({ experiment: options }))).rejects.toThrow(/refused before dispatch/);

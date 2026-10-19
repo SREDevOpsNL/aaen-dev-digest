@@ -70,8 +70,9 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(sort(value));
 }
 
-export function experimentOptions(config: ExperimentConfig): StructuredExperimentOptions {
+export function experimentOptions(config: ExperimentConfig, slotId: string): StructuredExperimentOptions {
   return {
+    slotId,
     transportMaxRetries: 0,
     maxRetries: 0,
     routing: { order: [config.provider], only: [config.provider], allowFallbacks: false },

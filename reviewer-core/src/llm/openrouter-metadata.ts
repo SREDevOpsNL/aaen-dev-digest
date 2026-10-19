@@ -106,6 +106,7 @@ export function parseEndpoints(body: unknown): OpenRouterEndpointInfo[] {
  * `order` and `only`, fallbacks off, a positive output bound, metadata on.
  */
 export function experimentOptionsProblem(options: StructuredExperimentOptions): string | null {
+  if (typeof options.slotId !== 'string' || options.slotId.length === 0) return 'an experiment slot id is required';
   if (options.transportMaxRetries !== 0) return 'transport retries must be 0';
   if (options.maxRetries !== 0) return 'structured-output retries must be 0';
   const { order, only, allowFallbacks } = options.routing;

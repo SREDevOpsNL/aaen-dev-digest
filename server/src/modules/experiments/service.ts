@@ -24,8 +24,6 @@ const FIXTURE_REPO = { owner: 'acme', name: 'payments-api', fullName: 'acme/paym
 const FIXTURE_PULLS = [501, 502];
 const FORBIDDEN_PULL = 3;
 
-/** One in-flight experiment run per process; the runner also holds a ledger lock. */
-const inFlight = new WeakMap<Container, string>();
 
 export interface ExperimentIdentity {
   stack_id: string;
@@ -89,7 +87,7 @@ export class ExperimentsService {
       max_output_tokens: config.maxOutputTokens,
       prices: config.prices,
       generation_lookup: config.generationLookup,
-      in_flight_slot: inFlight.get(this.container) ?? null,
+      in_flight_slot: this.container.experimentSpendGate.current,
       secrets_path: this.container.config.secretsPath,
       openrouter_key_configured: Boolean(await this.container.secrets.get('OPENROUTER_API_KEY')),
     };
@@ -124,9 +122,9 @@ export class ExperimentsService {
     const pulls = await this.repo.pullNumbers(workspaceId, FIXTURE_REPO.fullName);
     if (pulls.includes(FORBIDDEN_PULL)) throw new ValidationError('Demo PR #3 is present; this is not an experiment stack');
 
-    const busy = inFlight.get(this.container);
-    if (busy) throw new ConflictError(`Experiment slot ${busy} is still in flight`);
-    inFlight.set(this.container, input.slot_id);
+    // One slot at a time: opening the spend gate is also the in-flight check.
+    const gate = this.container.experimentSpendGate;
+    if (!gate.tryOpen(input.slot_id)) throw new ConflictError(`Experiment slot ${gate.current} is still in flight`);
     let handedOff = false;
     try {
       if ((await this.repo.runsForSlot(workspaceId, input.slot_id)).length > 0) {
@@ -155,13 +153,13 @@ export class ExperimentsService {
           reservation_usd: input.reservation_usd,
           expected_diff_sha256: input.expected_diff_sha256,
         },
-        onSettled: () => inFlight.delete(this.container),
+        onSettled: () => gate.close(input.slot_id),
       });
       handedOff = true;
       return { run_id: runs[0]!.run_id, slot_id: input.slot_id };
     } finally {
       // Until the executor owns the run, a failure here must release the gate.
-      if (!handedOff) inFlight.delete(this.container);
+      if (!handedOff) gate.close(input.slot_id);
     }
   }
 

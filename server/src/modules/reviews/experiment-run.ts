@@ -113,7 +113,7 @@ export async function prepareExperimentSlot(args: {
   }
   if (!canListEndpoints(llm)) refuse('the provider cannot report endpoint prices and limits');
 
-  const options = experimentOptions(config);
+  const options = experimentOptions(config, request.slot_id);
   const fingerprints = requestFingerprints(args.promptInput, config.model, options, args.sessionId);
   block.non_skill_fingerprint = fingerprints.nonSkill;
   block.skill_fingerprint = fingerprints.skill;

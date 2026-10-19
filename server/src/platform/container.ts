@@ -12,6 +12,7 @@ import type { Db } from '../db/client.js';
 import { JobRunner } from './jobs.js';
 import { runBus, type RunBus } from './sse.js';
 import { LocalSecretsProvider } from '../adapters/secrets/local.js';
+import { ExperimentGuardedProvider, ExperimentSpendGate } from './experiment-spend-gate.js';
 import { LocalNoAuthProvider } from '../adapters/auth/local.js';
 import { OctokitGitHubClient } from '../adapters/github/octokit.js';
 import { SimpleGitClient } from '../adapters/git/simple-git.js';
@@ -167,15 +168,21 @@ export class Container {
     return this._github;
   }
 
-  /** Resolve an LLM provider by id; constructs from the secret key, cached. */
+  /** HW2 experiment mode: the one door to paid generation (see experiment-spend-gate.ts). */
+  readonly experimentSpendGate = new ExperimentSpendGate();
+
+  /**
+   * Resolve an LLM provider by id; constructs from the secret key, cached. In
+   * experiment mode every provider (built or injected) is wrapped so that only
+   * the authorized experiment slot can generate; free metadata still passes.
+   */
   async llm(id: 'openai' | 'anthropic' | 'openrouter'): Promise<LLMProvider> {
-    const injected = this.overrides.llm?.[id];
-    if (injected) return injected;
     const cached = this.llmCache.get(id);
     if (cached) return cached;
-    const provider = await this.buildLlm(id);
-    this.llmCache.set(id, provider);
-    return provider;
+    const provider = this.overrides.llm?.[id] ?? (await this.buildLlm(id));
+    const resolved = this.config.experiment ? new ExperimentGuardedProvider(provider, this.experimentSpendGate) : provider;
+    this.llmCache.set(id, resolved);
+    return resolved;
   }
 
   private async buildLlm(id: 'openai' | 'anthropic' | 'openrouter'): Promise<LLMProvider> {

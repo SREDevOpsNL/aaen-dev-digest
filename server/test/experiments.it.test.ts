@@ -206,12 +206,14 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
   }
   const modelCalls = () => llm.requests.length;
 
-  it('is invisible without an experiment configuration', async () => {
+  it('is invisible without an experiment configuration, where providers are not wrapped', async () => {
+    const plainLlm = new FakeExperimentProvider();
     const plain = await buildApp({
       config: loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv),
       db: pg.handle.db,
-      overrides: { git: new MockGitClient(), github: new MockGitHubClient() },
+      overrides: { git: new MockGitClient(), github: new MockGitHubClient(), llm: { openrouter: plainLlm } },
     });
+    expect(await plain.container.llm('openrouter')).toBe(plainLlm); // normal mode: unchanged
     expect((await plain.inject({ url: '/experiments/identity' })).statusCode).toBe(404);
     expect((await plain.inject({ method: 'POST', url: '/experiments/runs', payload: { nonsense: true } })).statusCode).toBe(404);
     await plain.close();
@@ -236,6 +238,32 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
 
   it('rejects a partial experiment configuration at startup', () => {
     expect(() => loadConfig({ NODE_ENV: 'test', DEVDIGEST_EXPERIMENT_STACK_ID: 'hw2f-abcd' } as NodeJS.ProcessEnv)).toThrow(/Partial experiment configuration/);
+  });
+
+  it('refuses an ordinary review in experiment mode without reaching the provider', async () => {
+    const before = modelCalls();
+    const response = await app.inject({ method: 'POST', url: `/pulls/${pr502}/review`, payload: { agentId: apiAgent } });
+    expect(response.statusCode).toBe(200);
+    const runId = response.json().runs[0].run_id as string;
+    const run = await vi.waitFor(
+      async () => {
+        const [row] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, runId));
+        if (!row || row.status === 'running') throw new Error('not settled');
+        return row;
+      },
+      { timeout: 15_000, interval: 100 },
+    );
+    expect(run.status).toBe('failed');
+    expect(run.error).toMatch(/Refused in experiment mode: an ordinary structured call/);
+    expect(modelCalls()).toBe(before);
+  });
+
+  it('refuses intent derivation in experiment mode without reaching the provider', async () => {
+    const before = modelCalls();
+    await app.inject({ method: 'POST', url: `/pulls/${pr501}/intent/recompute` });
+    expect(modelCalls()).toBe(before); // the derivation never reached the provider
+    // The seeded cached intent is still the one the experiment slots use.
+    expect((await app.inject({ url: `/pulls/${pr501}/intent` })).json()).toMatchObject({ state: 'ready', stale: false, provider: 'seed' });
   });
 
   it('reports the stack identity: disposable database, fixtures present, no PR #3, no fixture clone', async () => {
@@ -268,12 +296,14 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
 
   it('runs one slot: one request with the frozen routing, preflight, fingerprints and telemetry on record', async () => {
     const before = modelCalls();
-    const response = await start();
+    const slotId = nextSlot();
+    const response = await start({ slot_id: slotId });
     expect(response.statusCode).toBe(202);
     const { run, trace } = await settledTrace(response.json().run_id);
     expect(modelCalls() - before).toBe(1);
     const sent = llm.requests.at(-1)!;
     expect(sent.experiment).toEqual({
+      slotId,
       transportMaxRetries: 0,
       maxRetries: 0,
       routing: { order: ['deepinfra'], only: ['deepinfra'], allowFallbacks: false },

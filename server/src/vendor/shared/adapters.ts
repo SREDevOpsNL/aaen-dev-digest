@@ -106,6 +106,8 @@ export interface ExperimentRouting {
 }
 
 export interface StructuredExperimentOptions {
+  /** The authorized experiment slot this request belongs to (one generation per slot). */
+  slotId: string;
   /** Must be 0: the OpenAI SDK may not retry a request on its own. */
   transportMaxRetries: 0;
   /** Must be 0: a schema-invalid answer is the slot's outcome, never reprompted. */
