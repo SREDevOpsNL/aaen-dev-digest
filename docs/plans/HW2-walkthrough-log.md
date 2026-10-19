@@ -81,8 +81,8 @@ only when its checklist step ran and succeeded. Screenshots are in
 | 10 | **Verified** | A pointer click on a card's footer opens a right-hand drawer (`aria-modal` dialog) with the rendered body and Open details; the URL stays `/skills` (`skill-preview-drawer.png`) |
 | 11 | **Verified** | Add skill shows "Create skill — Write a new skill" and "Import skill — From a Markdown file"; Create opens a dialog (`add-skill-menu.png`, `create-skill-modal.png`) |
 | 12 | **Verified** | The modal has Name, Description, Type and "Skill body (Markdown)". Created `hw2-walkthrough-skill` with a heading, bold text and a list (`create-skill-filled.png`) |
-| 13 | **Pending: your physical drag** | Link and unlink with the toggle passed: General Reviewer 0/4 → 1/4 (SQL 1 row), survived a reload → 0/4 (SQL 0). The drag is below |
-| 14 | **Pending: your physical drag** | Option A test evidence passed (see above). SQL order before the drag: Behavioral Coverage 0, Assertion Quality 1, Edge Cases and Error Paths 2, Test Isolation and Determinism 3 |
+| 13 | **Verified** | Link and unlink with the toggle passed: General Reviewer 0/4 → 1/4 (SQL 1 row), survived a reload → 0/4 (SQL 0). Physical drag by the user on 2026-10-20, about 00:21–00:24 local (22:21–22:23 UTC). The save history (`agent_versions` of the Test Quality Reviewer) records every change: v2 = the reported drag, Assertion Quality above Behavioral Coverage; v3–v5 further reorders, ending with Edge Cases and Error Paths on top; v6–v9 Test Isolation unlinked and relinked twice with its switch. Final order in SQL: Edge Cases and Error Paths 0, Assertion Quality 1, Behavioral Coverage 2, Test Isolation and Determinism 3. After a reload the page shows the same order (`tq-skills-after-drag.png`). The user confirmed the later saves were theirs. Every drag was saved and survived the reload |
+| 14 | **Verified** (Option A, approved) | Before the drag: Behavioral Coverage 0, Assertion Quality 1, Edge Cases and Error Paths 2, Test Isolation and Determinism 3. After the physical drags (row 13), `agent_skills.order` = Edge Cases and Error Paths 0, Assertion Quality 1, Behavioral Coverage 2, Test Isolation and Determinism 3, matching the page after a reload. Prompt order follows `agent_skills.order`: `skills-prompt.it.test.ts` ("follows a reorder …") passed |
 | 15 | **Verified** | Imported `docs/skills/api-contract/deprecation-policy.md`. Before saving, the drawer showed the body (1,750 characters) and the name `deprecation-policy` taken from the heading (`import-preview.png`) |
 | 16 | **Verified** | Mandatory setup done. SQL: `deprecation-policy` is `imported_file`; the API Contract Reviewer has 4 rows in order (breaking-change 0, response-schema 1, semver-discipline 2, deprecation-policy 3); 4 / 4 attached after a reload; Imported badge on the grid (`api-contract-4of4.png`, `skills-grid-imported.png`) |
 | 21 | **Verified** | The headless `/pr-self-review` run on a mixed diff, from PR #16, is recorded in the matrix. Re-checked without an LLM: `route-diff.mjs` on a throwaway client + server diff routed `client/src/app/skills/page.tsx` to frontend-ui-architecture, react-best-practices, typescript-expert and next-best-practices, and `server/src/modules/skills/routes.ts` to onion-architecture, typescript-expert, fastify-best-practices and zod. No active Git hooks, `core.hooksPath` unset, no `.husky`. CI runs only the router's unit tests |
@@ -95,7 +95,7 @@ only when its checklist step ran and succeeded. Screenshots are in
 | 28 | **Verified** | Diff on v1 shows "Changes from v1 to the current v3" with −/+ lines for the changed sentence and list item (`version-diff.png`) |
 | 29 | **Verified** | Restore v1 → confirmation "Restore v1? … becomes a new version, v4" → v4. After a reload the list is v4…v1. SQL: versions 1–4 are kept and v4's body equals v1's (`restore-confirm.png`, `after-restore.png`) |
 | 30 | **Verified** | Typing "schema" in "Filter skills…" leaves only response-schema; clearing it with the keyboard restores all rows (`agent-skills-filter.png`) |
-| 31 | **Pending: your physical drag** | `Test Isolation and Determinism` was disabled globally for this check. DOM: `draggable="true"` only on the three linked, enabled rows; `"false"` on the disabled one and on unlinked rows |
+| 31 | **Verified** | `Test Isolation and Determinism` was disabled globally for this check. DOM: `draggable="true"` only on the three linked, enabled rows; `"false"` on the disabled one and on unlinked rows. The user's physical attempt to drag it did not move it. In all 9 saved versions it is last or unlinked, never moved by a drag. It was re-enabled afterwards (SQL `enabled = t`) |
 | 32 | **FAIL** | The cards show name, description, model and toggle, but **no linked-skill count** (`agents.png`). `AgentCard` renders the count only when given a `skillCount` prop, and neither call site passes it (`AgentsListView.tsx`, `agents/[id]/page.tsx`). `GET /agents` has no skill-count field. The unit test passes the prop itself, which is why the static audit missed this |
 | 33 | **Verified** | A throwaway agent created through `POST /agents` was deleted from its card → Confirm. SQL: 0 rows (`delete-agent-confirm.png`) |
 | 34 | **Verified** | Flow 11 (Cancel, X). Confirm: "Delete agent “…”? This cannot be undone." → deleted |
@@ -126,14 +126,17 @@ rows 19 and 20 (the Gate 4 trace).
 
 | Result | Rows |
 | --- | --- |
-| Verified | 44: 1–12, 15, 16, 21–30, 33–35, 37–53 |
-| Pending, your physical drag | 3: 13, 14, 31 |
+| Verified | 47: 1–16, 21–31, 33–35, 37–53 |
 | Fail | 1: 32 (no linked-skill count on agent cards) |
 | Partial | 1: 36 (model list needs a key) |
 | Not in this walkthrough | 4: 17–20 |
 
 ## Observations
 
+- **Rows 13, 14 and 31:** the drags were done by a person with a real mouse.
+  The user keeps their own before and after screenshots;
+  `tq-skills-before-drag.png` and `tq-skills-after-drag.png` here were taken by
+  agent-browser, read-only.
 - **Row 25:** besides Config, Preview, Versioning and the optional Stats, the
   skill page has an **Evals** tab. The criterion does not forbid extra tabs.
   This is noted in case a grader reads it strictly.
@@ -155,5 +158,8 @@ the stack stops.
   Reviewer (4 / 4).
 - `repo-conventions` was created and linked to the General Reviewer.
 - Convention statuses changed, and the naming rule was edited.
-- `Test Isolation and Determinism` was disabled for the row 31 check.
+- `Test Isolation and Determinism` was disabled for the row 31 check and
+  re-enabled after it.
+- The Test Quality Reviewer's order was changed by the physical drags (rows
+  13 and 14).
 - The throwaway skill and agent were deleted.
