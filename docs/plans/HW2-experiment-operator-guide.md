@@ -245,11 +245,88 @@ Why one E:
 
 ### Gate 3: exploration on stack X (≤ USD 0.50)
 
-1. Start X (§2) and, in the runner terminal, set the §3 variables for X and
-   run its checks.
-2. Only after Gate 3 is explicitly authorized, create the exploration
-   capability ([Authorizing a paid phase](#authorizing-a-paid-phase-server-side-capability)).
-3. Set the reservation for one exploration slot, validate it, then run:
+The schedule, the cost figures from real free previews, and the stop rules are
+in the [Gate 3 plan](HW2-gate3-plan.md).
+
+1. **Start X** (§2). Set `DEVDIGEST_EXPERIMENT_PROVIDER` to the provider's
+   routing slug as OpenRouter writes it, `provider[/variant][/region][/tier]`.
+   Copy it from the provider's copy button on the model page.
+   - A full slug such as `deepinfra/fp8` names one endpoint.
+   - A base slug such as `deepinfra` matches **every** endpoint of that
+     provider, including ones added later.
+
+   In the runner terminal, set the §3 variables for X and run its checks.
+2. **Phase 0, free: the provider's endpoint.** It must exist for the slug (one
+   endpoint for a full slug), advertise `structured_outputs` (the request
+   requires every parameter it sends, see
+   [One request](#one-request)) and be up. This reads OpenRouter's public
+   model metadata; no key is sent.
+
+```bash
+SLUG=deepinfra/fp8   # EXAMPLE: the routing slug X was started with
+```
+
+```bash
+python3 -I - "$SLUG" <<'EOF'
+import json, sys, urllib.request
+slug = sys.argv[1]
+request = urllib.request.Request("https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-flash/endpoints", headers={"User-Agent": "devdigest-hw2-phase0"})
+endpoints = json.load(urllib.request.urlopen(request, timeout=30))["data"]["endpoints"]
+base = slug.split("/")[0]
+matching = [e for e in endpoints if e.get("tag") == slug or (slug == base and (e.get("tag") or "").split("/")[0] == base)]
+problems = []
+if not matching:
+    problems.append(f"no endpoint matches {slug}")
+if slug != base and len(matching) != 1:
+    problems.append(f"{len(matching)} endpoints match the full slug {slug}")
+for e in matching:
+    if "structured_outputs" not in (e.get("supported_parameters") or []):
+        problems.append(f"{e.get('tag')} does not advertise structured_outputs")
+    if e.get("status") != 0:
+        problems.append(f"{e.get('tag')} status is {e.get('status')}")
+    print(f"{e.get('tag')}: max completion {e.get('max_completion_tokens')}, context {e.get('context_length')}, uptime 30m {e.get('uptime_last_30m')}")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print(f"{slug}: endpoint ready")
+EOF
+```
+
+3. **Phase 0, free: condition-faithful previews.** The preview API builds the
+   prompt from the reviewer's **current** links, and its `condition` is only a
+   label. The runner's `preview` command therefore does the following, and
+   returns nonzero on any mismatch:
+   - links exactly what a slot of that condition links (the target skill, or
+     none);
+   - checks the links and the Skill fingerprint;
+   - prints the input bound and the worst case;
+   - always restores the original links.
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 18 --condition with --reservation 0.02
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 18 --condition without --reservation 0.02
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 17 --condition with --reservation 0.02
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 17 --condition without --reservation 0.02
+```
+
+   Choose the per-slot reservation as the smallest round value of at least
+   1.2 × the largest `worst_case_usd` printed, and at most USD 0.05.
+4. **Authorize.** Only after Gate 3 is explicitly authorized, create the
+   exploration capability
+   ([Authorizing a paid phase](#authorizing-a-paid-phase-server-side-capability)).
+   The [Gate 3 plan](HW2-gate3-plan.md) proposes `--budget 0.15`, below the
+   0.50 cap.
+5. **Run.** Set the reservation for one exploration slot, validate it, then run
+   one slot per invocation, and judge each from the ledger and the trace, never
+   from the exit code ([Gate 3 plan](HW2-gate3-plan.md)):
 
 ```bash
 X_RESERVATION=0.05   # EXAMPLE: USD reserved for this exploration slot
@@ -283,7 +360,7 @@ Exploration confirms what the implementation must not assume:
 
 Fixtures and settings may be refined only here.
 
-4. Preserve the exploration evidence before stopping X. Follow
+6. Preserve the exploration evidence before stopping X. Follow
    [Export the evidence before teardown](#export-the-evidence-before-teardown-gate-4)
    with these changes:
    - skip steps 2 and 5 (the report and the screenshots belong to Gate 4);
@@ -689,6 +766,9 @@ preview, are free metadata and still work. Normal mode is unaffected.
 The request carries:
 - SDK retries 0 and no reprompt;
 - `provider.order` = `provider.only` = [slug], with `allow_fallbacks: false`;
+- `provider.require_parameters: true`: OpenRouter never routes it to an
+  endpoint that would ignore one of its parameters, above all the strict
+  `json_schema` response format;
 - `max_tokens` = the cap;
 - `X-OpenRouter-Metadata: enabled`.
 

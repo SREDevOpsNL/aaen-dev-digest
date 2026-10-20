@@ -155,6 +155,116 @@ async function previewFingerprints(stack: Stack, reservationUsd: number): Promis
   return out;
 }
 
+/** The Skill fingerprint of a prompt with no Skills (`requestFingerprints` hashes the empty list). */
+export const EMPTY_SKILL_FINGERPRINT = sha256(canonicalJson([]));
+
+export interface ConditionPreview {
+  ok: boolean;
+  problems: string[];
+  experiment: string;
+  condition: 'with' | 'without';
+  reviewer: string;
+  linked_skills: string[];
+  refusal_reason: string | null;
+  input_upper_bound: number | null;
+  output_cap: number | null;
+  price_input_per_token: number | null;
+  price_output_per_token: number | null;
+  price_source: string | null;
+  worst_case_usd: number | null;
+  reservation_usd: number;
+  non_skill_fingerprint: string | null;
+  skill_fingerprint: string | null;
+}
+
+/**
+ * A free preview that reflects its condition: the preview API builds the
+ * prompt from the reviewer's current links (its `condition` is only a label),
+ * so this links exactly what a slot of that condition links (the target skill,
+ * or none, as in `slotRuns`), previews, checks that the links and the Skill
+ * fingerprint match the condition, and always restores the original links.
+ */
+export async function conditionPreview(
+  api: ExperimentApi,
+  args: { experiment: string; condition: string; reservationUsd: number; phase?: Phase },
+): Promise<ConditionPreview> {
+  if (args.condition !== 'with' && args.condition !== 'without') throw new Error('--condition must be with or without');
+  if (!(args.experiment in EXPERIMENT_FIXTURE)) throw new Error(`--experiment must be one of ${Object.keys(EXPERIMENT_FIXTURE).join(', ')}`);
+  const condition = args.condition;
+  const fixture = fixtureFor(args.experiment);
+  const { prId, agents, skills } = await lookupIds(api);
+  const agent = agents.find((a) => a.name === fixture.reviewer);
+  const target = skills.find((s) => s.name === fixture.targetSkill);
+  const pr = prId(fixture.number);
+  if (!agent || !target || !pr) throw new Error(`Experiment ${args.experiment}: reviewer, target skill or PR missing`);
+  const intended = condition === 'with' ? [target.id] : [];
+  const linksOf = async () => (await api.get<Array<{ skill_id: string }>>(`/agents/${agent.id}/skills`)).map((l) => l.skill_id);
+  const nameOf = (id: string) => skills.find((s) => s.id === id)?.name ?? id;
+
+  const original = await linksOf();
+  try {
+    await api.post(`/agents/${agent.id}/skills`, { skill_ids: intended });
+    const linked = await linksOf();
+    const preview = await api.post<{
+      ok: boolean;
+      reason: string | null;
+      block: {
+        non_skill_fingerprint: string | null;
+        skill_fingerprint: string | null;
+        preflight: {
+          input_upper_bound: number;
+          output_cap: number;
+          price_input_per_token: number;
+          price_output_per_token: number;
+          price_source: string;
+          worst_case_usd: number;
+        } | null;
+      };
+    }>('/experiments/preview', {
+      pr_id: pr,
+      agent_id: agent.id,
+      experiment: args.experiment,
+      condition,
+      phase: args.phase ?? 'exploration',
+      reservation_usd: args.reservationUsd,
+      expected_diff_sha256: await fixtureDiffSha(fixture),
+    });
+    const skillFingerprint = preview.block.skill_fingerprint;
+    const problems: string[] = [];
+    if (!preview.ok) problems.push(`the preview was refused: ${preview.reason}`);
+    if (linked.join(',') !== intended.join(',')) {
+      problems.push(`linked skills are [${linked.map(nameOf).join(', ')}], expected [${intended.map(nameOf).join(', ')}]`);
+    }
+    if (condition === 'without' && skillFingerprint !== EMPTY_SKILL_FINGERPRINT) problems.push('a without preview carried a Skill');
+    if (condition === 'with' && (!skillFingerprint || skillFingerprint === EMPTY_SKILL_FINGERPRINT)) problems.push('a with preview carried no Skill');
+    const flight = preview.block.preflight;
+    return {
+      ok: problems.length === 0,
+      problems,
+      experiment: args.experiment,
+      condition,
+      reviewer: fixture.reviewer,
+      linked_skills: linked.map(nameOf),
+      refusal_reason: preview.reason,
+      input_upper_bound: flight?.input_upper_bound ?? null,
+      output_cap: flight?.output_cap ?? null,
+      price_input_per_token: flight?.price_input_per_token ?? null,
+      price_output_per_token: flight?.price_output_per_token ?? null,
+      price_source: flight?.price_source ?? null,
+      worst_case_usd: flight?.worst_case_usd ?? null,
+      reservation_usd: args.reservationUsd,
+      non_skill_fingerprint: preview.block.non_skill_fingerprint,
+      skill_fingerprint: skillFingerprint,
+    };
+  } finally {
+    await api.post(`/agents/${agent.id}/skills`, { skill_ids: original });
+    const restored = await linksOf();
+    if (restored.join(',') !== original.join(',')) {
+      throw new Error(`Could not restore ${fixture.reviewer}'s links: now [${restored.map(nameOf).join(', ')}]`);
+    }
+  }
+}
+
 async function currentManifest(flags: Flags, stack: Stack, root: string): Promise<Manifest> {
   const { agents, skills } = await lookupIds(stack.api);
   const seed = Number(need(flags, 'seed'));
@@ -212,6 +322,18 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
   switch (command) {
     case 'endpoints': {
       log(JSON.stringify(await new ExperimentApi(need(flags, 'api')).get('/experiments/endpoints'), null, 2));
+      return;
+    }
+    case 'preview': {
+      const stack = await verifiedStack(flags);
+      const result = await conditionPreview(stack.api, {
+        experiment: need(flags, 'experiment'),
+        condition: need(flags, 'condition'),
+        reservationUsd: Number(need(flags, 'reservation')),
+        ...(flags.phase === 'confirmatory' ? { phase: 'confirmatory' as const } : {}),
+      });
+      log(JSON.stringify(result, null, 2));
+      if (!result.ok) throw new Error(`Preview does not reflect its condition or was refused: ${result.problems.join('; ')}`);
       return;
     }
     case 'check': {
@@ -381,7 +503,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       return;
     }
     default:
-      log('commands: endpoints | check | plan | manifest | authorize | reconcile | run | report (see docs/plans/HW2-experiment-operator-guide.md)');
+      log('commands: endpoints | check | preview | plan | manifest | authorize | reconcile | run | report (see docs/plans/HW2-experiment-operator-guide.md)');
   }
 }
 
