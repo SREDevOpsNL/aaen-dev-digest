@@ -30,6 +30,11 @@ The seed has no completed agent run, so flow `07a` stubs, in its own page only, 
 two read-only GETs behind the Timeline (`/pulls/:id/runs`, `/pulls/:id/reviews`);
 its `description` says why and how.
 
+## Written specs
+
+- [`written/01-pr-findings-ui.md`](written/01-pr-findings-ui.md) — shipped:
+  the PR findings journey proved by `04-pr-findings.flow.json`.
+
 ## Adding a written spec
 
 A prose spec goes in `written/NN-journey-name.md` and names the flow file that
