@@ -10,14 +10,16 @@ shown is in [prompt-assembly.md](prompt-assembly.md).
 
 [`src/review/run.ts`](../src/review/run.ts) exports one entry point:
 
-- **Input:** `ReviewInput` (`run.ts:44`):
+- **Input:** `ReviewInput` (`run.ts:49`):
   - the agent's system prompt and model;
   - a **parsed** `UnifiedDiff` and an **injected** `LLMProvider`;
   - optionally: a strategy, resolved skill, memory, and spec strings, a callers
-    digest, a repo map, the PR description, a task line, retry and threshold
-    overrides, an OpenRouter `sessionId`, an `onEvent` sink, and a
-    `checkCancelled` hook.
-- **Output:** `ReviewOutcome` (`run.ts:95`):
+    digest, a repo map, the PR description, a validated PR **intent** (L03), a
+    task line, retry and threshold overrides, an OpenRouter `sessionId`, an
+    `onEvent` sink, and a (possibly async) `checkCancelled` hook;
+  - for the opt-in HW2 experiment runner only: `experiment` options and an
+    `onAttempt` telemetry sink.
+- **Output:** `ReviewOutcome` (`run.ts:115`):
   - the grounded `Review` and a grounding summary like "3/4 passed";
   - the dropped findings with reasons;
   - the mode that ran, the prompt assembly, and the chunk labels;
@@ -31,7 +33,7 @@ see [server review runs](../../server/docs/review-runs.md).
 
 ## Steps
 
-1. **Choose the mode** (`selectMode`, `run.ts:118`):
+1. **Choose the mode** (`selectMode`, `run.ts:138`):
    - `single-pass` always sends one call.
    - `map-reduce` sends one call per file, but only when the diff touches more
      than one file.
@@ -44,8 +46,8 @@ see [server review runs](../../server/docs/review-runs.md).
 2. **Assemble the prompt** once per chunk (`assemblePrompt`; see
    [prompt assembly](prompt-assembly.md)). The trace keeps the whole-diff
    assembly for map-reduce, or the one call's assembly for single-pass.
-3. **Per chunk** (`run.ts:166`):
-   1. Call `checkCancelled()` first, so a cancel stops before the next paid
+3. **Per chunk** (`run.ts:213`):
+   1. Await `checkCancelled()` first, so a cancel stops before the next paid
       call.
    2. Call `llm.completeStructured<Review>` with the `Review` Zod schema and up
       to 2 repair retries (`DEFAULT_REVIEW_MAX_RETRIES`).
@@ -92,11 +94,27 @@ and Anthropic providers live in the server's adapters.
 
   | Field | Meaning |
   | --- | --- |
-  | `providerCostUsd` | The sum of OpenRouter's `usage.cost` over every attempt, but **only if every attempt reported one**; otherwise `null`. `run.ts:188` applies the same all-or-nothing rule across map-reduce chunks. |
+  | `providerCostUsd` | The sum of OpenRouter's `usage.cost` over every attempt, but **only if every attempt reported one**; otherwise `null`. It is authoritative only when the provider id is `openrouter`. `run.ts:237` applies the same all-or-nothing rule across map-reduce chunks. |
   | `costUsd` | The best available number: the provider cost if any attempt reported one, else the injected `estimateCost` from token prices, else `null`. Kept for estimate consumers only. |
 
 - **What gets persisted:** the studio stores only `providerCostUsd`. See
   [`../specs/01-provider-cost.md`](../specs/01-provider-cost.md).
+- **Aborting:** a request may carry an `AbortSignal`. The provider checks it
+  before each attempt and maps an abort to a cancellation rather than a
+  provider failure.
+
+## PR intent (L03)
+
+`src/intent/` holds the pure half of the intent layer:
+
+- `deriveIntent` (`intent/derive.ts`) makes the classifier call.
+- `validateIntent` (`intent/validate.ts`) checks citations and output limits.
+- `renderIntentForReview` (`intent/prompt.ts`) turns a validated intent into
+  the untrusted review section.
+
+The studio caches the result and gives one intent to every agent of a batch
+(see [server review runs](../../server/docs/review-runs.md)). How the intent
+enters the review prompt is in [prompt assembly](prompt-assembly.md).
 
 ## CI payload (scaffolded)
 
@@ -116,5 +134,11 @@ and Anthropic providers live in the server's adapters.
 - `test/run.test.ts`: single-pass grounding, the deterministic score, the
   cancel checkpoint, `sessionId` forwarding, and map-reduce cost aggregation.
 - `test/openrouter-cost.test.ts`: the cost fields above.
-- `test/prompt.test.ts`: the injection guard and the PR-description section.
+- `test/openrouter-abort.test.ts`: request timeouts and cancellation.
+- `test/openrouter-experiment.test.ts`: the experiment request body and
+  telemetry.
+- `test/intent.test.ts`: intent evidence, validation, derivation, and the
+  intent section in `assemblePrompt`.
+- `test/prompt.test.ts`: the injection guard, the PR-description section, and
+  the linked-skills trust boundary.
 - `test/to-review.test.ts`: the CI gate and inline anchoring.

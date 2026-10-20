@@ -47,13 +47,24 @@ can run beside a dev stack:
 | Step | Detail |
 | --- | --- |
 | Ports | Postgres `:5433`, API `:3101`, web `:3100`; override with `E2E_PG_PORT`, `E2E_API_PORT`, `E2E_WEB_PORT`. |
-| Postgres | `docker run --rm` of `pgvector/pgvector:pg16` with **no volume**, so it is empty on every run (`e2e.sh:87`); waits up to 60s for health. |
+| Postgres | `docker run --rm` of `pgvector/pgvector:pg16` with **no volume**, so it is empty on every run (`e2e.sh:124`); waits up to 60s for health. The database is `devdigest_e2e`, and the container is `devdigest-e2e-postgres` (override with `E2E_PG_CONTAINER`). Because that default name is fixed, never run two default suites at once. |
 | Dependencies | `pnpm install` in `server/` and `client/` only if `node_modules` is missing; `npm ci` in `reviewer-core/`, whose source the API imports. |
-| Data | `db:migrate` and `db:seed`, guarded to refuse any `DATABASE_URL` not on the isolated port (`e2e.sh:123`). |
+| Data | `db:migrate` and `db:seed` with `DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1`, guarded to refuse any `DATABASE_URL` not on the isolated port (`e2e.sh:160`). See [seed and flows](seed-and-flows.md). |
 | API | `pnpm exec tsx src/server.ts`: no watcher, so nothing restarts mid-suite. |
 | Web | `pnpm exec next dev -p 3100`, with `NEXT_PUBLIC_API_BASE` pointing at `:3101`. |
 | Run | `cd e2e && npm test` against `http://localhost:3100`. |
 | Teardown | On exit, error, or Ctrl-C, `kill_tree` walks each server's process tree leaves-first (the real listener is a grandchild of `pnpm`), then reaps anything still listening on the alternate ports and removes the container. |
+
+**`--serve` mode.** `scripts/e2e.sh --serve` starts a stack for the HW2
+experiment runner instead of running the flows:
+
+- a fresh stack id, with a database and container named after a random nonce;
+- Docker labels, an empty per-stack clone directory, and synthetic
+  conventions;
+- the server in experiment mode.
+
+It blocks until Ctrl-C. The operator guide is
+`docs/plans/HW2-experiment-operator-guide.md`.
 
 **Shared `.next/`.** The web server runs `next dev` inside the checkout's own
 `client/`. If a dev server is already running from the **same** checkout, both
@@ -66,7 +77,9 @@ It runs on pushes to `main` and on PRs that touch `client/`, `server/`, `e2e/`,
 or the workflow itself. Compared with the hermetic stack:
 
 - **Database:** `docker compose up -d` on the default ports (5432, 3001,
-  3000). The runner is fresh, so the database starts empty.
+  3000), then a separate `devdigest_e2e` database created inside it and seeded
+  with `DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1`. The runner is fresh, so it
+  starts empty.
 - **Web:** a **production build** (`pnpm build`, then `pnpm start`), not
   `next dev`. A flow that passes locally can still fail on a production-only
   difference, and the reverse.

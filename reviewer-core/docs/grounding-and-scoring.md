@@ -8,7 +8,7 @@ claims.
 ## Grounding
 
 [`src/grounding.ts`](../src/grounding.ts) runs once per review, after the
-reduce step (`review/run.ts:205`), against the full diff.
+reduce step (`review/run.ts:254`), against the full diff.
 
 1. **Index the diff:** `buildLineIndex` (`grounding.ts:24`) maps each file
    path to the set of **new-side** line numbers its hunks cover. It uses each
@@ -51,7 +51,7 @@ starts from 100 and subtracts a penalty per **grounded** finding, clamped to
 No findings score 100, whatever the model said. The model's self-reported score
 drifts between models, so it is discarded: `reduceReviews` still averages it
 across chunks, but the final outcome replaces it with the computed score
-(`run.ts:216`).
+(`run.ts:265`).
 
 ## Verdict and blockers
 

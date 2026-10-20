@@ -47,7 +47,9 @@ keeps its state in the URL: `?tab=overview | findings | diff`, and
   "View on GitHub".
   - **`RunReviewDropdown`** starts `POST /pulls/:id/review` for one agent or
     for all enabled agents, then switches to Agent runs.
-- **Overview** (`OverviewTab`): the PR description.
+- **Overview** (`OverviewTab`): the PR description and the L03 `IntentCard`.
+  The card reads the cached intent (`usePrIntent`), generates one on first
+  open when none exists, and offers Recompute.
 - **Files changed** (`DiffTab`): the patch viewer. It shows GitHub
   review-comment threads, plus a composer while the PR is open.
 - **Agent runs** (`FindingsTab`), from top to bottom:
@@ -74,7 +76,9 @@ keeps its state in the URL: `?tab=overview | findings | diff`, and
   - configuration;
   - stats (duration, tokens, findings, cost);
   - the run's persisted findings;
-  - prompt assembly, tool calls, raw output, and the full log.
+  - prompt assembly, with the Skills token count (the intent a run used is
+    stored in its trace but not shown in the drawer);
+  - tool calls, raw output, and the full log.
 
 ## Findings panel and cards
 
@@ -101,8 +105,9 @@ The acceptance criteria for the filter live in
 
 ## Tests
 
-Most component folders above have their own `*.test.tsx`. `FilterBar`,
-`DiffTab`, `FindingsTab`, `OverviewTab`, and `PrDetailHeader` do not yet. The
+Most component folders above have their own `*.test.tsx` (including
+`IntentCard`). `FilterBar`, `DiffTab`, `FindingsTab`, `OverviewTab`, and
+`PrDetailHeader` do not yet. The
 seeded browser journeys are e2e flows:
 
 - `04`: Review runs and the severity filter.

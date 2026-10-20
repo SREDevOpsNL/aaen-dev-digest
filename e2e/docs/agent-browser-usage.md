@@ -19,6 +19,7 @@ rather than repeating them.
 | `wait --fn <js>` | Polling a JavaScript condition, including "is gone": `!document.querySelector(…)`. | The condition never becomes truthy. |
 | `wait <ms>` | A fixed pause, only before checking a browser event that is dispatched asynchronously (a scroll event). | Never. |
 | `find text <t> click` / `find role button click --name <n>` | Clicking by visible text or accessible name. | No match. |
+| `click <css>` | Clicking an element by CSS selector when no text or role locator fits. | No match. |
 | `eval <js>` with `assert.stdoutIncludes` | Reading a value back (stdout is JSON-quoted) and checking a substring, e.g. `"open, at end, last finding visible"`. | The script throws, or the substring is missing. |
 | `hover <css>`, `focus <css>`, `press <key>` | Real pointer and keyboard input on an element. | No match. |
 | `mouse move x y`, `mouse down`, `mouse up` | Real input at viewport coordinates, e.g. dragging a scrollbar thumb. | Never by itself; pair it with an assertion. |

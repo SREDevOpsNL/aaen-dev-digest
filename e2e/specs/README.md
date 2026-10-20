@@ -24,9 +24,15 @@ is how the suite works **today**.
 | `07a-findings-preview-scroll.flow.json` | Timeline findings preview stays open while its findings scroll |
 | `08-skills.flow.json`            | Skills library and Test Quality Reviewer render from seed      |
 | `09-conventions.flow.json`       | Conventions Extractor opens for the seeded repository           |
+| `10-pr-intent.flow.json`         | PR detail shows the cached PR intent card                      |
+| `11-skills-lab.flow.json`        | Skills Lab navigation, skill cards, preview, Add menu and delete confirmations |
+| `12-agent-skills.flow.json`      | Agent Skills tab: link toggles, category labels and drag handles |
+| `13-api-contract.flow.json`      | API Contract Reviewer, its seeded skills and the experiment fixture PRs render |
+| `14-agent-skill-count.flow.json` | Agent cards show each agent's linked-skill count from the API  |
 
-Flows `01`, `02`, `04`, `05` and `07a` enter at `{BASE}/` and follow the home
-redirect to the **first** repo, so they assume the seeded demo repo is the only one.
+Flows `01`, `02`, `04`, `05`, `07a`, `09` and `10` enter at `{BASE}/` and follow
+the home redirect to the **first** repo, so they assume the seeded demo repo is the
+only one. [Seed and flows](../docs/seed-and-flows.md) lists what each flow needs.
 
 The seed has no completed agent run, so flow `07a` stubs, in its own page only, the
 two read-only GETs behind the Timeline (`/pulls/:id/runs`, `/pulls/:id/reviews`);

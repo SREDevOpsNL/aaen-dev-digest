@@ -35,8 +35,10 @@ Migrations do **not** run on boot (see [Data](#data-migrations-and-seed)).
 
 [`src/modules/index.ts`](../src/modules/index.ts) registers each module
 statically (no filesystem autoload, so tsx, the bundler, and vitest share one
-code path). The starter set is `settings`, `repos`, `pulls`, `polling`,
-`workspace`, `agents`, `reviews`, and `repoIntel`.
+code path). Registered today: `settings`, `repos`, `pulls`, `polling`,
+`workspace`, `agents`, `reviews`, and `repoIntel` (the starter set), plus
+`skills` and `conventions` (L02), `intent` (L03), and `experiments` (the gated
+HW2 experiment runner).
 
 A module is a Fastify plugin in `modules/<name>/routes.ts`. Larger modules
 split by role; `reviews` is the fullest example:
@@ -59,17 +61,17 @@ database (see [PR list summary](pr-list-summary.md)). Shared helpers live in
 [`src/platform/container.ts`](../src/platform/container.ts) is the only place
 that constructs adapters:
 
-- **Eager** (constructor, `container.ts:80`): `config`, `db`, `secrets`
+- **Eager** (constructor, `container.ts:83`): `config`, `db`, `secrets`
   (`LocalSecretsProvider`), `auth` (`LocalNoAuthProvider`), `jobs`
   (`JobRunner`), and the process-wide `runBus`.
 - **Lazy and cached:** `git`, `codeIndex`, `repoIntel`, `depgraph`,
-  `tokenizer`, `priceBook`, and the shared `agentsRepo` and `reviewRepo`
-  (`container.ts:89-140`).
-- **Lazy and secret-backed:** `github()` (`container.ts:153`), `llm(id)`
-  (`container.ts:163`), and `embedder()` (`container.ts:195`). Each one throws
+  `tokenizer`, `priceBook`, and the shared `agentsRepo`, `reviewRepo`, and
+  `reposRepo` (`container.ts:93-149`).
+- **Lazy and secret-backed:** `github()` (`container.ts:162`), `llm(id)`
+  (`container.ts:179`), and `embedder()` (`container.ts:210`). Each one throws
   `ConfigError` when its key is missing; `embedder()` also throws when
   `EMBEDDINGS_ENABLED` is off, before any OpenAI client exists.
-  `invalidateSecretCaches()` (`container.ts:214`) drops the cached clients after
+  `invalidateSecretCaches()` (`container.ts:229`) drops the cached clients after
   Settings saves a key.
 
 Tests pass `ContainerOverrides` (mock LLM, git, GitHub, repo-intel, …) through
@@ -118,6 +120,10 @@ API keys and the GitHub token go through `SecretsProvider`
 `GITHUB_TOKEN` is canonical, and `GITHUB_PAT` is still accepted. Secrets never
 enter `AppConfig`, the database, or git.
 
+In experiment mode, the `DEVDIGEST_EXPERIMENT_*` variables freeze an
+`ExperimentConfig` (`config.ts:70`). The secrets provider then reads only its
+dedicated key file and gets **no** `process.env` fallback (`container.ts:87`).
+
 ## Background work
 
 There are two mechanisms, and they are not interchangeable:
@@ -143,10 +149,19 @@ There are two mechanisms, and they are not interchangeable:
 - **Seed** (`pnpm db:seed`, idempotent; [`src/db/seed.ts`](../src/db/seed.ts)):
   - The default workspace, system user, membership, and settings.
   - The repository `acme/payments-api`.
-  - PR #482 with four files and one commit.
+  - PR #482 with four files, one commit, and a fresh cached intent.
   - One sample review with two findings (Critical and Warning) and **no
     `run_id`**.
-  - Three enabled agents: General, Security, and Performance Reviewer.
+  - The skills catalog with versions, and five enabled agents with their
+    versions and skill links: General, Security, Performance, Test Quality,
+    and API Contract Reviewer.
+  - **Only on request**, and only into a disposable database
+    (`src/db/disposable.ts`):
+    - `DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1` adds fixture PRs #501 and #502,
+      with intents.
+    - `DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS` adds pending conventions.
+
+    The hermetic e2e runner and CI enable the fixtures.
 
   Because the sample review has no successful run, the PR list and the Timeline
   show no severity counts for it; the browser suite stubs a run where it needs

@@ -19,6 +19,8 @@ components that read route params and the query string; `agents/page.tsx` and
 - `/repos/[repoId]/pulls/[number]` is the PR detail. The rest of its state also
   lives in the query string, so links and reloads keep it: `?tab=overview |
   findings | diff`, and `?trace=<runId>` opens the run-trace drawer.
+- `/repos/[repoId]/conventions` is the Conventions Extractor (L02).
+- `/skills` and `/skills/[id]` are the Skills Lab and skill detail (L02).
 - `/agents`, `/agents/[id]`, `/settings/[section]`, and `/onboarding`.
 
 The active repository comes from `RepoProvider`
@@ -58,7 +60,9 @@ component → hook (src/lib/hooks/*) → api.get/post (src/lib/api.ts) → fetch
   - `NEXT_PUBLIC_API_BASE` is read at build time, so changing it needs a dev
     server restart.
 - **Hooks** are grouped by domain: `core.ts` (settings, repos, pulls),
-  `reviews.ts`, `trace.ts`, `agents.ts`, and `repo-intel.ts`. Server state stays
+  `reviews.ts`, `trace.ts`, `agents.ts`, `repo-intel.ts`, `skills.ts`,
+  `conventions.ts`, and `intent.ts`. All of them are re-exported from
+  `src/lib/hooks/index.ts`. Server state stays
   in TanStack Query and is never copied into `useState`.
 - **Defaults** ([`src/lib/providers.tsx`](../src/lib/providers.tsx)):
   `retry: 1`, `staleTime: 30s`, and no refetch on window focus.
@@ -95,8 +99,9 @@ component → hook (src/lib/hooks/*) → api.get/post (src/lib/api.ts) → fetch
 - **Adding copy:** add the key to the matching namespace file, for example
   `prReview.list.findingsInLatestAgentRuns`. Component tests render with the
   real JSON file, so an assertion on the copy catches a missing key.
-- **Scaffolding:** many namespaces (`skills`, `eval`, `memory`, …) belong to
-  later lessons. A namespace is not evidence that a screen exists.
+- **Scaffolding:** many namespaces (`eval`, `memory`, `ci`, …) belong to later
+  lessons. A namespace is not evidence that a screen exists; check the
+  [product boundary](../../docs/ai-context/01_PRODUCT_BOUNDARY.md).
 
 ## Shell and vendored code
 
