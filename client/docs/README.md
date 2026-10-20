@@ -20,4 +20,12 @@ unbuilt screens ([`../specs/`](../specs/README.md)), rejected approaches
 
 ## Documents
 
-None yet. Add one when a topic outgrows the module README.
+- [`ui-architecture.md`](ui-architecture.md) — routing and URL state, the
+  `_components/<Name>/` folder anatomy, the data layer (API client, hooks,
+  query keys, polling, invalidation), next-intl copy, the app shell, and
+  vendored code.
+- [`pr-review-screens.md`](pr-review-screens.md) — what the PR list and PR
+  detail show, which component owns each part, and where its data comes from.
+- [`findings-preview.md`](findings-preview.md) — the shared severity-count
+  popover: props and scopes, placement, the open/close rules, accessibility,
+  and tests.

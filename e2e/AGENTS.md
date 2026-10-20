@@ -45,7 +45,7 @@ Hermetic ports are overridable: `E2E_PG_PORT`, `E2E_API_PORT`, `E2E_WEB_PORT`.
 
 ## Gotchas
 
-- **Flows assume a freshly-seeded DB with exactly one repo.** Four of the seven
+- **Flows assume a freshly-seeded DB with exactly one repo.** Seven of the fifteen
   enter at `{BASE}/` and follow the home redirect to the *first* repo. Your dev DB
   usually has other imported repos, so plain `npm test` against it fails those
   flows. Use `npm run e2e:hermetic`.

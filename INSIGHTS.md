@@ -89,3 +89,27 @@ says which file a finding goes in.
   repository uses symlinks instead, after approval. A probe started only at the
   root or a package root would have passed the broken setup. Details and
   evidence: the 2026-10-16 correction in `LEARNINGS.md`.
+
+- **2026-10-20 — L01 mentor follow-up.** The mentor raised two points: per-agent
+  PR-list FINDINGS, and package docs that were one paragraph each.
+  - **"Latest run" is a business rule.** The aggregation was simple; defining
+    "latest" was not. It means the run that *started* last
+    (`agent_runs.ran_at`), not the review written last, plus one agent identity
+    (`coalesce` of the review's and the run's agent) used for both grouping and
+    the shown name. Details:
+    [`server/INSIGHTS.md`](server/INSIGHTS.md#what-works) (2026-10-20).
+  - **Docs drift silently.** Expanding the docs showed that every package's
+    `docs/README.md` "Documents" list still said "None yet", and both module
+    `specs/README.md` indexes said "no specs yet", although files existed. The
+    e2e prose spec also claimed trace-drawer coverage that flow `04` never had.
+    No check catches this, so update the README index in the same commit as the
+    document, and derive a spec's assertions from the flow or test that proves
+    them.
+  - **Evidence for the aggregation** came from a DB-backed matrix of 9 identity
+    and ordering cases, and from a live hermetic demonstration: two seeded
+    agents, an outdated Critical, and a newer failed run, with the PR-list
+    popover showing exactly the two current findings by name.
+
+  Evidence: `server/test/reviews.it.test.ts` (PR-list FINDINGS matrix),
+  `server/src/modules/pulls/status.ts:81` (`compareReviewRuns`), and
+  `e2e/specs/written/01-pr-findings-ui.md`.

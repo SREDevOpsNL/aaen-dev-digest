@@ -448,13 +448,20 @@ Run cost is shown on the PR list as the sum of provider-reported costs from
 all successful review runs for that PR; a PR with no successful review renders an
 empty Cost cell. It is also shown inline beside each reviewer-run timestamp and
 in the General Reviewer trace drawer beside Duration, Tokens, and Findings.
-Score and the PR-list Findings popup use the newest completed review: its
-severity indicators, popup count, and previews are all scoped to that one
-review. Preview rationales are normalized and bounded to 180 characters before
-the list response is returned, while the stored finding rationale remains
-unchanged. Each settled Timeline run tile shows the same severity counts and
-read-only preview for its own run, using the findings the Findings tab already
-loaded.
+Score uses the newest completed review. The PR-list FINDINGS column and its
+popup use each agent's latest successful review run instead, so a PR reviewed by
+several agents shows all of their current findings:
+
+- **Agent:** `coalesce(reviews.agent_id, agent_runs.agent_id)`.
+- **"Latest"** is the run that started last, then the review written last, then
+  the higher review id.
+- **No fallback:** a clean latest review replaces that agent's older findings.
+
+The popup reads "N FINDINGS IN LATEST AGENT RUNS" and names each finding's
+agent. A Timeline tile's popup stays scoped to its one run. Preview rationales
+are normalized and bounded to 180 characters before the list response is
+returned, while the stored finding rationale remains unchanged. The full rules
+are in [`server/docs/pr-list-summary.md`](../../server/docs/pr-list-summary.md).
 
 Finding disposition and GitHub publication are deliberately separate paths.
 Accept/dismiss writes local finding state. Posting through the inline composer

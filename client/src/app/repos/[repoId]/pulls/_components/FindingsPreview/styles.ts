@@ -88,6 +88,11 @@ export const s = {
     fontSize: 11,
     color: "var(--text-muted)",
   } satisfies CSSProperties,
+  agent: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--text-secondary)",
+  } satisfies CSSProperties,
   location: {
     display: "block",
     marginTop: 5,

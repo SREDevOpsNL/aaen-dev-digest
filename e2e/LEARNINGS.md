@@ -65,6 +65,22 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   timeline that flows 02 and 04 read. Evidence: `server/src/db/seed.ts`
   (PR #482 block: `reviews` and `findings` inserts only).
 
+- **2026-10-19** — agent-browser 0.27.0 cannot express three things a pointer
+  flow tends to need. `mouse wheel` always fires at (0,0), whatever `mouse move`
+  set; a page log showed `wheel` on the sidebar `ASIDE` at `0,0`. `scroll
+  --selector` calls `element.scrollBy`, which fires a real `scroll` event but no
+  `wheel`. `network route --body` intercepted neither same-origin nor
+  cross-origin `fetch`: `/health` still returned the real body. What works: an
+  `eval` that replaces `window.fetch` after the first `open`. The app's soft
+  navigation keeps it, and the next flow's `open` drops it. A real scrollbar
+  drag needs static `mouse` coordinates, so pin the geometry first and add a
+  `wait --fn` precondition that `elementFromPoint` hits the scroller's
+  scrollbar. The studio scrolls `<main>`, not the window, and the PR header is
+  sticky (432px tall at a 760px viewport), so it covers content scrolled to the
+  top of `<main>`. Evidence: `e2e/specs/07a-findings-preview-scroll.flow.json:9`
+  (fetch stub), `e2e/specs/07a-findings-preview-scroll.flow.json:28` (scrollbar
+  drag).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
@@ -91,6 +107,19 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   effect (a request, a DB row or the rendered state), not the exit code.
   Evidence: `docs/plans/HW2-walkthrough-log.md` (Observations); a `fetch`
   wrapper recorded no request until the button was scrolled into view.
+
+- **2026-10-20** — `set viewport` persists across flows, because the runner
+  shares one agent-browser session. Flow `07a` pinned 760x1200 for its
+  scrollbar drag and passed 8/8 on the L01 branch, where it ran last. After
+  merging into `main`, flow `11-skills-lab` ran after it at 760px: the skill
+  detail was too narrow, its Versioning tab was clipped, and
+  `wait --text "Version history"` timed out (14/15). No command resets the
+  viewport, so a flow that changes it must end by restoring the session default:
+  1280x577 inner, in a 1280x720 window. When adding a flow, run the **whole**
+  suite, not just the new flow; a state leak only fails a later flow. Evidence:
+  `e2e/specs/07a-findings-preview-scroll.flow.json` (last step),
+  `e2e/test-results/11-skills-lab-fail.png` from the failing run (not
+  committed).
 
 ## Session Notes
 
