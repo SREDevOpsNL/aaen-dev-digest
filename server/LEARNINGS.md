@@ -96,6 +96,27 @@ correction. Repo-intel remains server-scoped;
   `server/src/adapters/secrets/local.ts:25,33` (`LocalSecretsProvider.load`),
   `server/src/platform/container.ts:87` (one provider per container).
 
+- **2026-10-20** — Two facts about the HW2 experiment runner bind a
+  confirmatory run to one disposable stack.
+  - **The manifest freezes `stack.database`,** and `scripts/e2e.sh --serve`
+    creates a new `devdigest_hw2f_<nonce>` on every start. A manifest
+    generated before a restart, or on another stack, can never match the one
+    `run` recomputes, so `run` refuses (zero cost). Generate the manifest,
+    commit the preregistration and run, all on one stack that is never
+    restarted. A preregistration-only commit is safe: the implementation
+    fingerprint ignores it.
+  - **Spend accounting is per stack.** The server's budget is recomputed from
+    that stack's database, and the runner's ledger lives in a per-stack
+    directory. A replacement stack therefore starts from zero recorded spend.
+    After a crash, settle the old ledgers offline with `charge()` and keep any
+    new `authorize --budget` within the remainder.
+
+  Evidence: `server/src/experiments/hw2/cli.ts` (`currentManifest`: `stack:
+  { database: identity.database, … }`, and the `run` comparison
+  `manifestFingerprint(current) !== manifestFingerprint(frozen)`),
+  `scripts/e2e.sh` (`NONCE` → `PG_DB`),
+  `server/src/experiments/hw2/budget.ts` (`charge`, `spent`),
+  `server/test/hw2-manifest-identity.test.ts`.
 ## Decisions
 
 ## Recurring Errors & Fixes
