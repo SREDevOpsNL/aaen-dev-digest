@@ -71,7 +71,7 @@ All stacks are disposable and none uses the development database.
 | --- | --- | --- |
 | W, `hw2f-d5b65f48` | Unpaid walkthrough, every row except 17–20 | **Completed 2026-10-19/20.** Results in the [walkthrough log](HW2-walkthrough-log.md). The stack ended with the agent session that ran it. |
 | R, `hw2f-a2c6f244` | Retest of row 32 after PR #25, from `main` at `3403eb0` | **Completed 2026-10-20.** [Log](HW2-walkthrough-log.md#retest-of-row-32-2026-10-20). Stopped after the retest. |
-| E (future) | Gate 4 confirmatory runs: rows 17–20 | **Not started.** It needs the separate Gate 2, 3 and 4 authorizations. |
+| X, E (future) | X: Gate 3 exploration. E: Gate 4 confirmatory runs, rows 17–20 | **Not started.** They need the separate Gate 2, 3 and 4 authorizations. |
 
 ### Procedure used on stack W (completed; kept for a re-run)
 
@@ -98,6 +98,14 @@ Order:
 
 ### Procedure for stack E (Gate 4, future)
 
+- E is a **new** stack started with the final settings, after the Gate 3
+  exploration stack has been exported and stopped. The confirmatory manifest,
+  the preregistration commit and the confirmatory run all happen on E, and E is
+  **not restarted** in between: the manifest freezes E's database identity.
+  Steps:
+  [operator guide, Gate 4](HW2-experiment-operator-guide.md#gate-4-confirmatory-on-a-new-stack-e--usd-100).
+  If E stops early:
+  [If stack E stops unexpectedly](HW2-experiment-operator-guide.md#if-stack-e-stops-unexpectedly).
 - Start E in your own terminal, not as an agent's background task. A
   background task ends with the agent session, and the stack and its traces
   end with it.
