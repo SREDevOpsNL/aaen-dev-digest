@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
@@ -57,6 +57,12 @@ export interface LinkedSkillRow {
   order: number;
 }
 
+/** An agent with the number of skills linked to it. */
+export interface AgentWithSkillCount {
+  agent: AgentRow;
+  skillCount: number;
+}
+
 export type SetSkillsResult =
   | { kind: 'ok'; links: LinkedSkillRow[] }
   | { kind: 'agent_not_found' }
@@ -66,8 +72,29 @@ export type SetSkillsResult =
 export class AgentsRepository {
   constructor(private db: Db) {}
 
-  async list(workspaceId: string): Promise<AgentRow[]> {
-    return this.db.select().from(t.agents).where(eq(t.agents.workspaceId, workspaceId));
+  /**
+   * The workspace's agents, each with its linked-skill count, in one statement.
+   * The count is a correlated subquery rather than a GROUP BY, so the outer scan
+   * (and the row order clients see) is the same as a plain select. It counts
+   * links to skills in the agent's own workspace, enabled or not; for links made
+   * through the API that equals the "N / 4 attached" count of `linkedSkills`.
+   */
+  async list(workspaceId: string): Promise<AgentWithSkillCount[]> {
+    // Drizzle renders a single-table select's columns unqualified ("id"), which
+    // inside the subquery would bind to the inner tables, so the outer agent
+    // columns are qualified explicitly.
+    const agentId = sql`${t.agents}.${sql.identifier(t.agents.id.name)}`;
+    const agentWorkspaceId = sql`${t.agents}.${sql.identifier(t.agents.workspaceId.name)}`;
+    const linkedCount = this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(t.agentSkills)
+      .innerJoin(t.skills, and(eq(t.skills.id, t.agentSkills.skillId), eq(t.skills.workspaceId, agentWorkspaceId)))
+      .where(eq(t.agentSkills.agentId, agentId));
+    const rows = await this.db
+      .select({ agent: t.agents, skillCount: sql<number>`(${linkedCount})` })
+      .from(t.agents)
+      .where(eq(t.agents.workspaceId, workspaceId));
+    return rows.map((row) => ({ agent: row.agent, skillCount: row.skillCount }));
   }
 
   async listEnabled(workspaceId: string): Promise<AgentRow[]> {
