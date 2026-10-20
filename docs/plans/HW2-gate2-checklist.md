@@ -5,8 +5,9 @@ Gate 2 makes **no paid request and authorizes none**. Paid exploration (Gate 3,
 ≤ USD 0.50) and confirmatory runs (Gate 4, ≤ USD 1.00) each need their own
 explicit authorization.
 
-**Status (2026-10-19):** prepared, not started. No key file, no spending
-capability and no experiment stack exist yet.
+**Status (2026-10-20): completed.** See [Gate 2 results](#gate-2-results-2026-10-20).
+No spending capability exists and no paid request was made. Gate 3 needs its
+own authorization.
 
 ## Why the key needs its own limit
 
@@ -53,6 +54,14 @@ Create a key named, for example, `devdigest-hw2-experiments` with K2–K6. The
 documentation pages above describe these fields on the key API (`limit`,
 `limit_reset`, `include_byok_in_limit`, `expires_at`), not the dashboard form.
 Step D verifies them on the key itself, whichever way they were set.
+
+- **Enter the credit limit explicitly.** A key created with the limit field
+  left empty has no limit: step D shows `limit: null`. This happened on the
+  first attempt at Gate 2.
+- **Check for BYOK keys in the dashboard.** An ordinary key cannot list BYOK
+  provider keys (`byok_usage: 0` only means no BYOK spend so far). If
+  `include_byok_in_limit` is `false`, confirm in the dashboard that the account
+  has none.
 
 ### B. Write the key file (you, WSL terminal)
 
@@ -113,7 +122,8 @@ Expect:
 - `limit` about 2 and `limit_remaining` about 2;
 - `usage` 0 for a new key;
 - `limit_reset: null`;
-- `include_byok_in_limit: true`, or no BYOK keys on the account;
+- `include_byok_in_limit: true`, or no BYOK keys on the account (confirmed in
+  the dashboard; this key cannot list them);
 - `is_management_key: false`;
 - the chosen `expires_at`.
 
@@ -175,3 +185,50 @@ Send a confirmation that contains no key material:
   experiment stack, because the server keeps the key it read at startup (K8).
 - **A spending authorization:** delete `capability.json`. The server rereads it
   for every slot ([operator guide](HW2-experiment-operator-guide.md#authorizing-a-paid-phase-server-side-capability)).
+
+## Gate 2 results (2026-10-20)
+
+Authorized by the user for Gate 2 only. No key material appears in this
+record; the key was entered privately by the user (step B).
+
+| Check | Result |
+| --- | --- |
+| C: modes | `0o700` / `0o600` |
+| C: entries | `['OPENROUTER_API_KEY']` only; `sk-or-` key `True` |
+| C: separation | `distinct True` from the everyday `~/.devdigest/secrets.json` key (`OPENROUTER_API_KEY` was not set in the checking shell) |
+| D, first attempt | **Failed:** `limit: null` (unlimited), `budgets: []`. Gate 2 stopped; the user set the credit limit |
+| D, after the fix | `limit: 2`, `limit_remaining: 2`, `limit_reset: null` (never resets), `usage: 0`, `is_management_key: false`, `expires_at: null`; one budget, `scope: key_limit`, `limit_usd: 2`, `reset_interval: null` |
+| D: BYOK | `include_byok_in_limit: false`, `byok_usage: 0`; the user confirmed in the dashboard that the account has **no BYOK provider keys** |
+| E: identity | stack `hw2f-f0b2f716`, `database_is_disposable: true`, `demo_pr_3_present: false`, `secrets_path` = the dedicated file, `openrouter_key_configured: true`, `in_flight_slot: null` |
+| E: `check` | isolation checks passed; both fixture intents fresh |
+| Metadata (free) | the endpoint list for `deepseek/deepseek-v4-flash` (below); `GET /providers/openrouter/models` returned 470 models, including the frozen model |
+| Criterion 36 | **Verified** on this stack ([walkthrough log](HW2-walkthrough-log.md#retest-of-row-36-2026-10-20-gate-2)) |
+| Nothing paid | after all checks: key `usage: 0`, `usage_daily: 0`; no `capability.json` anywhere; `agent_runs` = 0; no generation was attempted |
+
+The stack ran from `main` at `50b12b5` with provisional experiment settings and
+was stopped after the checks. The user keeps the key; it was not revoked.
+
+### Endpoint snapshot for Gate 3 planning
+
+`endpoints`, 2026-10-20, model `deepseek/deepseek-v4-flash`, 16 endpoints, all
+with request price 0. Prices and limits can change. Gate 3 re-reads them, and
+the preflight always uses the more expensive of the frozen and live values.
+
+| Provider | Routing slug (`tag`) | Quant. | Context | Max completion | Input USD / 1M tokens | Output USD / 1M tokens |
+| --- | --- | --- | --- | --- | --- | --- |
+| Relace | `relace/fp4` | fp4 | 1,048,576 | 943,718 | 0.038 | 0.450 |
+| OpenInference | `open-inference/fp4` | fp4 | 1,048,576 | 943,718 | 0.040 | 0.136 |
+| StreamLake | `streamlake/fp8` | fp8 | 1,024,000 | 384,000 | 0.083 | 0.165 |
+| DeepInfra | `deepinfra/fp8` | fp8 | 1,048,576 | 65,536 | 0.090 | 0.180 |
+| GMICloud | `gmicloud/fp8` | fp8 | 1,048,575 | 943,717 | 0.091 | 0.182 |
+| Venice | `venice` | unknown | 1,000,000 | 32,768 | 0.097 | 0.193 |
+| DigitalOcean | `digitalocean` | unknown | 1,048,576 | 384,000 | 0.098 | 0.196 |
+| SiliconFlow | `siliconflow/fp8` | fp8 | 1,048,576 | 393,216 | 0.130 | 0.280 |
+| Baidu | `baidu/fp8` | fp8 | 1,048,576 | 131,072 | 0.140 | 0.280 |
+| AtlasCloud | `atlas-cloud/fp4` | fp4 | 1,048,576 | 393,216 | 0.140 | 0.280 |
+| Parasail | `parasail/fp8` | fp8 | 1,048,576 | 943,718 | 0.140 | 0.280 |
+| Alibaba | `alibaba/fp8/us-east-1` | fp8 | 1,000,000 | 393,216 | 0.150 | 0.300 |
+| Mancer 2 | `mancer/fp8` | fp8 | 1,048,576 | 943,718 | 0.190 | 0.500 |
+| Azure | `azure/us` | unknown | 1,048,576 | 384,000 | 0.210 | 0.560 |
+| Cloudflare | `cloudflare` | unknown | 384,000 | 345,600 | 0.440 | 1.320 |
+| Wafer | `wafer/mxfp4` | mxfp4 | 1,048,576 | 943,718 | 0.700 | 0.170 |

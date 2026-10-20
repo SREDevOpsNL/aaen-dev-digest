@@ -7,11 +7,11 @@
 >   20, and its routes are superseded.
 > - The authoritative records are the
 >   [compliance matrix](HW2-compliance-matrix.md) (statuses and totals) and the
->   [walkthrough log](HW2-walkthrough-log.md) (evidence). As of 2026-10-20 they
->   record **48 / 53 Verified**:
+>   [walkthrough log](HW2-walkthrough-log.md) (evidence). As of 2026-10-20 (after Gate 2) they
+>   record **49 / 53 Verified**:
 >   - row 32 failed, was fixed in PR #25 and passed its retest;
->   - row 36 is partial;
->   - rows 17–20 wait for Gates 2–4.
+>   - row 36 was partial and passed its Gate 2 retest;
+>   - rows 17–20 wait for Gates 3–4.
 >   - Option A for rows 14 and 20 was approved on 2026-10-19.
 > - This file is kept unchanged below as part of the audit history.
 
