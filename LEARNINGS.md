@@ -180,6 +180,20 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   24 scenarios with asserted exit codes, PR #24); the empty-directory case was
   found only by running the blocks.
 
+- **2026-10-20** — A clean merge does not keep docs true. The L01 package docs
+  were written and link-checked on a branch 24 commits behind `main`. When they
+  were merged into `main`, none of the new doc files conflicted, yet many of
+  their claims were false against `main`'s source:
+  - "the studio never fills the skills slot";
+  - the review-run steps (no intent, no transactional finalize);
+  - every `run-executor.ts` and `container.ts` line anchor.
+
+  Git merges a new file without complaint, and a link checker only proves that
+  paths exist. After merging docs that cite `path:line` or describe behaviour,
+  re-read the cited source on the merged tree before opening the PR, or write
+  the docs on a branch cut from current `main`. Evidence: commit `63defcc` on
+  `codex/l01-mentor-followup` (13 docs corrected after merge `75bef55`).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source
