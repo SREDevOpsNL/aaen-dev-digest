@@ -44,7 +44,7 @@ Walkthrough for the final acceptance gate (plan rev. 4.3, Gate 5). A criterion m
 | 33 | Agent card Delete removes it from the database | Manual (browser) + SQL | `AgentCard.test.tsx` | delete a throwaway agent → row gone from `agents` | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 34 | Agent delete confirmation modal (Confirm, Cancel, X) | Flow 11 | flow 11 (Cancel, X) | Confirm deletes (manual) | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 35 | `/agents/:id` has exactly two tabs: Config and Skills | Manual (browser) | `AgentEditor/constants.ts` | agent editor has exactly Config and Skills | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
-| 36 | Agent Config: name, description, provider, model list, strategy, system prompt | Manual (browser) | — | Config tab fields incl. the model list and strategy | Partial 2026-10-19: model list needs a key; re-check after Gate 2 ([log](HW2-walkthrough-log.md)) |
+| 36 | Agent Config: name, description, provider, model list, strategy, system prompt | Manual (browser) | — | Config tab fields incl. the model list and strategy | Verified 2026-10-20, retest on the keyed Gate 2 stack (original 2026-10-19 Partial kept in the [log](HW2-walkthrough-log.md)) |
 | 37 | Agent Skills tab lists all skills, each with a toggle and a category label | Flow 12 | flow 12 | every skill has a toggle and a category | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 38 | `POST /repos/:id/conventions/extract` runs and persists | Evidence review | `conventions.it.test.ts` | decided ([below](#conventions-evidence-rows-38-46-47-49--decided)): no live extraction; record `conventions.it.test.ts` and the 2026-10-14 smoke-test record | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 39 | Sample selection without an LLM (configs + top 12) | Repo/CLI | `conventions/constants.ts` | configs + top 12 sampled without an LLM | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
@@ -71,6 +71,7 @@ All stacks are disposable and none uses the development database.
 | --- | --- | --- |
 | W, `hw2f-d5b65f48` | Unpaid walkthrough, every row except 17–20 | **Completed 2026-10-19/20.** Results in the [walkthrough log](HW2-walkthrough-log.md). The stack ended with the agent session that ran it. |
 | R, `hw2f-a2c6f244` | Retest of row 32 after PR #25, from `main` at `3403eb0` | **Completed 2026-10-20.** [Log](HW2-walkthrough-log.md#retest-of-row-32-2026-10-20). Stopped after the retest. |
+| G2, `hw2f-f0b2f716` | Gate 2 key checks and the row 36 retest, keyed, with no spending capability | **Completed 2026-10-20.** [Gate 2 results](HW2-gate2-checklist.md#gate-2-results-2026-10-20). Stopped afterwards. |
 | X, E (future) | X: Gate 3 exploration. E: Gate 4 confirmatory runs, rows 17–20 | **Not started.** They need the separate Gate 2, 3 and 4 authorizations. |
 
 ### Procedure used on stack W (completed; kept for a re-run)

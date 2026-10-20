@@ -100,7 +100,7 @@ only when its checklist step ran and succeeded. Screenshots are in
 | 33 | **Verified** | A throwaway agent created through `POST /agents` was deleted from its card → Confirm. SQL: 0 rows (`delete-agent-confirm.png`) |
 | 34 | **Verified** | Flow 11 (Cancel, X). Confirm: "Delete agent “…”? This cannot be undone." → deleted |
 | 35 | **Verified** | The agent editor has exactly two tab buttons, Config and Skills (`agent-config.png`) |
-| 36 | **Partial** | Name, Description, Provider, Model, Review strategy (3 options) and System prompt are all present. The **model list** shows "No models loaded — set the openrouter API key" on this keyless stack (`agent-model-select-keyless.png`). Re-check after Gate 2: listing models is free metadata |
+| 36 | **Verified** (retest 2026-10-20, Gate 2) | **Original result, 2026-10-19 on keyless stack W: Partial.** Name, Description, Provider, Model, Review strategy (3 options) and System prompt are all present. The **model list** shows "No models loaded — set the openrouter API key" on this keyless stack (`agent-model-select-keyless.png`). Re-check after Gate 2: listing models is free metadata. **Retest on the keyed Gate 2 stack: passed;** see [Retest of row 36](#retest-of-row-36-2026-10-20-gate-2) |
 | 37 | **Verified** | Flow 12. On the API Contract Reviewer, 9 of 9 skills (= `GET /skills`) each have a link switch and a category (rubric or convention) |
 | 38 | **Verified** (evidence review, as decided) | `conventions.it.test.ts` passed: the real `POST /repos/:id/conventions/extract` route against PostgreSQL, with a mocked model and git. Plus the 2026-10-14 smoke-test record. No live extraction is claimed |
 | 39 | **Verified** | `sample()` = `CONFIG_SAMPLE_PATHS` (14 config and instruction files) + `getTopFilesByRank(repoId, TOP_CODE_SAMPLES = 12)`. Both are a list and a DB rank query; the only model call comes after sampling (`conventions/service.ts`) |
@@ -126,8 +126,7 @@ rows 19 and 20 (the Gate 4 trace).
 
 | Result | Rows |
 | --- | --- |
-| Verified | 48: 1–16, 21–35, 37–53 (row 32 after its retest) |
-| Partial | 1: 36 (model list needs a key) |
+| Verified | 49: 1–16, 21–53 (row 32 and row 36 after their retests) |
 | Not in this walkthrough | 4: 17–20 |
 
 ## Retest of row 32 (2026-10-20)
@@ -172,6 +171,27 @@ retest ran on the merged code.
 - **Stack W:** it ended with the previous agent session on 2026-10-20. Its
   background task was stopped and `scripts/e2e.sh` tore it down. Its results
   above were recorded before that.
+
+## Retest of row 36 (2026-10-20, Gate 2)
+
+The original Partial result is kept in the Results table. Row 36 needed the
+agent Config tab's model list, which loads only with an OpenRouter key. The
+retest ran on the Gate 2 stack `hw2f-f0b2f716`, from `main` at `50b12b5`, with
+the dedicated key ([Gate 2 results](HW2-gate2-checklist.md#gate-2-results-2026-10-20)).
+No model generation was involved.
+
+- **Fields:** on the API Contract Reviewer's Config tab, Name, Description,
+  Provider, Model, Review strategy, CI gate, Repo intelligence, System prompt
+  (768 characters) and Output schema are all present.
+- **Model control:** "No models loaded" is gone. It now shows
+  `deepseek/deepseek-v4-flash — $0.091/$0.182 per 1M · 1M ctx`
+  (`r36-agent-config.png`).
+- **The list:** opening it shows "Search models…" and **470 models**, the same
+  count as `GET /providers/openrouter/models` (`r36-model-list-open.png`).
+- **Search:** typing "deepseek-v4" filters the list to the DeepSeek V4 models,
+  including the frozen one (`r36-model-search.png`).
+- **Nothing changed:** the list was closed without selecting or saving. Key
+  usage stayed 0, and no run or capability exists.
 
 ## Observations
 
