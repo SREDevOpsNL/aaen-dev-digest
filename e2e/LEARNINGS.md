@@ -21,6 +21,26 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   `e2e/specs/04-pr-findings.flow.json`,
   `e2e/specs/05-pr-diff.flow.json`
 
+- **2026-10-19** — In a fresh worktree, `npm run e2e:hermetic` boots the whole
+  stack (Postgres, migrations, seed, API and web, about a minute) and only then
+  fails with `sh: 1: tsx: not found`, exit 127, because `scripts/e2e.sh`
+  installs dependencies only for `server` and `client`, never for `e2e/`. Run
+  `npm ci` in `e2e/` first. Evidence: `scripts/e2e.sh:150-151`
+  (`install_if_needed`); the run passed 13/13 after `npm ci`.
+
+- **2026-10-20** — A `scripts/e2e.sh --serve` stack started as an agent's
+  background task lives only as long as that agent session. When the session
+  ended, the harness stopped the task, the script's exit trap removed the
+  ephemeral Postgres container, and the walkthrough stack's database went with
+  it (API unreachable, container gone, no change by the next session). Only
+  `~/.devdigest/hw2-experiments/<stack-id>/` survives. Record evidence before a
+  session ends. A stack whose data must outlive the session, such as the Gate 4
+  stack whose trace row 19 reuses, should run in the operator's own terminal.
+  Evidence: the session-end notice "Background shell command didn't finish
+  before the previous session ended"; `docker ps` no longer listed
+  `devdigest-hw2f-d5b65f48`; `scripts/e2e.sh` (`cleanup` trap,
+  `docker rm -f`).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-10-17** — `agent-browser drag <src> <tgt>` cannot exercise native
@@ -58,6 +78,19 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   on unstyled content that only appears once data has loaded. Evidence: a local
   probe page (lowercase query: no match; uppercase: match), and
   `e2e/specs/10-pr-intent.flow.json`.
+
+- **2026-10-19** — agent-browser 0.27.0 can report success without doing
+  anything:
+  - `click @ref` on a button below the viewport printed `✓ Done` but fired no
+    handler: a Save button at y = 799 in a 577 px viewport sent no request. It
+    worked after `scrollIntoView`.
+  - `fill <sel> ""` emptied the input without updating React state, so a list
+    filter stayed applied. Clearing with key presses worked.
+
+  Scroll the target into view before clicking, clear with keys, and check the
+  effect (a request, a DB row or the rendered state), not the exit code.
+  Evidence: `docs/plans/HW2-walkthrough-log.md` (Observations); a `fetch`
+  wrapper recorded no request until the button was scrolled into view.
 
 ## Session Notes
 

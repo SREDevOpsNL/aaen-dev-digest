@@ -29,53 +29,167 @@ key, and the checks are in the [Gate 2 checklist](HW2-gate2-checklist.md).
 
 ### 2. Start a disposable stack
 
+Every command below runs in bash. Values marked **EXAMPLE** must be replaced;
+values left empty must be filled in. A validation step follows each group and
+fails fast: it prints `FAILED` and returns a nonzero status. Do not continue
+past a `FAILED`.
+
+In the terminal that will run the stack, at the repository root, set the
+experiment settings:
+- Before Gate 3, provisional values are allowed. No slot can run without a
+  spending capability.
+- At Gate 4, use the values frozen in the manifest.
+
 ```bash
-DEVDIGEST_EXPERIMENT_PROVIDER=<routing slug> \
-DEVDIGEST_EXPERIMENT_MODEL=deepseek/deepseek-v4-flash \
-DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS=<cap> \
-DEVDIGEST_EXPERIMENT_PRICE_INPUT=<USD per input token> \
-DEVDIGEST_EXPERIMENT_PRICE_OUTPUT=<USD per output token> \
+export DEVDIGEST_EXPERIMENT_MODEL=deepseek/deepseek-v4-flash
+export DEVDIGEST_EXPERIMENT_PROVIDER=           # required: lowercase routing slug from `endpoints`, e.g. deepinfra/fp8
+export DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS=  # required: output cap in tokens, 1–200000, e.g. 4000
+export DEVDIGEST_EXPERIMENT_PRICE_INPUT=        # required: USD per input token, e.g. 0.00000027
+export DEVDIGEST_EXPERIMENT_PRICE_OUTPUT=       # required: USD per output token, e.g. 0.0000011
+```
+
+Optional:
+- `DEVDIGEST_EXPERIMENT_PROVIDER_NAME`: the serving provider's display name,
+  frozen after exploration and required at Gate 4;
+- `DEVDIGEST_EXPERIMENT_PRICE_REQUEST`;
+- `DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP=0|1` (default 1).
+
+A partial set fails the server's startup. Validate the settings with the same
+rules the server applies:
+
+```bash
+python3 -I - <<'EOF'
+import os, re, sys
+env, problems = os.environ, []
+def need(name, ok, hint):
+    value = env.get(name, "")
+    if not value:
+        problems.append(f"{name} is not set ({hint})")
+    elif not ok(value):
+        problems.append(f"{name}={value!r} is invalid ({hint})")
+def usd(value):
+    return re.fullmatch(r"\d+(\.\d+)?([eE]-?\d+)?", value) is not None and float(value) > 0
+need("DEVDIGEST_EXPERIMENT_MODEL", bool, "the model id")
+need("DEVDIGEST_EXPERIMENT_PROVIDER", lambda v: re.fullmatch(r"[a-z0-9][a-z0-9._/-]*", v), "a lowercase routing slug")
+need("DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS", lambda v: v.isdigit() and 0 < int(v) <= 200000, "an integer from 1 to 200000")
+need("DEVDIGEST_EXPERIMENT_PRICE_INPUT", usd, "a positive USD amount per token")
+need("DEVDIGEST_EXPERIMENT_PRICE_OUTPUT", usd, "a positive USD amount per token")
+if "DEVDIGEST_EXPERIMENT_PROVIDER_NAME" in env and not env["DEVDIGEST_EXPERIMENT_PROVIDER_NAME"]:
+    problems.append("DEVDIGEST_EXPERIMENT_PROVIDER_NAME is set but empty")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print("experiment settings are valid")
+EOF
+```
+
+Then start the stack in this terminal and leave it running:
+
+```bash
 scripts/e2e.sh --serve
 ```
 
-Optional: `DEVDIGEST_EXPERIMENT_PROVIDER_NAME` (the serving provider's display
-name, frozen after exploration), `DEVDIGEST_EXPERIMENT_PRICE_REQUEST`,
-`DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP=0|1` (default 1). A partial set fails
-the server's startup.
+`--serve` prints:
+- the stack id;
+- the database (`devdigest_hw2f_<nonce>`) and container;
+- the API URL;
+- the clone directory (empty, per stack);
+- the ledger directory (`~/.devdigest/hw2-experiments/<stack-id>/`).
 
-`--serve` prints the stack id, database (`devdigest_hw2f_<nonce>`), container,
-API URL, clone directory (empty, per stack) and ledger directory
-(`~/.devdigest/hw2-experiments/<stack-id>/`). It seeds the fixture PRs #501 and
-#502 (with fresh cached intents) and the labelled synthetic convention
-candidates. Ctrl-C tears everything down.
+It seeds the fixture PRs #501 and #502 (with fresh cached intents) and the
+labelled synthetic convention candidates. Ctrl-C tears everything down.
 
 ### 3. Unpaid runner commands
 
-Run from `server/`; `$ID` is the printed stack id.
+Run the runner from `server/` in a second terminal. First set the stack
+variables. Every later command uses them, including the paid ones and the
+Gate 4 export.
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts check --api http://127.0.0.1:3251 --stack $ID --database devdigest_hw2f_${ID#hw2f-} --container devdigest-hw2f-${ID#hw2f-}
+ID=hw2f-0a1b2c3d   # EXAMPLE: replace with the stack id that --serve printed
 ```
 
-`check` verifies the stack identity and fails closed on any mismatch: stack id,
-disposable database name, a single repository, fixtures present, no PR #3, no
-clone of the fixture repo, container labels, a loopback non-development API
-port, and that the stack reads the dedicated key file. It checks the file's
-path only: whether a key is present is the `openrouter_key_configured` flag of
-`GET /experiments/identity`, and `run` refuses without one. It also confirms
-both fixture intents are fresh and prints the frozen diff hashes.
+```bash
+API=http://127.0.0.1:3251; DB="devdigest_hw2f_${ID#hw2f-}"; CONTAINER="devdigest-hw2f-${ID#hw2f-}"; STACK=(--api "$API" --stack "$ID" --database "$DB" --container "$CONTAINER"); EV="$HOME/.devdigest/hw2-experiments/$ID/evidence"; LEDGER="$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl"
+```
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts endpoints --api http://127.0.0.1:3251
-pnpm exec tsx src/experiments/hw2/cli.ts plan --seed <seed>
-pnpm exec tsx src/experiments/hw2/cli.ts manifest --api … --stack … --database … --container … --seed <seed> --rules <rules.json> --reservation <USD per slot> --out manifest.json
+if [[ "$ID" =~ ^hw2f-[a-z0-9]{4,32}$ ]] && docker inspect "$CONTAINER" >/dev/null 2>&1; then echo "stack $ID: container $CONTAINER is running"; else echo "FAILED: $ID is not a running hw2f stack (check ID)"; false; fi
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts check "${STACK[@]}"
+```
+
+`check` verifies the stack identity and fails closed on any mismatch:
+- the stack id and the disposable database name;
+- a single repository, the fixtures present, and no PR #3;
+- no clone of the fixture repo;
+- the container labels;
+- a loopback, non-development API port;
+- that the stack reads the dedicated key file. It checks the file's path only.
+  Whether a key is present is the `openrouter_key_configured` flag of
+  `GET /experiments/identity`, and `run` refuses without one.
+
+It also confirms both fixture intents are fresh and prints the frozen diff
+hashes.
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts endpoints --api "$API"
+```
+
+Set the schedule seed, the expected-finding rules file and the per-slot
+reservation, then validate them:
+
+```bash
+SEED=20261020                                          # EXAMPLE: the seed recorded in the preregistration
+RULES="$HOME/.devdigest/hw2-experiments/rules.json"    # EXAMPLE path: the rules file written into the preregistration
+RESERVATION=0.04                                       # EXAMPLE: USD per confirmatory slot; 20 × RESERVATION must be ≤ 1.00
+MANIFEST="$HOME/.devdigest/hw2-experiments/$ID/manifest.json"
+```
+
+```bash
+python3 -I - "$SEED" "$RULES" "$RESERVATION" <<'EOF'
+import json, re, sys
+seed, rules, reservation = sys.argv[1:4]
+problems = []
+if not re.fullmatch(r"\d+", seed):
+    problems.append(f"SEED={seed!r} is not a non-negative integer")
+try:
+    usd = float(reservation)
+    if not (usd > 0 and 20 * usd <= 1.00 + 1e-9):
+        problems.append(f"RESERVATION={reservation} must be > 0 and 20 x RESERVATION <= USD 1.00")
+except ValueError:
+    problems.append(f"RESERVATION={reservation!r} is not a number")
+try:
+    data = json.load(open(rules))
+    if not (isinstance(data, dict) and data and all(isinstance(r, dict) and r.get("anchors") and r.get("keywords") for r in data.values())):
+        problems.append(f"{rules} is not an object of {{anchors, keywords}} rules per experiment")
+except (OSError, ValueError) as err:
+    problems.append(f"RULES: {err}")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print("seed, rules and reservation are valid")
+EOF
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts plan --seed "$SEED"
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts manifest "${STACK[@]}" --seed "$SEED" --rules "$RULES" --reservation "$RESERVATION" --out "$MANIFEST"
 ```
 
 - `endpoints` lists the model's live provider endpoints: prices, limits, tags.
   It is OpenRouter metadata, not a generation, but needs the key file.
 - `plan` prints the 20-slot balanced, seeded schedule.
 - `manifest` builds the canonical manifest and its fingerprint. It refuses
-  unless 20 × the per-slot reservation fits USD 1.00. The manifest freezes:
+  unless 20 × the per-slot reservation fits USD 1.00. The manifest that is
+  pre-registered must be generated on the Gate 4 stack E itself (see
+  [Paid](#paid)); one generated on any other stack never matches. The manifest
+  freezes:
+  - the **stack settings and identity**: database name, provider, provider name,
+    model, output cap, prices and generation lookup;
   - the **implementation fingerprint**: committed blob ids of `server/src`,
     `reviewer-core/src`, their package and lock files, and `scripts/e2e.sh`.
     Unlike `HEAD`, it does not change when the preregistration is committed,
@@ -86,13 +200,12 @@ pnpm exec tsx src/experiments/hw2/cli.ts manifest --api … --stack … --databa
 
 ### Authorizing a paid phase (server-side capability)
 
-The server refuses every slot unless the operator's capability authorizes it. A
-direct API call therefore cannot bypass the gate. After a gate is explicitly
-authorized:
+The server refuses every slot unless the operator's capability authorizes it,
+so a direct API call cannot bypass the gate. Run this only **after Gate 3 is
+explicitly authorized**:
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget 0.50 --hours 12 \
-  --api … --stack … --database … --container …
+pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget 0.50 --hours 12 "${STACK[@]}"
 ```
 
 - This writes `~/.devdigest/hw2-experiments/<stack-id>/capability.json`
@@ -107,39 +220,143 @@ pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authori
   experiment runs: known cost, zero for refusals, the full reservation for
   anything unknown. It caps each phase at min(phase cap, capability budget)
   and the total at USD 1.50, and returns 409 when a slot would exceed either.
+- `authorize` itself refuses a budget above the phase cap (0.50 exploration,
+  1.00 confirmatory).
 - Slot ids carry their phase (`x-` exploration, `c-` confirmatory).
 - Deleting `capability.json` revokes the authorization.
 
 ## Paid
 
-### Gate 3: exploration (≤ USD 0.50)
+Each paid phase runs on its own disposable stack:
+
+| Stack | Phase | Rule |
+| --- | --- | --- |
+| X | Gate 3, exploration | Started per §2 with provisional or candidate settings. Its evidence is exported before it stops. |
+| E | Gate 4, confirmatory | A **new** stack with the final settings. The manifest, the preregistration commit and the confirmatory run all happen on E, and E is **not restarted** in between. |
+
+Why one E:
+- The manifest freezes `stack.database`.
+- Every `scripts/e2e.sh --serve` start creates a new database, `devdigest_hw2f_<nonce>`.
+- A manifest generated on any other stack, or before a restart, never matches the one `run` recomputes, so `run` refuses before any request.
+
+`server/test/hw2-manifest-identity.test.ts` shows both halves of this:
+- a different database identity changes the fingerprint;
+- a preregistration-only commit on the same stack does not.
+
+### Gate 3: exploration on stack X (≤ USD 0.50)
+
+1. Start X (§2) and, in the runner terminal, set the §3 variables for X and
+   run its checks.
+2. Only after Gate 3 is explicitly authorized, create the exploration
+   capability ([Authorizing a paid phase](#authorizing-a-paid-phase-server-side-capability)).
+3. Set the reservation for one exploration slot, validate it, then run:
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend \
-  --api … --stack … --database … --container … --experiment 18 --condition with --count 1 --reservation <USD>
+X_RESERVATION=0.05   # EXAMPLE: USD reserved for this exploration slot
+```
+
+```bash
+python3 -I - "$X_RESERVATION" <<'EOF'
+import sys
+try:
+    usd = float(sys.argv[1])
+except ValueError:
+    sys.exit(f"FAILED: X_RESERVATION={sys.argv[1]!r} is not a number")
+if not 0 < usd <= 0.50:
+    sys.exit("FAILED: X_RESERVATION must be > 0 and <= USD 0.50, the exploration cap")
+print("exploration reservation is valid")
+EOF
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment 18 --condition with --count 1 --reservation "$X_RESERVATION"
 ```
 
 Exploration confirms what the implementation must not assume:
 - the live `openrouter_metadata` shape;
 - which generation id `/generation` accepts;
-- the provider's display name (from the slug);
+- the provider's display name (from the slug), which becomes
+  `DEVDIGEST_EXPERIMENT_PROVIDER_NAME` for E;
 - endpoint prices and limits;
 - whether one-item `order` + `only` + `allow_fallbacks: false` routes as intended;
 - a viable output cap.
 
 Fixtures and settings may be refined only here.
 
-### Gate 4: confirmatory (≤ USD 1.00)
+4. Preserve the exploration evidence before stopping X. Follow
+   [Export the evidence before teardown](#export-the-evidence-before-teardown-gate-4)
+   with these changes:
+   - skip steps 2 and 5 (the report and the screenshots belong to Gate 4);
+   - give step 7 `exploration` as its last argument instead of `confirmatory`.
 
-1. Fill `docs/plans/HW2-experiment-preregistration.md`, paste the manifest into
-   its ```` ```json manifest ```` block, and **commit** it.
-2. Restart the stack with the frozen values (`…_PROVIDER_NAME` set).
-3. Authorize the confirmatory phase (`authorize --phase confirmatory --authorized-gate 4 --confirm-spend --budget 1.00 …`), then run:
+   Stop X only after steps 1, 3, 4, 6 and 7 succeeded. Keep its ledger: its
+   spend counts toward the USD 1.50 total.
+
+### Gate 4: confirmatory on a new stack E (≤ USD 1.00)
+
+1. **Prepare E.**
+   - In a new terminal at the repository root, set the §2 settings to the final
+     values established at Gate 3, including
+     `DEVDIGEST_EXPERIMENT_PROVIDER_NAME`.
+   - Run the §2 validation, then confirm that the provider name is set:
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts run --phase confirmatory --authorized-gate 4 --confirm-spend \
-  --prereg ../docs/plans/HW2-experiment-preregistration.md --rules <rules.json> \
-  --api … --stack … --database … --container …
+if [ -n "${DEVDIGEST_EXPERIMENT_PROVIDER_NAME:-}" ]; then echo "provider name: $DEVDIGEST_EXPERIMENT_PROVIDER_NAME"; else echo "FAILED: DEVDIGEST_EXPERIMENT_PROVIDER_NAME is required for stack E"; false; fi
+```
+
+   - Start E with `scripts/e2e.sh --serve` (§2). Leave this terminal and E
+     running until the evidence export has succeeded.
+
+2. **Check E.** In the runner terminal:
+   - set `ID` to E's stack id;
+   - set the §3 variables;
+   - run the stack check and `check`.
+3. **Generate the confirmatory manifest on E.**
+   - Set `SEED`, `RULES` and `RESERVATION`, then validate them (§3).
+   - Run `manifest` (§3). It computes the non-Skill previews on E and writes
+     `$MANIFEST`.
+4. **Pre-register while E keeps running.**
+   - Paste `$MANIFEST` into the ```` ```json manifest ```` block of
+     `docs/plans/HW2-experiment-preregistration.md`. Fill in the rest of the
+     document and commit it.
+   - Commit nothing under the implementation paths: `server/src`,
+     `reviewer-core/src`, their package and lock files, and `scripts/e2e.sh`.
+     The implementation fingerprint refuses uncommitted changes there, and a
+     committed change there invalidates the manifest.
+   - Then confirm that the committed preregistration holds exactly E's
+     manifest:
+
+```bash
+python3 -I - ../docs/plans/HW2-experiment-preregistration.md "$MANIFEST" "$DB" <<'EOF'
+import json, re, subprocess, sys
+prereg, manifest_file, database = sys.argv[1:4]
+if subprocess.run(["git", "status", "--porcelain", "--", prereg], capture_output=True, text=True).stdout.strip():
+    sys.exit("FAILED: the preregistration has uncommitted changes")
+fence = "`" * 3  # the manifest block's fence, built here so this snippet holds no literal fence
+block = re.search(fence + r"json manifest\n([\s\S]*?)\n" + fence, open(prereg).read())
+if not block:
+    sys.exit("FAILED: the preregistration has no json manifest block")
+committed, generated = json.loads(block.group(1)), json.load(open(manifest_file))
+if committed != generated:
+    sys.exit("FAILED: the committed manifest is not the one generated on this stack")
+if committed.get("stack", {}).get("database") != database:
+    sys.exit(f"FAILED: the manifest was generated on {committed.get('stack', {}).get('database')}, not on {database}")
+print(f"preregistered manifest matches stack E ({database})")
+EOF
+```
+
+5. **Do not restart E.** The manifest is bound to E's database. If E stops
+   for any reason, follow [If stack E stops unexpectedly](#if-stack-e-stops-unexpectedly).
+6. **Run, only after Gate 4 is separately authorized.** On the same E, with the
+   same variables, create the confirmatory capability, then run the frozen
+   schedule:
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase confirmatory --authorized-gate 4 --confirm-spend --budget 1.00 --hours 12 "${STACK[@]}"
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase confirmatory --authorized-gate 4 --confirm-spend --prereg ../docs/plans/HW2-experiment-preregistration.md --rules "$RULES" "${STACK[@]}"
 ```
 
 The run refuses unless:
@@ -152,11 +369,84 @@ refuses a confirmatory slot without it, or one that does not reproduce it,
 before any model request, and the runner stops on any mismatch.
 Confirmatory slots also need a known max-completion-tokens limit.
 
+7. **Export the evidence, then stop E.** Follow
+   [Export the evidence before teardown](#export-the-evidence-before-teardown-gate-4).
+
+### If stack E stops unexpectedly
+
+Only the ledger directory `~/.devdigest/hw2-experiments/<stack-id>/` survives.
+E's database, runs and traces are gone, and so is the server-side budget
+computed from them. A replacement stack starts with a new database, a new
+ledger and zero recorded spend.
+
+1. **Stop all paid commands.** Do not run `run` against another stack with
+   this preregistration: it refuses anyway, because the database identity
+   differs. Do not run `authorize` again.
+2. **Never replay a slot that may have cost money:**
+   - a slot recorded as `reserved`, `dispatched` or `ambiguous` is unresolved;
+     without E's API it cannot be reconciled, so it is treated as `ambiguous`
+     and charged its full reservation;
+   - a `completed` or `failed` slot keeps its recorded outcome;
+   - none of these is ever run again.
+3. **Settle the spend offline.** This uses the same rule as the runner's
+   `charge()`. Pass every ledger of this experiment, X's and E's, because
+   exploration counts toward the USD 1.50 total. It reads the ledgers only.
+
+```bash
+X_ID=hw2f-11aa22bb   # EXAMPLE: replace with the exploration stack's id
+```
+
+```bash
+python3 -I - "$HOME/.devdigest/hw2-experiments/$X_ID/ledger.jsonl" "$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl" <<'EOF'
+import json, sys
+TERMINAL = {"completed", "failed", "refused", "ambiguous"}
+slots = {}
+for path in sys.argv[1:]:
+    for line in open(path):
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        current = slots.get(event["slot_id"])
+        if current and current["state"] in TERMINAL:
+            continue
+        slots[event["slot_id"]] = {"state": event["state"], "phase": event["phase"], "reservation": event["reservation_usd"], "cost": event.get("cost_usd")}
+def charge(slot):
+    if slot["state"] == "refused":
+        return 0.0
+    if slot["state"] in ("completed", "failed") and slot["cost"] is not None:
+        return slot["cost"]
+    return slot["reservation"]
+spent = {phase: sum(charge(s) for s in slots.values() if s["phase"] == phase) for phase in ("exploration", "confirmatory")}
+total = spent["exploration"] + spent["confirmatory"]
+for state in sorted({s["state"] for s in slots.values()}):
+    print(f"{state}: {', '.join(sorted(k for k, s in slots.items() if s['state'] == state))}")
+print(f"charged: exploration ${spent['exploration']:.6f}, confirmatory ${spent['confirmatory']:.6f}, total ${total:.6f}")
+print(f"remaining confirmatory budget at most ${max(0.0, min(1.00 - spent['confirmatory'], 1.50 - total)):.6f}")
+print("never replay: " + (", ".join(sorted(k for k, s in slots.items() if s["state"] != "refused")) or "(none)"))
+EOF
+```
+
+4. **Preserve what survived.**
+   - Run the secret scan (export step 6) and the checksums (export step 8)
+     over whatever was exported.
+   - Record the stop time, the ledger states and the output above in the
+     results document. A lost or ambiguous slot stays in the evidence as such;
+     it is never silently replaced.
+5. **Report and wait.** Continuing needs:
+   - a new preregistration revision, committed before any further paid call,
+     that documents the lost and ambiguous slots and says which slots, if any,
+     the new stack runs;
+   - a new stack E with its own manifest (Gate 4 steps 1–5);
+   - a separate, explicit authorization.
+
+   On that stack, `authorize --budget` must not exceed the remaining budget
+   printed above, because the new stack's server and ledger start from zero.
+   The OpenRouter key limit remains the outer control.
+
 ### Report
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts report --prereg ../docs/plans/HW2-experiment-preregistration.md \
-  --api … --stack … --database … --container … --out report.md
+pnpm exec tsx src/experiments/hw2/cli.ts report --prereg ../docs/plans/HW2-experiment-preregistration.md "${STACK[@]}" --out "$HOME/.devdigest/hw2-experiments/$ID/report.md"
 ```
 
 The report covers **all 20 scheduled slots**, including those never
@@ -182,6 +472,190 @@ Per experiment it gives the with and without detections and counts, and the
 outcome: success, negative, inconclusive, incomplete, or *invalid* when any
 otherwise eligible slot broke the frozen fingerprint or did not execute its
 preregistered slot, condition or Skills.
+
+### Export the evidence before teardown (Gate 4)
+
+Stopping the stack deletes its database and every trace in it (`docker rm -f`).
+Only `~/.devdigest/hw2-experiments/<stack-id>/` survives. Before the row 19/20
+browser check and **before stopping E**, export the evidence into that
+directory.
+
+- Run the stack itself in your own terminal: an agent's background task ends
+  with the agent session.
+- Run these steps from `server/` in a second terminal.
+- The export reads only the local API on loopback (no credentials), the
+  stack's own database (which never holds keys) and the ledger. It never copies
+  `secrets.json`, `capability.json` or `capability.token`, and no step prints a
+  key.
+- Steps 1, 3, 4, 6 and 7 **fail closed**: on any problem they print `FAILED`
+  and return a nonzero status. Stop E only after all of them have succeeded.
+
+1. In a new terminal, set the stack variables exactly as in §3. The id is **an
+   example**: replace it with the `stack id` that `--serve` printed. Then
+   create the evidence directory.
+
+```bash
+ID=hw2f-0a1b2c3d   # EXAMPLE: replace with the stack id that --serve printed
+```
+
+```bash
+API=http://127.0.0.1:3251; DB="devdigest_hw2f_${ID#hw2f-}"; CONTAINER="devdigest-hw2f-${ID#hw2f-}"; STACK=(--api "$API" --stack "$ID" --database "$DB" --container "$CONTAINER"); EV="$HOME/.devdigest/hw2-experiments/$ID/evidence"; LEDGER="$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl"
+```
+
+```bash
+if [[ "$ID" =~ ^hw2f-[a-z0-9]{4,32}$ ]] && test -s "$LEDGER" && (umask 077 && mkdir -p "$EV/traces"); then echo "evidence directory ready for $ID"; else echo "FAILED: no ledger at $LEDGER (check ID)"; false; fi
+```
+
+2. Write the final report:
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts report --prereg ../docs/plans/HW2-experiment-preregistration.md "${STACK[@]}" --out "$EV/report.md" > /dev/null
+```
+
+3. Export the trace of every run the ledger names, one file per slot.
+   - Each trace must be a JSON object whose `experiment.slot_id` is that slot.
+   - Anything else (an HTTP error, an empty body, invalid JSON, the wrong slot)
+     is listed in `traces/MISSING.txt`.
+   - The export continues past a failure, then fails at the end.
+
+```bash
+python3 -I - "$EV" "$LEDGER" "$API" <<'EOF'
+import json, pathlib, sys, urllib.error, urllib.request
+ev, ledger, api = sys.argv[1:4]
+runs = {}
+for line in open(ledger):
+    event = json.loads(line)
+    if event.get("run_id"):
+        runs[event["slot_id"]] = event["run_id"]
+missing = []
+for slot, run in sorted(runs.items()):
+    target = pathlib.Path(ev, "traces", f"{slot}.json")
+    try:
+        with urllib.request.urlopen(f"{api}/runs/{run}/trace", timeout=30) as response:
+            body = response.read()
+        trace = json.loads(body)
+        if not isinstance(trace, dict) or (trace.get("experiment") or {}).get("slot_id") != slot:
+            raise ValueError("not this slot's trace")
+        target.write_bytes(body)
+    except (urllib.error.URLError, ValueError) as err:
+        target.unlink(missing_ok=True)
+        missing.append(f"{slot} {run} {err}")
+pathlib.Path(ev, "traces", "MISSING.txt").write_text("".join(m + "\n" for m in missing))
+print(f"{len(runs) - len(missing)} of {len(runs)} traces exported")
+if not runs:
+    sys.exit("FAILED: the ledger names no run, so there is nothing to export")
+if missing:
+    sys.exit(f"FAILED: {len(missing)} trace(s) not exported, see traces/MISSING.txt. Do not stop the stack.")
+EOF
+```
+
+4. Dump the run, trace, review and finding rows (data only):
+
+```bash
+(umask 077 && docker exec "$CONTAINER" pg_dump -U devdigest -d "$DB" --data-only -t agent_runs -t run_traces -t reviews -t findings -t agents -t agent_skills -t skills > "$EV/db-data.sql") || { echo "FAILED: pg_dump"; false; }
+```
+
+5. Rows 19 and 20, by hand, on `http://localhost:3250`. Save two PNG
+   screenshots under these exact names:
+   - `$EV/with-skill-trace.png`: a completed **with**-skill trace, whose Skills
+     block shows `~N tokens` and only the target skill;
+   - `$EV/without-skill-trace.png`: a completed **without**-skill trace, with no
+     Skills block.
+6. Check that no secret was exported.
+   - The script reads the dedicated key into memory and prints only file names
+     and what was found, never the key.
+   - It prints `clean` and exits 0 only when the evidence directory exists, is
+     not empty, and nothing was found; otherwise it exits 1.
+
+```bash
+python3 -I - "$EV" <<'EOF'
+import json, pathlib, sys
+ev = pathlib.Path(sys.argv[1])
+if not ev.is_dir() or not any(ev.rglob("*")):
+    sys.exit(f"FAILED: no exported evidence in {ev}")
+secrets = pathlib.Path.home() / ".devdigest" / "hw2-experiments" / "secrets.json"
+key = json.loads(secrets.read_text()).get("OPENROUTER_API_KEY", "") if secrets.exists() else ""
+needles = {"the experiment key": key, "an sk-or- key": "sk-or-", "a bearer header": "Bearer "}
+hits = [f"{p.relative_to(ev)}: {label}" for p in sorted(ev.rglob("*")) if p.is_file()
+        for label, needle in needles.items() if needle and needle in p.read_text(errors="replace")]
+if hits:
+    sys.exit("FAILED: secret material found:\n" + "\n".join(hits))
+print("clean")
+EOF
+```
+
+7. Check that the export is complete. The last argument is `confirmatory` at
+   Gate 4, or `exploration` for stack X, where the report and screenshots do
+   not apply. All of these must hold:
+   - the report exists and is not empty (confirmatory);
+   - the dump holds at least one `run_traces` **record** per exported slot,
+     not only the empty `COPY` statement;
+   - every required trace exists and is not empty;
+   - `traces/MISSING.txt` is empty;
+   - both named screenshots exist and are PNG files (confirmatory).
+
+```bash
+python3 -I - "$EV" "$LEDGER" confirmatory <<'EOF'
+import json, pathlib, sys
+ev, ledger, phase = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+if phase not in ("confirmatory", "exploration"):
+    sys.exit(f"FAILED: unknown phase {phase!r}; use confirmatory or exploration")
+slots = sorted({e["slot_id"] for e in map(json.loads, open(ledger)) if e.get("run_id")})
+problems = []
+report = ev / "report.md"
+if phase == "confirmatory" and (not report.is_file() or report.stat().st_size == 0):
+    problems.append("report.md is missing or empty")
+dump = ev / "db-data.sql"
+trace_rows = 0
+if not dump.is_file() or dump.stat().st_size == 0:
+    problems.append("db-data.sql is missing or empty")
+else:
+    in_traces = False
+    for line in dump.read_text(errors="replace").splitlines():
+        if line.startswith("COPY public.run_traces "):
+            in_traces = True
+        elif in_traces and line == "\\.":
+            in_traces = False
+        elif in_traces and line.strip():
+            trace_rows += 1
+    if trace_rows == 0 or trace_rows < len(slots):
+        problems.append(f"db-data.sql holds {trace_rows} run_traces record(s); expected at least {max(len(slots), 1)}")
+if not slots:
+    problems.append("the ledger names no run")
+for slot in slots:
+    trace = ev / "traces" / f"{slot}.json"
+    if not trace.is_file() or trace.stat().st_size == 0:
+        problems.append(f"traces/{slot}.json is missing or empty")
+missing = ev / "traces" / "MISSING.txt"
+if missing.is_file() and missing.read_text().strip():
+    problems.append("traces/MISSING.txt lists traces that were not exported")
+for name in ("with-skill-trace.png", "without-skill-trace.png") if phase == "confirmatory" else ():
+    shot = ev / name
+    if not shot.is_file() or shot.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        problems.append(f"{name} is missing or not a PNG screenshot")
+print(f"{phase}: checked {trace_rows} run_traces record(s) and {len(slots)} trace file(s)" + (", the report and 2 screenshots" if phase == "confirmatory" else ""))
+if problems:
+    sys.exit("FAILED, do not stop the stack:\n" + "\n".join(problems))
+print("complete")
+EOF
+```
+
+8. Record checksums:
+
+```bash
+(cd "$EV" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && wc -l < SHA256SUMS)
+```
+
+9. Stop E (Ctrl-C in its terminal) **only** after steps 1, 3, 4, 6 and 7
+   succeeded. The ledger and `$EV` stay under
+   `~/.devdigest/hw2-experiments/$ID/`, outside git.
+10. Commit only normalized, secret-free results, and only after step 6 printed
+    `clean`:
+    - per-slot results and outcomes from `report.md`, into
+      [`HW2-skills-experiments.md`](HW2-skills-experiments.md);
+    - the two screenshots.
+
+    Raw traces and `db-data.sql` stay outside git.
 
 ## Safety rules the code enforces
 

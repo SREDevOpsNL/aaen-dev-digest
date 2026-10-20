@@ -164,6 +164,22 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   lifecycle: HEAD moves when the pre-registration is committed, the
   fingerprint does not; a mutation back to HEAD fails it).
 
+- **2026-10-20** — `bash -n` does not show that a documented command
+  sequence works. The HW2 operator guide passed it, yet:
+  - `ID=<stack id>` is an input redirection, not an assignment;
+  - `cmd || echo "FAILED"` returns 0, so a failure looks like success;
+  - a secret scan over a missing evidence directory printed `clean`.
+
+  Test a runbook by extracting its fenced `bash` blocks **verbatim** and
+  running them in order in one shell. Use a sandboxed `HOME` and stand-ins for
+  the external commands (`pnpm`, `docker`, a mock HTTP endpoint), and assert
+  each block's exit status in success and failure scenarios. Write failure
+  branches as `|| { echo "FAILED: …"; false; }` or `sys.exit("FAILED: …")`,
+  and use clearly marked example values instead of `<placeholders>`.
+  Evidence: `docs/plans/HW2-experiment-operator-guide.md` (28 blocks,
+  24 scenarios with asserted exit codes, PR #24); the empty-directory case was
+  found only by running the blocks.
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-20** — Do not assume that URLs, screenshots, or other source
