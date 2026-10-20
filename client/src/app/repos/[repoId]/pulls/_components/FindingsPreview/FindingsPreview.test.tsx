@@ -142,6 +142,21 @@ describe("FindingsPreview", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
+  it("names the agent and changes the heading only in the latest-agent-runs scope", () => {
+    const items = [{ ...CRITICAL, agent_name: "Security Reviewer" }, { ...WARNING, agent_name: null }];
+    const { unmount } = renderPreview({ counts: { CRITICAL: 1, WARNING: 1 }, items });
+    fireEvent.mouseEnter(screen.getByRole("group"));
+    expect(screen.getByRole("tooltip")).toHaveTextContent("2 FINDINGS IN THIS RUN");
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent(/Security Reviewer|Unknown agent/);
+    unmount();
+
+    renderPreview({ counts: { CRITICAL: 1, WARNING: 1 }, items, scope: "latestAgentRuns" });
+    fireEvent.mouseEnter(screen.getByRole("group"));
+    expect(screen.getByRole("tooltip")).toHaveTextContent("2 FINDINGS IN LATEST AGENT RUNS");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Unauthenticated endpoint · security · Security Reviewer");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Inclusive date range · bug · Unknown agent");
+  });
+
   it("renders counts without a preview when the findings are not loaded", () => {
     renderPreview({ counts: { WARNING: 2 }, items: [] });
     const group = screen.getByRole("group", { name: "Findings: 2 WARNING" });

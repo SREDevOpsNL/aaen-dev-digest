@@ -20,6 +20,7 @@ export function FindingsPreview({
   counts,
   items,
   align = "left",
+  scope = "run",
 }: {
   /** Findings per severity; zero and missing severities are not shown. */
   counts: Partial<Record<string, number>>;
@@ -27,6 +28,8 @@ export function FindingsPreview({
   items: PreviewFinding[];
   /** Which edge of the counts the preview aligns to. */
   align?: "left" | "right";
+  /** One run's findings (Timeline), or each agent's latest run (PR list), which names each finding's agent. */
+  scope?: "run" | "latestAgentRuns";
 }) {
   const t = useTranslations("prReview");
   const triggerRef = React.useRef<HTMLSpanElement>(null);
@@ -96,7 +99,7 @@ export function FindingsPreview({
           <span id={tooltipId} role="tooltip" style={s.tooltipCard}>
             <span style={s.heading}>
               <Icon.AlertOctagon size={12} aria-hidden />
-              {t("list.findingsInRun", { count: items.length })}
+              {t(scope === "run" ? "list.findingsInRun" : "list.findingsInLatestAgentRuns", { count: items.length })}
             </span>
             <span style={s.list}>
               {items.map((finding, index) => {
@@ -114,6 +117,11 @@ export function FindingsPreview({
                         {t("panel.severity." + finding.severity.toLowerCase())}
                       </span>{" "}
                       <strong>{finding.title}</strong> · <span style={s.category}>{finding.category}</span>
+                      {scope === "latestAgentRuns" && (
+                        <>
+                          {" "}· <span style={s.agent}>{finding.agent_name ?? t("list.unknownAgent")}</span>
+                        </>
+                      )}
                     </span>
                     <span className="mono" style={s.location}>
                       {finding.file}:{lines} · {Math.round(finding.confidence * 100)}%

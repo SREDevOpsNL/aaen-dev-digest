@@ -74,6 +74,8 @@
     "title": "Pull Requests",
     "summary": "{open} open · {needsReview} need review",
     "findingsInRun": "{count} FINDINGS IN THIS RUN",
+    "findingsInLatestAgentRuns": "{count} FINDINGS IN LATEST AGENT RUNS",
+    "unknownAgent": "Unknown agent",
     "loading": "Loading pull requests…",
     "status": {
       "open": "Open",
