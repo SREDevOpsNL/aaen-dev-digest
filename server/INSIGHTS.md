@@ -22,6 +22,32 @@ server/src/vendor/shared/contracts/platform.ts:178.
   `server/src/modules/pulls/routes.ts:172` (`latestReviewIds`),
   `server/src/modules/pulls/routes.ts:178` (`findingRows`).
 
+- **2026-10-20** — Correction to the 2026-09-28 "different scopes" entry above:
+  severity counts and previews no longer come from the newest completed review.
+  They are the union of **each agent's latest successful review run**. With
+  several agents on one PR, the old rule silently dropped every agent but the
+  last to finish (L01 mentor review).
+  - **Identity:** `coalesce(reviews.agent_id, agent_runs.agent_id)`, with the
+    agent name joined on that same expression, so grouping and the label cannot
+    disagree.
+  - **Decision on "latest":** order by `agent_runs.ran_at`, then
+    `reviews.created_at`, then the review id. Ordering by `created_at` alone was
+    rejected: two overlapping runs of one agent would let the run that
+    *started* first win, because it *finished* last.
+  - **Unchanged:** score still uses the newest review by `created_at`, and cost
+    still sums every successful run.
+
+  Evidence: server/src/modules/pulls/status.ts:81 (`compareReviewRuns`),
+  server/src/modules/pulls/routes.ts:137 (agent identity), and
+  server/test/reviews.it.test.ts ("takes the run that started last when two
+  runs of an agent overlap").
+
+- **2026-10-20** — PR-list cost now sums each successful run **once**, even
+  when several review rows link to it. No current code path creates such rows,
+  so this is a defensive fix. See the matching
+  [LEARNINGS entry](LEARNINGS.md#codebase-patterns--tool--library-notes).
+  Evidence: server/src/modules/pulls/routes.ts:176.
+
 ## What Doesn't Work
 
 ## Codebase Patterns & Tool / Library Notes
@@ -33,3 +59,18 @@ server/src/vendor/shared/contracts/platform.ts:178.
 ## Session Notes
 
 ## Open Questions
+
+- **2026-10-14** — Is the Intent Layer's classifier budget (30 s per request,
+  35 s per derivation) enough for large PRs? It has only applied since the L03
+  fix that aborts timed-out requests; before, OpenRouter ignored it. In a
+  post-migration smoke test on the dev database with
+  `deepseek/deepseek-v4-flash` via OpenRouter, Recompute on PR #2 (66 files,
+  2,507 changed lines) failed with `Operation timed out after 35000ms` after
+  35.1 s; no analysis was stored and the cost was marked incomplete. A first
+  open on the seeded PR #482 (4 files, no patches, so no excerpts) succeeded in
+  11.3 s (1,617 / 1,045 tokens, $0.00014). One attempt each, with different
+  inputs, so this does not show that PR size caused the timeout. Measure
+  classifier latency against PR size before changing the budget. Evidence:
+  `server/src/modules/intent/constants.ts` (`INTENT_TIMEOUT_MS`,
+  `INTENT_TIMEOUT_MARGIN_MS`); the general cancellation pitfall is in the root
+  `LEARNINGS.md` (2026-10-14, `withTimeout`).

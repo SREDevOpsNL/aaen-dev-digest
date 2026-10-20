@@ -2,8 +2,12 @@
 
 > **Document role:** Canonical curated explanation of how the current DevDigest
 > system works.
-> **Last verified:** 2026-09-21 against `main` at
-> `4cdbd57db1345c0d80dcc0ef82d6831fc400797b`.
+> **Last verified:** 2026-10-11 against the integrated L01 (severity filters,
+> review cost, findings previews) and L02 (skills, conventions) implementation
+> on the L02 branch after `main` was merged into it. Package typechecks and
+> lint, unit and Docker-backed persistence tests, and hermetic browser flows
+> passed locally in WSL and in GitHub Actions; Git history identifies the exact
+> commit.
 > Product identity is owned by
 > [`docs/ai-context/00_PRODUCT_IDENTITY.md`](../ai-context/00_PRODUCT_IDENTITY.md),
 > and capability status by
@@ -19,14 +23,18 @@ Its current operational capabilities centre on:
 - cloning and indexing repositories locally;
 - importing and browsing pull requests;
 - configuring specialised reviewer agents;
+- managing reusable text-only review skills and attaching them to agents;
+- extracting grounded house-rule conventions from a repository sample and
+  turning accepted conventions into skills;
+- deriving and caching each PR's intent and giving it to reviewers as context;
 - executing one or all enabled AI reviewer configurations;
 - grounding findings against actual changed lines;
 - persisting reviews, findings, run status, and execution traces;
 - accepting or dismissing findings locally;
 - authoring inline review comments that are posted to GitHub.
 
-Weekly digests, evaluation, persistent memory, CI export, first-class skills,
-plugins, dashboards, onboarding, and related capabilities currently exist
+Weekly digests, evaluation, persistent memory, CI export, plugins, dashboards,
+onboarding, and related capabilities currently exist
 primarily as schema, contracts, prompt slots, or other scaffolding for later
 course stages. They are not part of the operational architecture unless listed
 as operational in the product-boundary document.
@@ -295,10 +303,29 @@ The guard tells the model that text inside those blocks is evidence to analyse,
 not instructions to follow. It specifically prevents claims such as “this is a
 test fixture” or “do not report this problem” from redefining the review task.
 
-The reusable engine has optional slots for skills, memory, and specs. Their
-existence is an extension point, not evidence that the studio resolves those
-inputs today. The current studio executor passes the diff, PR description,
-agent prompt, caller digest, repo map, and rank note.
+The reusable engine has optional slots for skills, memory, and specs. The studio
+now resolves an agent's globally enabled linked skills in deterministic order,
+passes each body as separately fenced untrusted review criteria, and persists the
+assembled skill block in the run trace, with the token count of the whole Skills
+section as sent (`PromptAssembly.skills_tokens`, counted by the studio tokenizer
+over `renderSkillsSection`, the renderer `assemblePrompt` itself uses). Memory and project specs remain extension
+points that the studio does not resolve today. The executor also passes the diff,
+PR description, agent prompt, caller digest, repo map, and rank note.
+
+Before the agents run, the executor resolves one PR intent for the whole batch
+through the `intent` module: a fresh cached intent is reused, a missing or stale
+one is refreshed once (single-flight per PR revision: PR, head SHA, context
+fingerprint and linked-issue content), and on failure the batch reviews without
+intent. A derivation that a newer one superseded, or one for different inputs,
+is never injected. If every run is cancelled before this step, no classifier
+call is made. The derivation's deadline aborts the classifier request through
+`StructuredRequest.signal` rather than abandoning it. Single flight is
+in-process, like the rest of the executor's state, so it relies on the
+one-process-per-database assumption. `reviewer-core` renders the validated
+intent as an untrusted section and adds a trusted scope policy to the system message after the
+injection guard; without intent the prompt is unchanged. The run trace stores an
+immutable copy of the intent used, and classifier cost stays on the `pr_intent`
+cache rather than in the run's cost.
 
 ### Strategy selection
 
@@ -310,7 +337,8 @@ Each agent can choose:
   lines and changes more than one file.
 
 File chunks are processed sequentially. Cancellation is checked before each
-expensive chunk call. Structured output receives up to two repair/retry attempts
+agent, before each expensive chunk call, and before persistence, against the
+durable `agent_runs.status` (the in-memory flag is only a fast path). Structured output receives up to two repair/retry attempts
 by default.
 
 ### Structured output
@@ -378,7 +406,10 @@ outputs, but `prompt_assembly` is a whole-diff representation rather than a
 complete copy of every exact per-file message sent to the model.
 
 Failures and cancellations update the run status and persist a trace containing
-the event log and error information available at that point. On server startup,
+the event log and error information available at that point. Terminal status
+writes are compare-and-set from `running`, so a cancelled run is never
+overwritten to `done` or `failed`; a successful run's status, review, findings,
+and reviewed head commit in one transaction. On server startup,
 runs left in `running` state by a dead process are reaped rather than resumed.
 Historical runs and runs whose provider did not report a complete cost retain a
 `null` cost. They are displayed as unavailable, never as `$0.00`.
@@ -417,11 +448,20 @@ Run cost is shown on the PR list as the sum of provider-reported costs from
 all successful review runs for that PR; a PR with no successful review renders an
 empty Cost cell. It is also shown inline beside each reviewer-run timestamp and
 in the General Reviewer trace drawer beside Duration, Tokens, and Findings.
-Score and the PR-list Findings popup use the newest completed review: its
-severity indicators, popup count, and previews are all scoped to that one
-review. Preview rationales are normalized and bounded to 180 characters before
-the list response is returned, while the stored finding rationale remains
-unchanged.
+Score uses the newest completed review. The PR-list FINDINGS column and its
+popup use each agent's latest successful review run instead, so a PR reviewed by
+several agents shows all of their current findings:
+
+- **Agent:** `coalesce(reviews.agent_id, agent_runs.agent_id)`.
+- **"Latest"** is the run that started last, then the review written last, then
+  the higher review id.
+- **No fallback:** a clean latest review replaces that agent's older findings.
+
+The popup reads "N FINDINGS IN LATEST AGENT RUNS" and names each finding's
+agent. A Timeline tile's popup stays scoped to its one run. Preview rationales
+are normalized and bounded to 180 characters before the list response is
+returned, while the stored finding rationale remains unchanged. The full rules
+are in [`server/docs/pr-list-summary.md`](../../server/docs/pr-list-summary.md).
 
 Finding disposition and GitHub publication are deliberately separate paths.
 Accept/dismiss writes local finding state. Posting through the inline composer
@@ -437,12 +477,16 @@ calls GitHub and does not persist a second local comment copy.
 | Pull requests | `GET /repos/:id/pulls`, `GET /pulls/:id`, `POST /repos/:id/poll` |
 | GitHub comments | `GET/POST /pulls/:id/comments` |
 | Repo intelligence | `GET /repos/:id/index-state`, `POST /repos/:id/resync` |
-| Agents | Agent CRUD, versions, model lists, and skill-link endpoints under `/agents` and `/providers` |
+| Agents | Agent CRUD, versions, model lists, and ordered skill links (`GET/POST /agents/:id/skills`; at most 4 per agent, enforced under the agent row lock, `422 skill_limit_reached`) under `/agents` and `/providers`; `GET /agents` adds each agent's `skill_count` (linked skills in its workspace, enabled or not, from one query) |
+| Skills | `GET/POST /skills` (`link_agent_id` creates and links in one transaction), `GET/PUT/DELETE /skills/:id`, versions under `/skills/:id/versions` (restore a previous body as a new version with `POST /skills/:id/versions/:version/restore`), and `GET /skills/:id/agents` |
+| Conventions | `GET /repos/:id/conventions`, `POST /repos/:id/conventions/extract`, `POST /repos/:id/conventions/skill`, `PATCH/DELETE /conventions/:id` |
+| PR intent | `GET /pulls/:id/intent` (cache only), `POST /pulls/:id/intent` (first-open generation), `POST /pulls/:id/intent/recompute`; the POSTs are rate-limited |
+| Experiments (HW2, opt-in) | `GET /experiments/identity`, `GET /experiments/endpoints`, `POST /experiments/runs`, `GET /experiments/slots/:slotId`; 404 unless the server runs with a complete experiment configuration (disposable stack only) |
 | Reviews | `POST /pulls/:id/review`, review/finding reads and actions |
 | Runs | Active/history reads, cancel/delete, SSE events, and persisted trace |
 
-The agent skill-link endpoints are present, but their existence does not make
-skills an end-to-end review feature; see the product boundary.
+Skills and the Conventions Extractor are operational; their exact scope and
+limits are recorded in the product boundary.
 
 ## Data and storage
 
@@ -459,7 +503,8 @@ Operational table groups include:
 | Local identity/settings | `users`, `workspaces`, `workspace_members`, `settings` |
 | Repositories and PRs | `repos`, `pull_requests`, `pr_files`, `pr_commits` |
 | Agents | `agents`, `agent_versions` |
-| Reviews | `reviews`, `findings` |
+| Skills and conventions | `skills`, `skill_versions`, `agent_skills`, `conventions` |
+| Reviews | `reviews`, `findings`, `pr_intent` (intent cache) |
 | Execution | `agent_runs`, `run_traces`, `jobs` |
 | Repo intelligence | `repo_index_state`, `file_edges`, `file_facts`, `file_rank`, `repo_map_cache`, plus indexed symbol/reference storage |
 

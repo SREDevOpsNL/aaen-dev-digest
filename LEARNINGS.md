@@ -24,6 +24,21 @@ Module-local findings belong beside their subject —
   (neither is installed there). Method:
   [Agent environment](docs/ai-context/02_AGENT_ENVIRONMENT.md#verifying-instruction-discovery).
 
+- **2026-10-08** — Correction to the 2026-10-07 `AGENTS.md` discovery entry:
+  Claude Code was already installed inside WSL (npm global under nvm, 2.1.278),
+  and the earlier "not installed" reading came from a non-interactive `bash -s`
+  probe that had not loaded nvm. With nvm sourced, the WSL-native
+  **Claude Code CLI 2.1.278** passes the same test: a fresh `claude -p` session
+  with `--tools ""` and `--no-session-persistence`, whose `stream-json` log has
+  zero `tool_use` events, reported the root sentinel when started at
+  `/home/dmitri/projects/aaen-dev-digest` and both the root and
+  `client/AGENTS.md` sentinels when started in `client/`. The sentinels were
+  removed and `git diff` was empty afterwards. The WSL-native Codex CLI
+  (`@openai/codex@0.155.1`, npm global under nvm) is installed but not logged
+  in, so its discovery is still unverified. Evidence: `claude --version` and
+  `codex --version` after `. "$NVM_DIR/nvm.sh"`; `codex login status` →
+  `Not logged in`.
+
 ## What Doesn't Work
 
 - **2026-09-17** — Editing `client/src/vendor/shared/` alone silently desyncs the
@@ -86,6 +101,98 @@ typecheck and tests. Do not treat the earlier absence as current state.
 Evidence: client/eslint.config.mjs:15, client/package.json:10,
 .github/workflows/client.yml:47.
 
+- **2026-10-02** — `CLAUDE.md → AGENTS.md` compatibility symlinks failed
+  silently. During L02 development the five Git symlink blobs stored
+  `AGENTS.md\n`, so every native checkout pointed at a file named with a
+  trailing newline, and the verifier of that time accepted them by trimming the
+  target. They are not needed: Claude Code loads `AGENTS.md` itself when no
+  `CLAUDE.md` exists (verified 2026-10-07 under What Works). Keep `AGENTS.md` as
+  the only instruction file; `node scripts/verify-agent-instructions.mjs`
+  rejects symlinks and `CLAUDE.md`-style files. Evidence:
+  `git cat-file -p 1be590e:CLAUDE.md | od -c` → `A G E N T S . m d \n`, from the
+  original L02 branch. That commit is not part of the rewritten PR #4 history,
+  which never contains the symlinks, so the blob is reproducible only where
+  `1be590e` is still held (a local reflog or an older clone).
+
+- **2026-10-08** — A `claude -p` call inside a script fed to `bash -s` reads the
+  rest of the script from stdin: the first headless session received the
+  remaining lines as extra input, and the commands after it never ran, without
+  an error. Redirect stdin (`claude -p "…" </dev/null`) whenever a headless
+  agent runs inside a stdin-fed script. Evidence: a two-session sentinel test
+  printed only the first session's result until `</dev/null` was added.
+
+- **2026-10-14** — `withTimeout` (a `Promise.race`) does not stop the model
+  call: the caller gets a `TimeoutError`, but the SDK request keeps running, and
+  possibly billing, in the background. Before L03's fix, `OpenRouterProvider`
+  also ignored `StructuredRequest.timeoutMs`: a classifier asked for 120 s took
+  445 s, because only the client's 90 s per-request default applied, and it
+  restarts with every SDK and structured-output retry. A timeout
+  that should cancel must pass an `AbortSignal` into the SDK call; use
+  `withAbortableTimeout` (server) or `StructuredRequest.signal`, and test it
+  against a loopback server that never answers, checking that the connection
+  closes. Evidence: `server/src/platform/resilience.ts`
+  (`withAbortableTimeout`), `reviewer-core/src/llm/openrouter.ts`
+  (`requestOptions`), `server/test/llm-abort.test.ts`,
+  `docs/plans/L03-intent-evaluation.md` (run 2, the 445 s derivation).
+
+- **2026-10-16** — Correction to the 2026-10-02 `CLAUDE.md` symlink entry: the
+  Homework 2 rubric requires a `CLAUDE.md` next to each `AGENTS.md`, so the five
+  are back as symlinks, and they work when the stored target is exactly
+  `AGENTS.md`. The rubric's other allowed form, a one-line `@AGENTS.md` import,
+  fails: Claude Code 2.1.278 expands an `@` import only in the starting
+  directory's `CLAUDE.md`, not in an ancestor's, and once any `CLAUDE.md` exists
+  it no longer reads `AGENTS.md` directly. With imports, a session started in
+  `client/` lost the root `AGENTS.md`, and one started in `client/src/app` got
+  no project instructions at all. With symlinks, sessions started at the root,
+  `client/`, `client/src/app` and `server/src/modules` each received the root
+  and package sentinels exactly once; without any `CLAUDE.md` the same nested
+  probe also passes. Probe below a package root, not only at it. Evidence:
+  headless `claude -p --tools ""` sentinel runs (0 tool calls), sentinels
+  removed afterwards; `scripts/verify-agent-instructions.mjs` (requires Git
+  mode 120000 and the exact stored target).
+
+- **2026-10-19** — A committed document cannot freeze the commit it lives in.
+  The first PR-F2 runner refused a confirmatory run unless the
+  pre-registration's frozen `git rev-parse HEAD` equalled the current `HEAD`,
+  but committing the pre-registration creates a new `HEAD`, so the check
+  could never pass. Freeze a fingerprint of the implementation instead: the
+  committed blob ids (`git ls-tree -r HEAD -- <paths>`) of the paths that
+  determine behaviour, which a docs-only commit leaves unchanged, and refuse
+  uncommitted changes in those paths so the fingerprint describes the running
+  code. Evidence: `server/src/experiments/hw2/source.ts`
+  (`implementationFingerprint`), `server/test/hw2-source.test.ts` (a real Git
+  lifecycle: HEAD moves when the pre-registration is committed, the
+  fingerprint does not; a mutation back to HEAD fails it).
+
+- **2026-10-20** — `bash -n` does not show that a documented command
+  sequence works. The HW2 operator guide passed it, yet:
+  - `ID=<stack id>` is an input redirection, not an assignment;
+  - `cmd || echo "FAILED"` returns 0, so a failure looks like success;
+  - a secret scan over a missing evidence directory printed `clean`.
+
+  Test a runbook by extracting its fenced `bash` blocks **verbatim** and
+  running them in order in one shell. Use a sandboxed `HOME` and stand-ins for
+  the external commands (`pnpm`, `docker`, a mock HTTP endpoint), and assert
+  each block's exit status in success and failure scenarios. Write failure
+  branches as `|| { echo "FAILED: …"; false; }` or `sys.exit("FAILED: …")`,
+  and use clearly marked example values instead of `<placeholders>`.
+  Evidence: `docs/plans/HW2-experiment-operator-guide.md` (28 blocks,
+  24 scenarios with asserted exit codes, PR #24); the empty-directory case was
+  found only by running the blocks.
+
+- **2026-10-20** — A clean merge does not keep docs true. The L01 package docs
+  were written and link-checked on a branch 24 commits behind `main`. When they
+  were merged into `main`, none of the new doc files conflicted, yet many of
+  their claims were false against `main`'s source:
+  - "the studio never fills the skills slot";
+  - the review-run steps (no intent, no transactional finalize);
+  - every `run-executor.ts` and `container.ts` line anchor.
+
+  Git merges a new file without complaint, and a link checker only proves that
+  paths exist. After merging docs that cite `path:line` or describe behaviour,
+  re-read the cited source on the merged tree before opening the PR, or write
+  the docs on a branch cut from current `main`. Evidence: commit `63defcc` on
+  `codex/l01-mentor-followup` (13 docs corrected after merge `75bef55`).
 
 ## Codebase Patterns & Tool / Library Notes
 
@@ -157,6 +264,23 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   `reviewer-core/src/review/run.ts:159-184` (`reviewPullRequest`),
   `server/src/platform/container.ts:181-188` (`Container.buildLlm`).
 
+- **2026-09-25** — The reverted history contains a complete Conventions
+  Extractor specification, implementation, and tests in commit `641b637`, but
+  that commit also bundles an older Skills implementation and migrations
+  `0011`-`0015`. Use it as a porting reference against the current L02 Skills
+  contracts and generate a new migration from the current schema; do not
+  cherry-pick it wholesale. Evidence: `git show
+  641b637:docs/specs/conventions.md`; `git show --stat 641b637`.
+
+- **2026-10-13** — In Claude Code 2.1.278, `claude agents` manages background
+  sessions and does not list custom subagent definitions. Verify a
+  `.claude/agents/<name>.md` subagent with a headless session instead:
+  `claude -p --agent <name> --output-format stream-json --verbose "…" </dev/null`.
+  Its `system/init` event reports the effective `tools` (the frontmatter
+  allowlist), the resolved `model`, and the discovered `agents`. Evidence:
+  both project subagents reported `tools: ["Read","Grep","Glob"]`, models
+  `claude-sonnet-5` / `claude-opus-5`, and answered that they had no write tool.
+
 ## Decisions
 
 - **2026-09-21** — Use the Ubuntu 24.04 WSL2 checkout at
@@ -188,6 +312,16 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   multi-step experiments. Evidence: `devdigest-final-review-db` was healthy,
   then exited with code 0 before the next migration command; the same sequence
   completed when kept in one session (`migrate` → `seed` → API → two reviews).
+
+- **2026-10-13** — In a fresh worktree, `server` `pnpm typecheck` fails with
+  `TS2322: Type 'unknown' is not assignable to type 'T'` in
+  `src/adapters/llm/anthropic.ts` and `openai.ts` even when the code is
+  unchanged, because the server compiles `reviewer-core` source through a path
+  alias and `reviewer-core/node_modules` is missing, so its Zod types do not
+  resolve. Run `npm ci` in `reviewer-core/` before typechecking `server/` in a
+  new worktree. Evidence: the same commit typechecked cleanly after
+  `npm ci` in `reviewer-core/`, with identical `typescript` and `zod`
+  versions in `server/`.
 
 ## Session Notes
 

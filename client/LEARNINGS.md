@@ -22,6 +22,16 @@ correction. Genuinely cross-package findings belong in
 
 ## Codebase Patterns & Tool / Library Notes
 
+- **2026-10-17** — The vendored `FormField` renders its `label` as a sibling of
+  the control, with no `htmlFor`, and the vendored `TextInput`/`Textarea` accept
+  no `id` or `aria-*` props. A field built with them has **no accessible name**,
+  so `getByRole("textbox", { name })` cannot find it. Without editing
+  `vendor/ui`, wrap the control in its own `<label>` holding a visually hidden
+  copy of the label text, and keep `FormField` for the visible label and hint.
+  Evidence: `client/src/vendor/ui/kit/FormField.tsx`,
+  `client/src/app/skills/_components/SkillsRail/_components/CreateSkillModal.tsx`
+  (body field), `client/src/app/skills/page.test.tsx` (selects it by name).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
@@ -33,6 +43,14 @@ correction. Genuinely cross-package findings belong in
   and toggle handler, and test their synchronized pressed states. Evidence:
   `client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx:75`
   (`FindingsPanel`), `e2e/specs/04-pr-findings.flow.json:17`.
+
+- **2026-10-19** — A popover that closes on page scroll or blur must ignore
+  scroll events and focus moves that stay inside it, or a scrollable popover
+  closes as soon as it is scrolled, Tabbed into, or its scrollbar is dragged.
+  Full finding: [`INSIGHTS.md`](INSIGHTS.md#recurring-errors--fixes)
+  (2026-10-19). Evidence:
+  `client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/FindingsPreview.tsx:49`
+  (`onScroll`).
 
 ## Session Notes
 

@@ -61,7 +61,7 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
       </div>
       <div>
         {previews.length > 0 ? (
-          <FindingsPreview counts={pr.findings_by_severity ?? {}} items={previews} align="right" />
+          <FindingsPreview counts={pr.findings_by_severity ?? {}} items={previews} align="right" scope="latestAgentRuns" />
         ) : (
           <span style={s.muted}>—</span>
         )}

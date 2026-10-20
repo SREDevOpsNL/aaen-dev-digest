@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IntentRunSnapshot } from './brief.js';
 
 /**
  * Run trace. The ENTIRE trace of one run is persisted as a SINGLE
@@ -39,6 +40,10 @@ export type ToolCall = z.infer<typeof ToolCall>;
 export const PromptAssembly = z.object({
   system: z.string(),
   skills: z.string().nullish(),
+  /** Tokens of the whole Skills section of the user message as sent (heading,
+      preamble and wrapped skill bodies), counted by the studio tokenizer;
+      null/absent when no skill was attached or in traces written before it existed. */
+  skills_tokens: z.number().int().nonnegative().nullish(),
   memory: z.string().nullish(),
   specs: z.string().nullish(),
   /** Callers-of-changed-symbols digest (T1.3); null when absent. */
@@ -48,6 +53,8 @@ export const PromptAssembly = z.object({
   repo_map: z.string().nullish(),
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
+  /** The derived-intent block (wrapped as untrusted) the model saw; null when reviewed without intent. */
+  intent: z.string().nullish(),
   user: z.string(),
 });
 export type PromptAssembly = z.infer<typeof PromptAssembly>;
@@ -69,6 +76,53 @@ export const RunStats = z.object({
 });
 export type RunStats = z.infer<typeof RunStats>;
 
+/**
+ * HW2 controlled-experiment evidence for one run (absent for every ordinary
+ * run). Written before dispatch (`dispatching`) and again at the end, so a
+ * crash leaves the slot's state on record.
+ */
+export const ExperimentRunTrace = z.object({
+  stack_id: z.string(),
+  slot_id: z.string(),
+  experiment: z.string(),
+  condition: z.enum(['with', 'without']),
+  /** The separately authorized spending phase this slot ran under. */
+  phase: z.enum(['exploration', 'confirmatory']),
+  manifest_fingerprint: z.string(),
+  /** `refused` = stopped before any model request (zero cost). */
+  dispatch_state: z.enum(['refused', 'dispatching', 'completed', 'failed']),
+  refusal_reason: z.string().nullable(),
+  /** sha256 of the exact diff text the review used, and the frozen fixture hash it must equal. */
+  diff_sha256: z.string().nullable(),
+  expected_diff_sha256: z.string(),
+  /** sha256 of the request with the Skill slot replaced by a fixed sentinel. */
+  non_skill_fingerprint: z.string().nullable(),
+  /** sha256 of the Skill slot alone (the linked skill blocks, in order). */
+  skill_fingerprint: z.string().nullable(),
+  /** The frozen non-Skill fingerprint this slot had to match (required in the confirmatory phase). */
+  expected_non_skill_fingerprint: z.string().nullable(),
+  routing: z.object({ order: z.array(z.string()), only: z.array(z.string()), allow_fallbacks: z.literal(false) }),
+  preflight: z
+    .object({
+      input_upper_bound: z.number().int(),
+      output_cap: z.number().int(),
+      price_input_per_token: z.number(),
+      price_output_per_token: z.number(),
+      request_fee_usd: z.number(),
+      context_length: z.number().int().nullable(),
+      max_completion_tokens: z.number().int().nullable(),
+      worst_case_usd: z.number(),
+      reservation_usd: z.number(),
+      price_source: z.string(),
+    })
+    .nullable(),
+  /** False when a dispatched request's usage or cost is not known: reserve its full worst case. */
+  usage_known: z.boolean(),
+  /** One record per attempt as the provider reported it (StructuredAttemptTelemetry). */
+  attempts: z.array(z.record(z.string(), z.unknown())),
+});
+export type ExperimentRunTrace = z.infer<typeof ExperimentRunTrace>;
+
 /** The single-document trace stored in `run_traces.trace`. */
 export const RunTrace = z.object({
   config: z.object({
@@ -86,6 +140,10 @@ export const RunTrace = z.object({
   memory_pulled: z.array(MemoryPulled),
   specs_read: z.array(z.string()),
   log: z.array(RunLogLine),
+  /** Immutable copy of the intent this run used (L03); absent in historical traces. */
+  intent: IntentRunSnapshot.nullish(),
+  /** HW2 experiment evidence; absent for ordinary runs. */
+  experiment: ExperimentRunTrace.nullish(),
 });
 export type RunTrace = z.infer<typeof RunTrace>;
 

@@ -74,6 +74,8 @@
     "title": "Pull Requests",
     "summary": "{open} open · {needsReview} need review",
     "findingsInRun": "{count} FINDINGS IN THIS RUN",
+    "findingsInLatestAgentRuns": "{count} FINDINGS IN LATEST AGENT RUNS",
+    "unknownAgent": "Unknown agent",
     "loading": "Loading pull requests…",
     "status": {
       "open": "Open",
@@ -117,5 +119,47 @@
     "goToReview": "Jump to this run’s findings below",
     "openTrace": "Open run trace & logs",
     "deleteRun": "Delete run"
+  },
+  "intent": {
+    "title": "PR intent",
+    "deriving": "Deriving PR intent…",
+    "recompute": "Recompute",
+    "recomputing": "Recomputing…",
+    "stale": "Stale",
+    "staleReason": {
+      "head_changed": "new commits since it was derived",
+      "context_changed": "title, description, files or linked issue changed",
+      "prompt_changed": "the intent prompt was updated",
+      "legacy": "derived before the Intent Layer"
+    },
+    "staleHint": "This intent no longer matches the PR ({reasons}). Recompute to refresh it.",
+    "confidence": {
+      "low": "Low confidence",
+      "medium": "Medium confidence",
+      "high": "High confidence"
+    },
+    "lowConfidenceHint": "Used as context only. It never narrows the review.",
+    "claimed": "Author claims",
+    "supported": "Supported by the changes",
+    "supportedHint": "Model interpretation. Citations are checked for presence, not correctness.",
+    "inScope": "In scope",
+    "outOfScope": "Out of scope",
+    "discrepancies": "Discrepancies",
+    "discrepancyKind": {
+      "unsupported_claim": "Claim not visible in the changes",
+      "undeclared_change": "Change not mentioned by the author"
+    },
+    "unverified": "Unverified statements",
+    "unverifiedHint": "No valid citation. Do not rely on these.",
+    "noSupported": "Nothing in the changes could be confirmed.",
+    "linkedIssue": "Linked issue #{number}: {title}",
+    "derivedWith": "Derived with {model}",
+    "cost": "classifier cost ${cost}",
+    "costUnknown": "classifier cost not reported",
+    "evidenceTruncated": "Evidence was truncated",
+    "lastError": "Last recompute failed: {error}. Showing the previous intent.",
+    "failed": "The intent could not be derived: {error}",
+    "noKey": "No API key is set for the configured intent model. Add it in Settings, then Recompute.",
+    "loadError": "Couldn't load the PR intent."
   }
 }

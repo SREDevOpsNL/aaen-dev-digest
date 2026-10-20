@@ -23,6 +23,19 @@ the PR list. Unpack the bundle's `__bundler/manifest` (base64, gzip) and read
 the screen source before calling a UI requirement complete. Evidence:
 client/src/app/repos/[repoId]/pulls/[number]/_components/RunHistory/RunHistory.tsx:217.
 
+- **2026-10-19** — Homework 2 criterion 32 (an agent card shows its
+  linked-skill count) passed the static audit and its unit test but failed in
+  the browser. `AgentCard` renders the count only when given the optional
+  `skillCount` prop. `AgentCard.test.tsx` passes that prop itself, while
+  neither real call site passes it, and `GET /agents` returns no count. A
+  component test that supplies an optional prop proves only the component. For
+  an optional prop, check that a real call site provides it, or assert on the
+  page. Evidence:
+  `client/src/app/agents/_components/AgentsListView/AgentsListView.tsx:86`,
+  `client/src/app/agents/[id]/page.tsx:83`,
+  `client/src/app/agents/_components/AgentCard/AgentCard.tsx` (`skillCount`),
+  `docs/plans/HW2-walkthrough-log.md` (row 32).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-10-02** — Correction to the 2026-09-30 title-attribute entry: the
@@ -43,6 +56,24 @@ real browser while every jsdom test passed. Anchor row popovers with
 check popovers in a browser, not only in component tests. Evidence:
 client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/helpers.ts:17,
 client/src/app/repos/[repoId]/pulls/styles.ts:94.
+
+- **2026-10-19** — Extends the 2026-10-02 popover entry above: "close them on
+scroll" through a capture-phase `window` scroll listener also closed the
+FindingsPreview whenever its own findings list scrolled, by mouse wheel or by
+dragging its scrollbar. `scroll` does not bubble, but capture listeners on
+`window` still hear it from every element. A headless-Chrome trace showed
+`wheel` and then `scroll` on the list span with no `mouseleave`, and the card
+closed. The fix ignores scroll events whose target is inside the card. Its
+keyboard twin: Chrome makes a scroller with no focusable children a Tab stop, so
+Tab from the counts moved focus into the list. `onBlur={hide}` (with
+`relatedTarget` = the list) unmounted it mid-move, and focus fell to `<body>`.
+Blur now closes only when `relatedTarget` is outside the trigger. Adding
+`overscroll-behavior: contain` was tried and removed: a `position: fixed` card
+chains its scroll to the viewport, which never scrolls in this shell, because
+`<main>` does. Evidence:
+client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/FindingsPreview.tsx:49
+(`onScroll`), FindingsPreview.tsx:78 (`onBlur`),
+FindingsPreview.test.tsx:90, e2e/specs/07a-findings-preview-scroll.flow.json:33.
 
 
 ## Session Notes

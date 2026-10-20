@@ -14,8 +14,10 @@
 // Prompt assembly + prompt-injection hardening.
 export {
   assemblePrompt,
+  renderSkillsSection,
   wrapUntrusted,
   type PromptParts,
+  type SkillsSection,
   type AssembledPrompt,
 } from './prompt.js';
 
@@ -37,6 +39,10 @@ export { reduceReviews, sliceDiff } from './review/reduce.js';
 // The engine entry point: given (diff + resolved agent inputs + LLM) → grounded Review.
 export {
   reviewPullRequest,
+  reviewPromptParts,
+  singlePassMessages,
+  REVIEW_SCHEMA_NAME,
+  type ReviewPromptInput,
   DEFAULT_MAP_THRESHOLD_LINES,
   DEFAULT_REVIEW_MAX_RETRIES,
   type ReviewInput,
@@ -56,4 +62,52 @@ export {
 
 // The single OpenAI-compatible structured provider (OpenRouter), shared by the
 // CI runner and the server's openrouter path. Owns session grouping + guards.
-export { OpenRouterProvider, type OpenRouterProviderOptions } from './llm/openrouter.js';
+export {
+  OpenRouterProvider,
+  experimentRequestBody,
+  type OpenRouterProviderOptions,
+} from './llm/openrouter.js';
+// Pure parsers of OpenRouter's provenance metadata (HW2 experiment mode).
+export {
+  GENERATION_ID,
+  experimentOptionsProblem,
+  parseEndpoints,
+  summarizeGeneration,
+  summarizeRouterMetadata,
+} from './llm/openrouter-metadata.js';
+
+// Intent Layer (L03): bounded evidence → one classifier call → citation-checked
+// analysis. deriveIntent calls the injected LLMProvider; the rest is pure.
+export {
+  buildIntentEvidence,
+  DEFAULT_INTENT_EVIDENCE_LIMITS,
+  MANIFEST_INCOMPLETE_NOTE,
+  NO_HUNKS_LABEL,
+  type ExtraFile,
+  type IntentEvidence,
+  type IntentEvidenceLimits,
+  type SampledLines,
+} from './intent/evidence.js';
+export {
+  checkCitation,
+  validateIntent,
+  INTENT_MAX_CITATION_SPAN,
+  INTENT_OUTPUT_LIMITS,
+  type IntentValidation,
+} from './intent/validate.js';
+export {
+  buildIntentMessages,
+  renderIntentForReview,
+  INTENT_PROMPT_VERSION,
+  INTENT_SYSTEM_PROMPT,
+  MAX_LINKED_ISSUE_CHARS,
+  type IntentClaims,
+} from './intent/prompt.js';
+export {
+  deriveIntent,
+  DEFAULT_INTENT_MAX_TOKENS,
+  DEFAULT_INTENT_REASONING,
+  type DeriveIntentInput,
+  type DeriveIntentOutcome,
+} from './intent/derive.js';
+export { INTENT_SCOPE_POLICY } from './prompt.js';

@@ -33,4 +33,5 @@ missing ones** — an agent reads them as current intent.
 
 ## Index
 
-No server specs yet.
+- [`01-pr-list-review-summary.md`](01-pr-list-review-summary.md) — shipped:
+  PR-list score, cost, and per-agent FINDINGS, with the tests that prove them.

@@ -4,10 +4,22 @@ import type {
   ModelInfo,
   CompletionRequest,
   CompletionResult,
+  GenerationMetadataSummary,
+  OpenRouterEndpointInfo,
+  StructuredAttemptTelemetry,
+  StructuredExperimentOptions,
   StructuredRequest,
   StructuredResult,
 } from '@devdigest/shared';
 import { toJsonSchema, parseWithRepair } from './structured.js';
+import {
+  GENERATION_ID,
+  emptyGeneration,
+  experimentOptionsProblem,
+  parseEndpoints,
+  summarizeGeneration,
+  summarizeRouterMetadata,
+} from './openrouter-metadata.js';
 
 /**
  * The single OpenAI-compatible structured provider, owned by the engine because
@@ -29,11 +41,47 @@ export interface OpenRouterProviderOptions {
   baseURL?: string;
   /** Provider id for traces/gating (default 'openrouter'). */
   id?: 'openai' | 'openrouter';
-  /** Per-request timeout (ms) — the SDK retries on timeout/5xx/429 with backoff. */
+  /**
+   * Per-request timeout (ms) — the SDK retries on timeout/5xx/429 with backoff.
+   * Also the ceiling for `StructuredRequest.timeoutMs`.
+   */
   timeoutMs?: number;
   maxRetries?: number;
   /** Injected cost estimator; returns USD or null when the model is unknown. */
   estimateCost?: (model: string, tokensIn: number, tokensOut: number) => number | null;
+  /** HTTP for the metadata endpoints (generation lookup, model endpoints); tests inject one. */
+  fetchImpl?: typeof fetch;
+  /** Delay between generation-lookup polls; tests inject one. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * The exact chat-completion body an experiment request sends: also what the
+ * studio's preflight serializes to bound the input tokens before dispatch.
+ */
+export function experimentRequestBody(
+  req: Pick<StructuredRequest<unknown>, 'model' | 'messages' | 'schema' | 'schemaName' | 'temperature' | 'sessionId' | 'reasoning'>,
+  options: StructuredExperimentOptions,
+): OpenAI.Chat.ChatCompletionCreateParamsNonStreaming {
+  const jsonSchema = toJsonSchema(req.schema, req.schemaName);
+  return {
+    model: req.model,
+    messages: [...req.messages],
+    temperature: req.temperature ?? 0,
+    max_tokens: options.maxTokens,
+    response_format: {
+      type: 'json_schema' as const,
+      json_schema: { name: req.schemaName, schema: jsonSchema.schema, strict: true },
+    },
+    ...(req.sessionId ? { session_id: req.sessionId } : {}),
+    ...(req.reasoning ? { reasoning: req.reasoning } : {}),
+    usage: { include: true },
+    provider: {
+      order: options.routing.order,
+      only: options.routing.only,
+      allow_fallbacks: false,
+    },
+  } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
 }
 
 export class OpenRouterProvider implements LLMProvider {
@@ -41,22 +89,29 @@ export class OpenRouterProvider implements LLMProvider {
   private client: OpenAI;
   private baseURL: string;
   private apiKey: string;
+  private timeoutMs: number;
   private estimateCost?: OpenRouterProviderOptions['estimateCost'];
+  private fetchImpl: typeof fetch;
+  private sleep: (ms: number) => Promise<void>;
 
   constructor(apiKey: string, opts: OpenRouterProviderOptions = {}) {
     this.id = opts.id ?? 'openrouter';
     this.apiKey = apiKey;
     this.baseURL = opts.baseURL ?? 'https://openrouter.ai/api/v1';
     this.estimateCost = opts.estimateCost;
+    this.timeoutMs = opts.timeoutMs ?? 90_000;
+    this.fetchImpl = opts.fetchImpl ?? ((...args) => fetch(...args));
+    this.sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.client = new OpenAI({
       apiKey,
       baseURL: this.baseURL,
-      timeout: opts.timeoutMs ?? 90_000,
+      timeout: this.timeoutMs,
       maxRetries: opts.maxRetries ?? 2,
     });
   }
 
   async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+    if (req.experiment) return this.completeExperiment(req);
     const jsonSchema = toJsonSchema(req.schema, req.schemaName);
     const maxRetries = req.maxRetries ?? 2;
     const messages = [...req.messages];
@@ -66,9 +121,12 @@ export class OpenRouterProvider implements LLMProvider {
     let hasAnyProviderCost = false;
     let hasCompleteProviderCost = this.id === 'openrouter';
     let lastRaw = '';
+    const options = this.requestOptions(req);
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-      const res = await this.client.chat.completions.create({
+      // A cancelled call starts no further (billable) attempt.
+      req.signal?.throwIfAborted();
+      const body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
         model: req.model,
         messages,
         temperature: req.temperature ?? 0,
@@ -80,10 +138,15 @@ export class OpenRouterProvider implements LLMProvider {
         // OpenRouter session grouping — extra body field (spread is exempt from
         // excess-property checks). Only sent when talking to OpenRouter.
         ...(this.id === 'openrouter' && req.sessionId ? { session_id: req.sessionId } : {}),
+        ...(this.id === 'openrouter' && req.reasoning ? { reasoning: req.reasoning } : {}),
         // OpenRouter usage accounting — ask it to return the REAL generation
         // cost (USD) in `usage.cost`, instead of estimating from a price book.
         ...(this.id === 'openrouter' ? { usage: { include: true } } : {}),
-      });
+      };
+      // Request options only when asked for, so existing callers send exactly what they did.
+      const res = options
+        ? await this.client.chat.completions.create(body, options)
+        : await this.client.chat.completions.create(body);
 
       // OpenRouter can return HTTP 200 with no `choices` (an upstream provider
       // error / moderation / free-tier limit in the body) — surface it.
@@ -124,6 +187,178 @@ export class OpenRouterProvider implements LLMProvider {
       messages.push({ role: 'user', content: parsed.repromptMessage });
     }
     throw new Error(`OpenRouter structured output failed schema validation for ${req.schemaName}`);
+  }
+
+  /**
+   * HW2 experiment mode: exactly one HTTP request (SDK retries off, no
+   * reprompt), routed to the one frozen provider with fallbacks disabled and
+   * router metadata on. Every outcome, including a refusal before dispatch and
+   * a thrown error, is reported through `req.onAttempt` before returning or
+   * throwing. Provenance comes only from OpenRouter's metadata.
+   */
+  private async completeExperiment<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+    const options = req.experiment!;
+    const started = Date.now();
+    const base: StructuredAttemptTelemetry = {
+      sequence: 1,
+      dispatch: 'refused',
+      outcome: 'refused',
+      failureReason: null,
+      httpStatus: null,
+      startedAt: new Date(started).toISOString(),
+      durationMs: 0,
+      requested: { model: req.model, routing: options.routing, maxTokens: options.maxTokens },
+      responseId: null,
+      generationIdHeader: null,
+      servedModel: null,
+      finishReason: null,
+      tokensIn: null,
+      tokensOut: null,
+      costUsd: null,
+      router: null,
+      generation: null,
+      routerMetadataRaw: null,
+    };
+    const report = (patch: Partial<StructuredAttemptTelemetry>) =>
+      req.onAttempt?.({ ...base, ...patch, durationMs: Date.now() - started });
+
+    const problem = this.id !== 'openrouter' ? 'experiment mode needs the OpenRouter provider' : experimentOptionsProblem(options);
+    if (problem) {
+      report({ failureReason: problem });
+      throw new Error(`Experiment request refused before dispatch: ${problem}`);
+    }
+    if (req.signal?.aborted) {
+      report({ outcome: 'cancelled', failureReason: 'cancelled before dispatch' });
+      req.signal.throwIfAborted();
+    }
+
+    const body = experimentRequestBody(req, options);
+    const requestOptions = {
+      ...(this.requestOptions(req) ?? {}),
+      maxRetries: 0,
+      headers: { 'X-OpenRouter-Metadata': 'enabled' },
+    };
+
+    let data: OpenAI.Chat.ChatCompletion & { openrouter_metadata?: unknown };
+    let headers: Headers | null = null;
+    try {
+      const result = await this.client.chat.completions.create(body, requestOptions).withResponse();
+      data = result.data as typeof data;
+      headers = result.response.headers;
+    } catch (err) {
+      const cancelled = req.signal?.aborted || err instanceof OpenAI.APIUserAbortError;
+      const status = err instanceof OpenAI.APIError && typeof err.status === 'number' ? err.status : null;
+      report({
+        dispatch: 'dispatched',
+        outcome: cancelled ? 'cancelled' : status !== null ? 'http_error' : 'network_error',
+        httpStatus: status,
+        failureReason: (err as Error).message,
+      });
+      throw err;
+    }
+
+    const usage = data.usage as (OpenAI.Completions.CompletionUsage & { cost?: number }) | undefined;
+    const apiCost = usage?.cost;
+    const cost = typeof apiCost === 'number' && Number.isFinite(apiCost) && apiCost >= 0 ? apiCost : null;
+    const choice = data.choices?.[0];
+    const responseId = typeof data.id === 'string' ? data.id : null;
+    const generationIdHeader = headers?.get('x-generation-id') ?? null;
+    const generationId = [responseId, generationIdHeader].find((id): id is string => !!id && GENERATION_ID.test(id)) ?? null;
+    const dispatched: Partial<StructuredAttemptTelemetry> = {
+      dispatch: 'dispatched',
+      httpStatus: 200,
+      responseId,
+      generationIdHeader,
+      servedModel: typeof data.model === 'string' ? data.model : null,
+      finishReason: choice?.finish_reason ?? null,
+      tokensIn: usage?.prompt_tokens ?? null,
+      tokensOut: usage?.completion_tokens ?? null,
+      costUsd: cost,
+      router: summarizeRouterMetadata(data.openrouter_metadata),
+      routerMetadataRaw: data.openrouter_metadata ?? null,
+      generation: options.generationLookup
+        ? generationId
+          ? await this.lookupGeneration(generationId, options.generationLookup)
+          : emptyGeneration('unavailable')
+        : null,
+    };
+
+    if (!choice) {
+      const errMsg = (data as unknown as { error?: { message?: string } }).error?.message;
+      const reason = `OpenRouter returned no choices for ${req.schemaName}${errMsg ? `: ${errMsg}` : ''}`;
+      report({ ...dispatched, outcome: 'http_error', failureReason: reason });
+      throw new Error(reason);
+    }
+    const raw = choice.message?.content ?? '';
+    // A length stop is truncation even if what arrived happens to parse: the
+    // answer was cut at the output cap, so it is not a complete review.
+    if (choice.finish_reason === 'length') {
+      const reason = `output reached the max_tokens cap (finish_reason=length) for ${req.schemaName}; experiment mode does not reprompt`;
+      report({ ...dispatched, outcome: 'truncated', failureReason: reason });
+      throw new Error(reason);
+    }
+    const parsed = parseWithRepair(req.schema, raw);
+    if (!parsed.ok) {
+      const reason = `structured output failed schema validation for ${req.schemaName} (finish_reason=${choice.finish_reason ?? 'unknown'}; experiment mode does not reprompt)`;
+      report({ ...dispatched, outcome: 'schema_invalid', failureReason: reason });
+      throw new Error(reason);
+    }
+    report({ ...dispatched, outcome: 'valid' });
+    const tokensIn = usage?.prompt_tokens ?? 0;
+    const tokensOut = usage?.completion_tokens ?? 0;
+    return {
+      data: parsed.data,
+      model: req.model,
+      tokensIn,
+      tokensOut,
+      providerCostUsd: cost,
+      costUsd: cost ?? this.estimateCost?.(req.model, tokensIn, tokensOut) ?? null,
+      raw,
+      attempts: 1,
+    };
+  }
+
+  /** Bounded polling of `GET /generation?id=`; never throws. */
+  private async lookupGeneration(
+    id: string,
+    policy: { attempts: number; delayMs: number },
+  ): Promise<GenerationMetadataSummary> {
+    for (let attempt = 1; attempt <= Math.max(policy.attempts, 1); attempt++) {
+      if (attempt > 1) await this.sleep(policy.delayMs);
+      try {
+        const res = await this.fetchImpl(`${this.baseURL}/generation?id=${encodeURIComponent(id)}`, {
+          headers: { Authorization: `Bearer ${this.apiKey}` },
+        });
+        if (res.status === 404) continue; // metadata can lag the response
+        if (!res.ok) return emptyGeneration('unavailable');
+        return summarizeGeneration(await res.json());
+      } catch {
+        return emptyGeneration('unavailable');
+      }
+    }
+    return emptyGeneration('not_found');
+  }
+
+  /** Per-provider endpoints of `model` with prices and limits (free metadata call). */
+  async listEndpoints(model: string): Promise<OpenRouterEndpointInfo[]> {
+    const res = await this.fetchImpl(`${this.baseURL}/models/${model}/endpoints`, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    if (!res.ok) throw new Error(`OpenRouter /models/${model}/endpoints returned ${res.status}`);
+    return parseEndpoints(await res.json());
+  }
+
+  /**
+   * SDK request options for `timeoutMs` and `signal`. The SDK aborts a request
+   * that times out (then retries it) and aborts on `signal` without retrying.
+   * The request timeout can shorten the provider's timeout, never extend it, so
+   * a caller that already passed a longer `timeoutMs` keeps today's behaviour.
+   */
+  private requestOptions(req: StructuredRequest<unknown>): { timeout?: number; signal?: AbortSignal } | null {
+    const timeout =
+      req.timeoutMs !== undefined && req.timeoutMs > 0 ? Math.min(req.timeoutMs, this.timeoutMs) : undefined;
+    if (timeout === undefined && !req.signal) return null;
+    return { ...(timeout !== undefined ? { timeout } : {}), ...(req.signal ? { signal: req.signal } : {}) };
   }
 
   /**

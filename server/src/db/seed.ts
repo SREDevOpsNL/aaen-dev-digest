@@ -6,7 +6,15 @@ import {
   GENERAL_REVIEWER_PROMPT,
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
+  TEST_QUALITY_REVIEWER_PROMPT,
+  API_CONTRACT_REVIEWER_PROMPT,
 } from './seed-prompts.js';
+import { API_CONTRACT_SEED_SKILLS } from './seed-skills.js';
+import { EXPERIMENT_FIXTURES, SYNTHETIC_CONVENTIONS, patchStats } from './seed-fixtures.js';
+import { assertDisposableDatabase } from './disposable.js';
+import type { IntentAnalysis } from '@devdigest/shared';
+import { INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
+import { contextHash, identifyLinkedIssue, issueHash } from '../modules/intent/helpers.js';
 
 /** Default provider/model for the built-in reviewer agents. */
 const DEFAULT_PROVIDER = 'openrouter' as const;
@@ -18,17 +26,39 @@ const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
  *
  * Seeds: default workspace + system user + membership, default settings,
  * demo repo (acme/payments-api), PR #482 with files/commits, a sample review
- * with a few findings, and the three built-in agents (General + Security +
- * Performance), all on the default openrouter/deepseek-v4-flash provider+model.
- *
- * Course lessons populate the other tables (skills, conventions, memory, eval,
- * …) once their features are built — they start empty here.
+ * with a few findings, four reusable test-quality skills, three API Contract
+ * skills, five built-in agents (General + Security + Performance + Test Quality
+ * + API Contract), all on the default openrouter/deepseek-v4-flash
+ * provider+model. With `experimentFixtures` (disposable databases only), also
+ * the two HW2 experiment fixture PRs (#501, #502).
  */
 
 export const DEFAULT_WORKSPACE_NAME = 'default';
 export const SYSTEM_USER_EMAIL = 'you@local';
 
-export async function seed(db: Db): Promise<{ workspaceId: string; userId: string }> {
+export interface SeedOptions {
+  /**
+   * Also seed the HW2 experiment fixture PRs #501 and #502. Opt-in, and only
+   * into a demonstrably disposable database (./disposable.ts): the plain
+   * `pnpm db:seed` never creates them. The CLI enables it with
+   * DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1.
+   */
+  experimentFixtures?: boolean;
+  /**
+   * Also seed synthetic, labelled convention candidates for the demo repo, for
+   * the final Conventions walkthrough without a paid extraction. Opt-in and
+   * disposable-only like the fixtures (CLI: DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS=1).
+   */
+  syntheticConventions?: boolean;
+}
+
+export async function seed(
+  db: Db,
+  options: SeedOptions = {},
+): Promise<{ workspaceId: string; userId: string }> {
+  // Checked before any write, so a refused run changes nothing.
+  if (options.experimentFixtures || options.syntheticConventions) await assertDisposableDatabase(db);
+
   // ---- workspace + user (no-auth defaults) ----
   let [ws] = await db
     .select()
@@ -175,7 +205,124 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     ]);
   }
 
-  // ---- built-in agents (the three starter presets) ----
+  // ---- cached PR intent for #482 (L03) ----
+  // A demo intent fingerprinted exactly as IntentService does, so it reads as
+  // fresh: opening the seeded PR never triggers generation, and seeded e2e
+  // flows stay read-only with no model call. Never overwrites a real one.
+  await seedFreshIntent(db, pr!, {
+    intent: 'Adds a token-bucket rate limiter to the public API endpoints',
+    analysis: {
+      claimed_purpose:
+        'Add rate limiting to public API endpoints to prevent abuse from unauthenticated clients.',
+      supported_points: [
+        {
+          statement: 'Adds a token-bucket rate limiter to the public API endpoints',
+          evidence: [{ file: 'src/middleware/ratelimit.ts', side: 'new', start_line: 1, end_line: 12 }],
+        },
+      ],
+      discrepancies: [
+        {
+          kind: 'undeclared_change',
+          statement: 'Also changes payment configuration in src/config.ts',
+          evidence: [{ file: 'src/config.ts', side: 'new', start_line: 12, end_line: 12 }],
+        },
+      ],
+      in_scope: ['public API rate limiting', 'rate-limit configuration'],
+      out_of_scope: ['authenticated endpoints', 'billing'],
+      confidence: 'medium',
+      unverified_statements: [],
+    },
+    filesExcerpted: 2,
+  });
+
+  // ---- HW2 experiment fixtures: PRs #501 and #502 (opt-in, disposable only) ----
+  if (options.experimentFixtures) await seedExperimentFixtures(db, workspaceId, repoId);
+  if (options.syntheticConventions) await seedSyntheticConventions(db, workspaceId, repoId);
+
+  // ---- built-in skills (text configuration only; never executable) ----
+  const seedSkills: Array<typeof t.skills.$inferInsert> = [
+    {
+      workspaceId,
+      name: 'Behavioral Coverage',
+      description: 'Checks that tests prove public behavior rather than implementation details.',
+      type: 'rubric',
+      source: 'manual',
+      body:
+        'Identify every caller-visible behavior changed by the diff. Require focused tests for meaningful success, failure, and state-transition paths. Do not request tests solely to increase line coverage.',
+      enabled: true,
+      version: 1,
+    },
+    {
+      workspaceId,
+      name: 'Assertion Quality',
+      description: 'Rejects assertions that can pass while the intended behavior is broken.',
+      type: 'rubric',
+      source: 'manual',
+      body:
+        'Check that assertions observe the externally meaningful result, error, or side effect. Flag tests that only assert mocks were called, snapshots changed, or values exist when those checks would miss a realistic regression.',
+      enabled: true,
+      version: 1,
+    },
+    {
+      workspaceId,
+      name: 'Edge Cases and Error Paths',
+      description: 'Covers boundaries and failure behavior introduced by the change.',
+      type: 'rubric',
+      source: 'manual',
+      body:
+        'Look for untested empty, missing, malformed, boundary, authorization, and dependency-failure inputs relevant to this diff. Require fail-closed behavior where security or data integrity is involved.',
+      enabled: true,
+      version: 1,
+    },
+    {
+      workspaceId,
+      name: 'Test Isolation and Determinism',
+      description: 'Finds order dependence, leaked state, time races, and unintended external I/O.',
+      type: 'convention',
+      source: 'manual',
+      body:
+        'Tests must be deterministic and independently runnable. Flag shared mutable state, unbounded timing assumptions, real network calls, cross-test database leakage, and cleanup that is skipped on failure.',
+      enabled: true,
+      version: 1,
+    },
+  ];
+  const skillIds: string[] = [];
+  for (const skill of seedSkills) {
+    let [stored] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, skill.name)));
+    if (!stored) {
+      [stored] = await db.insert(t.skills).values(skill).returning();
+    }
+    skillIds.push(stored!.id);
+    await db
+      .insert(t.skillVersions)
+      .values({ skillId: stored!.id, version: 1, body: stored!.body })
+      .onConflictDoNothing();
+  }
+
+  // ---- API Contract skills (three seeded; deprecation-policy is imported) ----
+  const apiContractSkillIds: string[] = [];
+  for (const content of API_CONTRACT_SEED_SKILLS) {
+    let [stored] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, content.name)));
+    if (!stored) {
+      [stored] = await db
+        .insert(t.skills)
+        .values({ workspaceId, ...content, type: 'rubric', source: 'manual', enabled: true, version: 1 })
+        .returning();
+    }
+    apiContractSkillIds.push(stored!.id);
+    await db
+      .insert(t.skillVersions)
+      .values({ skillId: stored!.id, version: 1, body: stored!.body })
+      .onConflictDoNothing();
+  }
+
+  // ---- built-in agents (the starter presets + Test Quality + API Contract) ----
   // Prompt bodies live in ./seed-prompts.ts (mirrored in docs/agent-prompts/*.md).
   const seedAgents: Array<typeof t.agents.$inferInsert> = [
     {
@@ -211,16 +358,183 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       version: 1,
       createdBy: userId,
     },
+    {
+      workspaceId,
+      name: 'Test Quality Reviewer',
+      description: 'Checks behavioral coverage, assertions, edge cases, and test isolation.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: TEST_QUALITY_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
+    {
+      workspaceId,
+      name: 'API Contract Reviewer',
+      description: 'Flags breaking route, schema, versioning and deprecation changes for existing API clients.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: API_CONTRACT_REVIEWER_PROMPT,
+      // Fixed review shape: one whole-diff call and no repo-intel context, so
+      // runs differ only in their inputs (the fixtures have no clone anyway).
+      strategy: 'single-pass',
+      repoIntel: false,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
   ];
+  // Seeded links per agent (order = index). Within the 4-skill limit.
+  const linkedSkills: Record<string, string[]> = {
+    'Test Quality Reviewer': skillIds,
+    'API Contract Reviewer': apiContractSkillIds,
+  };
+  const agentIds: Record<string, string> = {};
   for (const a of seedAgents) {
-    const [existing] = await db
+    let [existing] = await db
       .select()
       .from(t.agents)
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, a.name)));
-    if (!existing) await db.insert(t.agents).values(a);
+    if (!existing) [existing] = await db.insert(t.agents).values(a).returning();
+    agentIds[a.name] = existing!.id;
+
+    await db
+      .insert(t.agentVersions)
+      .values({
+        agentId: existing!.id,
+        version: existing!.version,
+        configJson: {
+          provider: existing!.provider,
+          model: existing!.model,
+          system_prompt: existing!.systemPrompt,
+          output_schema: existing!.outputSchema,
+          strategy: existing!.strategy,
+          ci_fail_on: existing!.ciFailOn,
+          repo_intel: existing!.repoIntel,
+          skills: linkedSkills[a.name] ?? [],
+        },
+      })
+      .onConflictDoNothing();
+  }
+
+  for (const [agentName, ids] of Object.entries(linkedSkills)) {
+    const agentId = agentIds[agentName];
+    if (!agentId || ids.length === 0) continue;
+    await db
+      .insert(t.agentSkills)
+      .values(ids.map((skillId, order) => ({ agentId, skillId, order })))
+      .onConflictDoNothing();
   }
 
   return { workspaceId, userId };
+}
+
+/**
+ * Seed the HW2 experiment fixture PRs (./seed-fixtures.ts) into the demo
+ * repository. Only called after assertDisposableDatabase.
+ */
+async function seedExperimentFixtures(db: Db, workspaceId: string, repoId: string): Promise<void> {
+  // Reviewed from their stored patches only; each gets a fresh cached intent so
+  // a review batch never derives one. Existing rows are left as they are.
+  for (const fixture of EXPERIMENT_FIXTURES) {
+    let [fixturePr] = await db
+      .select()
+      .from(t.pullRequests)
+      .where(and(eq(t.pullRequests.repoId, repoId), eq(t.pullRequests.number, fixture.number)));
+    if (!fixturePr) {
+      const stats = fixture.files.map((file) => ({ file, ...patchStats(file.patch) }));
+      [fixturePr] = await db
+        .insert(t.pullRequests)
+        .values({
+          workspaceId,
+          repoId,
+          number: fixture.number,
+          title: fixture.title,
+          author: fixture.author,
+          branch: fixture.branch,
+          base: 'main',
+          headSha: fixture.headSha,
+          additions: stats.reduce((sum, f) => sum + f.additions, 0),
+          deletions: stats.reduce((sum, f) => sum + f.deletions, 0),
+          filesCount: fixture.files.length,
+          status: 'needs_review',
+          body: fixture.body,
+        })
+        .returning();
+      await db.insert(t.prFiles).values(
+        stats.map(({ file, additions, deletions }) => ({
+          prId: fixturePr!.id,
+          path: file.path,
+          additions,
+          deletions,
+          patch: file.patch,
+        })),
+      );
+      await db.insert(t.prCommits).values({
+        prId: fixturePr!.id,
+        sha: fixture.headSha,
+        message: fixture.commitMessage,
+        author: fixture.author,
+      });
+    }
+    await seedFreshIntent(db, fixturePr!, {
+      intent: fixture.intent.summary,
+      analysis: fixture.intent.analysis,
+      filesExcerpted: fixture.files.length,
+    });
+  }
+}
+
+/**
+ * Seed the labelled synthetic convention candidates (./seed-fixtures.ts), once:
+ * nothing is added when the repository already has candidates.
+ */
+async function seedSyntheticConventions(db: Db, workspaceId: string, repoId: string): Promise<void> {
+  const existing = await db.select({ id: t.conventions.id }).from(t.conventions).where(eq(t.conventions.repoId, repoId));
+  if (existing.length > 0) return;
+  await db.insert(t.conventions).values(
+    SYNTHETIC_CONVENTIONS.map((candidate) => ({ workspaceId, repoId, status: 'pending' as const, ...candidate })),
+  );
+}
+
+/**
+ * Store a cached intent for `pr`, fingerprinted exactly as IntentService does,
+ * so it reads as fresh and a review batch reuses it instead of deriving one.
+ * Never overwrites an existing intent row.
+ */
+async function seedFreshIntent(
+  db: Db,
+  pr: typeof t.pullRequests.$inferSelect,
+  input: { intent: string; analysis: IntentAnalysis; filesExcerpted: number },
+): Promise<void> {
+  const files = await db.select().from(t.prFiles).where(eq(t.prFiles.prId, pr.id));
+  const linked = identifyLinkedIssue(pr.body, { owner: 'acme', name: 'payments-api' });
+  await db
+    .insert(t.prIntent)
+    .values({
+      prId: pr.id,
+      intent: input.intent,
+      inScope: input.analysis.in_scope,
+      outOfScope: input.analysis.out_of_scope,
+      status: 'ready',
+      analysis: input.analysis,
+      evidence: { files_listed: files.length, files_excerpted: input.filesExcerpted, truncated: false, invalid_citations: 0 },
+      headSha: pr.headSha,
+      contextHash: contextHash({
+        title: pr.title,
+        body: pr.body,
+        files,
+        linkedIssueNumber: linked.status === 'identified' ? linked.number : null,
+      }),
+      issueHash: issueHash(null),
+      promptVersion: INTENT_PROMPT_VERSION,
+      provider: 'seed',
+      model: 'seed',
+      derivedAt: new Date('2026-10-01T00:00:00Z'),
+      startedAt: new Date('2026-10-01T00:00:00Z'),
+    })
+    .onConflictDoNothing();
 }
 
 // CLI entrypoint
@@ -231,7 +545,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
   const handle = createDb(url);
-  seed(handle.db)
+  seed(handle.db, {
+    experimentFixtures: process.env.DEVDIGEST_SEED_EXPERIMENT_FIXTURES === '1',
+    syntheticConventions: process.env.DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS === '1',
+  })
     .then(async (r) => {
       console.log('✓ seeded', r);
       await handle.close();

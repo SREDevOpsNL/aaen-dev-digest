@@ -41,4 +41,6 @@ real spec shows what is actually missing from this one.
 
 ## Index
 
-No cross-package specs yet.
+- [`01-skills-for-review-agents.md`](01-skills-for-review-agents.md) - **implemented and verified**: reusable text-only skills, agent attachment, prompt wiring, and the updated Skills editor design.
+- [`02-conventions-extractor.md`](02-conventions-extractor.md) - **implemented and verified**: bounded repository sampling, grounded convention candidates, human triage, and conversion of accepted rules into a Skill draft.
+- [`03-intent-layer.md`](03-intent-layer.md) - **implemented (provisional, L03)**: cached PR intent from bounded, citation-checked evidence, the PR Intent card with Recompute, and intent-aware review under a trusted scope policy.

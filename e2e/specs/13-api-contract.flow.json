@@ -1,0 +1,22 @@
+{
+  "name": "API Contract Reviewer, its seeded skills and the experiment fixture PRs render",
+  "description": "Read-only: the seeded API Contract Reviewer appears on the Agents page with exactly its three seeded skills attached in order (breaking-change, response-schema, semver-discipline; 3 of 4), the three skills appear on the Skills page while deprecation-policy is absent (it is imported for real, never seeded), and the HW2 experiment fixture PRs #501 and #502 appear in the seeded repository's PR list. Nothing is linked, imported, saved or reviewed, and no model is called.",
+  "steps": [
+    { "cmd": ["open", "{BASE}/agents"], "label": "load the Agents page" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "agents fetch settles" },
+    { "cmd": ["wait", "--text", "API Contract Reviewer"], "label": "the API Contract Reviewer card is visible" },
+    { "cmd": ["find", "text", "API Contract Reviewer", "click"], "label": "open the API Contract Reviewer" },
+    { "cmd": ["wait", "--url", "tab=config"], "label": "agent editor reached" },
+    { "cmd": ["eval", "location.assign(location.pathname + '?tab=skills')"], "label": "switch to the Skills tab" },
+    { "cmd": ["wait", "--text", "3 / 4 attached"], "label": "three of four skills are attached" },
+    { "cmd": ["eval", "[...document.querySelectorAll('[data-testid^=agent-skill-]')].filter((r) => r.querySelector('[role=switch]')?.getAttribute('aria-checked') === 'true').map((r) => r.querySelector('label > span').textContent).join('|')"], "assert": { "stdoutIncludes": "breaking-change|response-schema|semver-discipline" }, "label": "the attached skills, in link order" },
+    { "cmd": ["open", "{BASE}/skills"], "label": "load the Skills page" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "skills fetch settles" },
+    { "cmd": ["wait", "--text", "semver-discipline"], "label": "seeded API Contract skills are listed" },
+    { "cmd": ["eval", "(() => { const t = document.body.innerText; return t.includes('breaking-change') && t.includes('response-schema') && !t.includes('deprecation-policy'); })()"], "assert": { "stdoutIncludes": "true" }, "label": "deprecation-policy is not seeded" },
+    { "cmd": ["open", "{BASE}/"], "label": "load the seeded repository's PR list" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "PR list settles" },
+    { "cmd": ["wait", "--text", "Return payment amounts as decimal strings"], "label": "fixture PR #502 is listed" },
+    { "cmd": ["wait", "--text", "Add coupon discounts to checkout totals"], "label": "fixture PR #501 is listed" }
+  ]
+}

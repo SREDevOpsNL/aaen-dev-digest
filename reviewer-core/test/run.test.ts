@@ -192,3 +192,43 @@ diff --git a/b.ts b/b.ts
     expect(partial.costUsd).toBeCloseTo(0.51);
   });
 });
+
+describe('reviewPullRequest cancellation checkpoint', () => {
+  const fixture = { verdict: 'comment', summary: 's', score: 100, findings: [] };
+  class Cancelled extends Error {}
+
+  async function run(checkCancelled?: () => void | Promise<void>) {
+    const llm = new MockLLMProvider('openai', { structured: fixture });
+    const diff = await new MockGitClient().diff();
+    const result = reviewPullRequest({ systemPrompt: 's', model: 'm', diff, llm, checkCancelled });
+    return { llm, result };
+  }
+
+  const structuredCalls = (llm: MockLLMProvider) =>
+    llm.calls.filter((c) => c.method === 'completeStructured').length;
+
+  it('a synchronous throw aborts before the LLM call (existing callers unchanged)', async () => {
+    const { llm, result } = await run(() => {
+      throw new Cancelled();
+    });
+    await expect(result).rejects.toBeInstanceOf(Cancelled);
+    expect(structuredCalls(llm)).toBe(0);
+  });
+
+  it('an async rejection aborts before the LLM call', async () => {
+    const { llm, result } = await run(async () => {
+      await Promise.resolve();
+      throw new Cancelled();
+    });
+    await expect(result).rejects.toBeInstanceOf(Cancelled);
+    expect(structuredCalls(llm)).toBe(0);
+  });
+
+  it('a passing async checkpoint and no checkpoint both review normally', async () => {
+    for (const check of [async () => undefined, undefined]) {
+      const { llm, result } = await run(check);
+      await expect(result).resolves.toMatchObject({ mode: 'single-pass' });
+      expect(structuredCalls(llm)).toBe(1);
+    }
+  });
+});

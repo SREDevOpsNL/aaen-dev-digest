@@ -1,0 +1,394 @@
+/**
+ * HW2 experiment runner CLI (talks only to a disposable DevDigest API).
+ *
+ *   pnpm exec tsx src/experiments/hw2/cli.ts <command> [--flag value …]
+ *
+ * Unpaid: endpoints · check · plan · manifest · reconcile · report
+ * Authorization: authorize (writes the server-side spending capability for one
+ *   phase; only after that phase's gate was explicitly authorized)
+ * Paid:   run (refuses unless --authorized-gate matches the phase, --confirm-spend
+ *   is set, the dedicated key exists, the capability token exists, the ledger
+ *   lock is free, every identity check passes and the ledger is reconciled;
+ *   confirmatory also needs a committed, unmodified pre-registration whose
+ *   manifest equals the one recomputed now). The server checks the capability,
+ *   phase and budget again on every slot.
+ *
+ * The full procedure is in docs/plans/HW2-experiment-operator-guide.md.
+ */
+import { randomBytes } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
+import { EXPERIMENT_FIXTURES } from '../../db/seed-fixtures.js';
+import { toSkillPromptBlock } from '../../modules/reviews/helpers.js';
+import { EXPERIMENT_CAPS, PHASE_GATE, canonicalJson, sha256, type ExperimentCapability } from '../../modules/_shared/experiment.js';
+import { ExperimentApi } from './api.js';
+import { CAPS, scheduleFits, spent } from './budget.js';
+import { containerLabels, identityProblems, type StackIdentity } from './identity.js';
+import { Ledger } from './ledger.js';
+import { EXPERIMENT_FIXTURE, buildManifest, fixtureDiffSha, manifestFingerprint, type Manifest } from './manifest.js';
+import { buildReport, renderReport, type SlotRunData } from './report.js';
+import type { ExpectedRule, FindingLike } from './rules.js';
+import { reconcile, runSchedule, type SlotRun } from './runner.js';
+import { buildSchedule, slotId, type Phase, type Slot } from './schedule.js';
+import { implementationFingerprint, preregisteredManifest, repoRoot } from './source.js';
+
+type Flags = Record<string, string | true>;
+
+export function parseArgs(argv: string[]): { command: string; flags: Flags } {
+  const [command = 'help', ...rest] = argv;
+  const flags: Flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i]!;
+    if (!arg.startsWith('--')) throw new Error(`Unexpected argument ${arg}`);
+    const next = rest[i + 1];
+    if (next === undefined || next.startsWith('--')) flags[arg.slice(2)] = true;
+    else {
+      flags[arg.slice(2)] = next;
+      i++;
+    }
+  }
+  return { command, flags };
+}
+
+const need = (flags: Flags, name: string): string => {
+  const value = flags[name];
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`--${name} is required`);
+  return value;
+};
+
+/** Gate flags must name the phase's own gate (exploration = 3, confirmatory = 4). */
+export function assertPaidAuthorization(flags: Flags): Phase {
+  const phase = need(flags, 'phase');
+  if (phase !== 'exploration' && phase !== 'confirmatory') throw new Error('--phase must be exploration or confirmatory');
+  const gate = need(flags, 'authorized-gate');
+  const required = String(PHASE_GATE[phase]);
+  if (gate !== required) throw new Error(`--authorized-gate ${gate} does not authorize the ${phase} phase (needs Gate ${required})`);
+  if (flags['confirm-spend'] !== true) throw new Error('--confirm-spend is required for paid runs');
+  return phase;
+}
+
+export const experimentDir = (stackId: string, home = homedir()) => join(home, '.devdigest', 'hw2-experiments', stackId);
+const tokenFile = (stackId: string, home?: string) => join(experimentDir(stackId, home), 'capability.token');
+
+/**
+ * Write the server-side spending capability for one phase (stores only the
+ * token's hash) and the token for this runner (mode 0600). Run only after the
+ * phase's gate was explicitly authorized.
+ */
+export function writeCapability(args: { stackId: string; phase: Phase; budgetUsd: number; hours: number; home?: string; now?: Date }): ExperimentCapability {
+  if (!(args.budgetUsd > 0) || args.budgetUsd > EXPERIMENT_CAPS[args.phase]) {
+    throw new Error(`--budget must be positive and at most $${EXPERIMENT_CAPS[args.phase]} for ${args.phase}`);
+  }
+  if (!(args.hours > 0) || args.hours > 72) throw new Error('--hours must be between 0 and 72');
+  const dir = experimentDir(args.stackId, args.home);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const token = randomBytes(32).toString('hex');
+  const now = args.now ?? new Date();
+  const capability: ExperimentCapability = {
+    version: 1,
+    stack_id: args.stackId,
+    phase: args.phase,
+    gate: PHASE_GATE[args.phase],
+    budget_usd: args.budgetUsd,
+    expires_at: new Date(now.getTime() + args.hours * 3_600_000).toISOString(),
+    token_sha256: sha256(token),
+    authorized_at: now.toISOString(),
+  };
+  writeFileSync(join(dir, 'capability.json'), `${JSON.stringify(capability, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(tokenFile(args.stackId, args.home), token, { mode: 0o600 });
+  return capability;
+}
+
+interface Stack {
+  api: ExperimentApi;
+  identity: StackIdentity;
+  stackId: string;
+}
+
+/** Identity checks that must all pass before anything else (fail closed). */
+async function verifiedStack(flags: Flags): Promise<Stack> {
+  const apiUrl = need(flags, 'api');
+  const stackId = need(flags, 'stack');
+  const expected = { stackId, database: need(flags, 'database'), container: need(flags, 'container'), apiUrl };
+  const api = new ExperimentApi(apiUrl);
+  const identity = await api.get<StackIdentity>('/experiments/identity');
+  const problems = identityProblems(identity, await containerLabels(expected.container), expected);
+  if (problems.length > 0) throw new Error(`Stack identity check failed:\n- ${problems.join('\n- ')}`);
+  return { api, identity, stackId };
+}
+
+async function lookupIds(api: ExperimentApi) {
+  const repos = await api.get<Array<{ id: string; full_name: string }>>('/repos');
+  const repo = repos.find((r) => r.full_name === 'acme/payments-api');
+  if (!repo) throw new Error('acme/payments-api not found');
+  const pulls = await api.get<Array<{ id?: string | null; number: number }>>(`/repos/${repo.id}/pulls`);
+  const agents = await api.get<Array<{ id: string; name: string; system_prompt: string; model: string; strategy: string; repo_intel: boolean }>>('/agents');
+  const skills = await api.get<Array<{ id: string; name: string; body: string }>>('/skills');
+  const prId = (n: number) => pulls.find((p) => p.number === n)?.id ?? null;
+  return { prId, agents, skills };
+}
+
+const fixtureFor = (experiment: string) => EXPERIMENT_FIXTURES.find((f) => f.number === EXPERIMENT_FIXTURE[experiment])!;
+
+/** Free preview per experiment: the non-Skill fingerprint the manifest freezes. */
+async function previewFingerprints(stack: Stack, reservationUsd: number): Promise<Record<string, string>> {
+  const { prId, agents } = await lookupIds(stack.api);
+  const out: Record<string, string> = {};
+  for (const experiment of Object.keys(EXPERIMENT_FIXTURE)) {
+    const fixture = fixtureFor(experiment);
+    const preview = await stack.api.post<{ ok: boolean; reason: string | null; block: { non_skill_fingerprint: string | null } }>('/experiments/preview', {
+      pr_id: prId(fixture.number),
+      agent_id: agents.find((a) => a.name === fixture.reviewer)!.id,
+      experiment,
+      condition: 'without',
+      phase: 'confirmatory',
+      reservation_usd: reservationUsd,
+      expected_diff_sha256: await fixtureDiffSha(fixture),
+    });
+    if (!preview.ok || !preview.block.non_skill_fingerprint) throw new Error(`Preview of experiment ${experiment} refused: ${preview.reason}`);
+    out[experiment] = preview.block.non_skill_fingerprint;
+  }
+  return out;
+}
+
+async function currentManifest(flags: Flags, stack: Stack, root: string): Promise<Manifest> {
+  const { agents, skills } = await lookupIds(stack.api);
+  const seed = Number(need(flags, 'seed'));
+  const reservation = Number(need(flags, 'reservation'));
+  const slots = buildSchedule({ seed, phase: 'confirmatory', experiments: ['17', '18'], trials: 5 });
+  const rules = JSON.parse(readFileSync(need(flags, 'rules'), 'utf8')) as Record<string, ExpectedRule>;
+  const reviewers = EXPERIMENT_FIXTURES.map((f) => f.reviewer);
+  const targets = EXPERIMENT_FIXTURES.map((f) => f.targetSkill);
+  const identity = stack.identity as StackIdentity & { prices: unknown; generation_lookup: unknown };
+  return buildManifest({
+    implementationFingerprint: implementationFingerprint(root).sha256,
+    nonSkillFingerprints: await previewFingerprints(stack, reservation),
+    stack: {
+      database: identity.database,
+      provider: identity.provider,
+      providerName: identity.provider_name,
+      model: identity.model,
+      maxOutputTokens: identity.max_output_tokens,
+      prices: identity.prices,
+      generationLookup: identity.generation_lookup,
+    },
+    skills: skills.filter((s) => targets.includes(s.name)).map((s) => ({ name: s.name, body: s.body })),
+    agents: agents.filter((a) => reviewers.includes(a.name)),
+    schedule: { seed, slots },
+    rules,
+    perSlotReservationUsd: reservation,
+  });
+}
+
+async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, reservationUsd: number, fingerprint: string): Promise<SlotRun[]> {
+  const { prId, agents, skills } = await lookupIds(stack.api);
+  return Promise.all(
+    slots.map(async (slot) => {
+      const fixture = fixtureFor(slot.experiment);
+      const agent = agents.find((a) => a.name === fixture.reviewer);
+      const target = skills.find((s) => s.name === fixture.targetSkill);
+      const pr = prId(fixture.number);
+      if (!agent || !target || !pr) throw new Error(`Experiment ${slot.experiment}: reviewer, target skill or PR missing`);
+      return {
+        slot,
+        prId: pr,
+        agentId: agent.id,
+        skillIds: slot.condition === 'with' ? [target.id] : [],
+        manifestFingerprint: fingerprint,
+        expectedDiffSha256: frozen?.fixtures.find((f) => f.number === fixture.number)?.diff_sha256 ?? (await fixtureDiffSha(fixture)),
+        reservationUsd,
+        expectedNonSkillFingerprint: frozen ? frozen.non_skill_fingerprints[slot.experiment]! : null,
+      };
+    }),
+  );
+}
+
+export async function main(argv: string[], log: (m: string) => void = console.log): Promise<void> {
+  const { command, flags } = parseArgs(argv);
+  switch (command) {
+    case 'endpoints': {
+      log(JSON.stringify(await new ExperimentApi(need(flags, 'api')).get('/experiments/endpoints'), null, 2));
+      return;
+    }
+    case 'check': {
+      const stack = await verifiedStack(flags);
+      const { prId } = await lookupIds(stack.api);
+      for (const fixture of EXPERIMENT_FIXTURES) {
+        const intent = await stack.api.get<{ state: string; stale: boolean }>(`/pulls/${prId(fixture.number)}/intent`);
+        if (intent.state !== 'ready' || intent.stale) throw new Error(`PR #${fixture.number}: cached intent is not fresh`);
+        log(`PR #${fixture.number}: intent fresh; frozen diff sha256 ${await fixtureDiffSha(fixture)}`);
+      }
+      log(`implementation fingerprint ${implementationFingerprint(repoRoot()).sha256}`);
+      log(`stack ${stack.stackId} on ${stack.identity.database}: isolation checks passed`);
+      return;
+    }
+    case 'plan': {
+      const slots = buildSchedule({ seed: Number(need(flags, 'seed')), phase: 'confirmatory', experiments: ['17', '18'], trials: Number(flags.trials ?? 5) });
+      const json = JSON.stringify(slots, null, 2);
+      if (typeof flags.out === 'string') writeFileSync(flags.out, `${json}\n`);
+      log(json);
+      return;
+    }
+    case 'manifest': {
+      const stack = await verifiedStack(flags);
+      const manifest = await currentManifest(flags, stack, repoRoot());
+      if (!scheduleFits(manifest.schedule.slots.length, manifest.per_slot_reservation_usd)) {
+        throw new Error(`${manifest.schedule.slots.length} slots × $${manifest.per_slot_reservation_usd} exceed the $${CAPS.confirmatory} confirmatory cap`);
+      }
+      const json = JSON.stringify(manifest, null, 2);
+      if (typeof flags.out === 'string') writeFileSync(flags.out, `${json}\n`);
+      log(`manifest fingerprint ${manifestFingerprint(manifest)}`);
+      return;
+    }
+    case 'authorize': {
+      const phase = assertPaidAuthorization(flags);
+      const stack = await verifiedStack(flags);
+      const capability = writeCapability({ stackId: stack.stackId, phase, budgetUsd: Number(need(flags, 'budget')), hours: Number(flags.hours ?? 12) });
+      log(`capability for ${phase} (Gate ${capability.gate}) on ${stack.stackId}: budget $${capability.budget_usd}, expires ${capability.expires_at}`);
+      return;
+    }
+    case 'reconcile': {
+      const stack = await verifiedStack(flags);
+      const ledger = new Ledger(experimentDir(stack.stackId));
+      ledger.acquire({ pid: process.pid, stackId: stack.stackId });
+      try {
+        await reconcile({ api: stack.api, ledger, log, capabilityToken: '' });
+      } finally {
+        ledger.release();
+      }
+      return;
+    }
+    case 'run': {
+      const phase = assertPaidAuthorization(flags);
+      const stack = await verifiedStack(flags);
+      if (!stack.identity.openrouter_key_configured) {
+        throw new Error(`No OpenRouter key in ${stack.identity.secrets_path}; Gate 2 (the dedicated key and its limit) comes first`);
+      }
+      if (!existsSync(tokenFile(stack.stackId))) throw new Error(`No spending capability for ${stack.stackId}; run \`authorize\` after the gate is authorized`);
+      const capabilityToken = readFileSync(tokenFile(stack.stackId), 'utf8').trim();
+      const ledger = new Ledger(experimentDir(stack.stackId));
+      ledger.acquire({ pid: process.pid, stackId: stack.stackId });
+      try {
+        const deps = { api: stack.api, ledger, log, capabilityToken };
+        await reconcile(deps);
+        let runs: SlotRun[];
+        if (phase === 'confirmatory') {
+          const root = repoRoot();
+          const frozen = preregisteredManifest<Manifest>(need(flags, 'prereg'), root);
+          const current = await currentManifest({ ...flags, seed: String(frozen.schedule.seed), reservation: String(frozen.per_slot_reservation_usd) }, stack, root);
+          if (manifestFingerprint(current) !== manifestFingerprint(frozen)) {
+            throw new Error('The current implementation, stack or content does not match the pre-registered manifest');
+          }
+          const slots = buildSchedule({ seed: frozen.schedule.seed, phase, experiments: ['17', '18'], trials: 5 });
+          runs = await slotRuns(stack, slots, frozen, frozen.per_slot_reservation_usd, manifestFingerprint(frozen));
+        } else {
+          const experiment = need(flags, 'experiment');
+          const condition = need(flags, 'condition') as 'with' | 'without';
+          const count = Number(flags.count ?? 1);
+          const taken = [...ledger.slots().keys()];
+          const slots: Slot[] = [];
+          for (let trial = 1; slots.length < count; trial++) {
+            const id = slotId('exploration', experiment, condition, trial);
+            if (!taken.includes(id)) slots.push({ slot_id: id, index: slots.length, phase, experiment, condition, trial });
+          }
+          runs = await slotRuns(stack, slots, null, Number(need(flags, 'reservation')), 'e'.repeat(64));
+        }
+        const { stopped } = await runSchedule(deps, runs);
+        const all = [...ledger.slots().values()];
+        log(`charged: ${phase} $${spent(all, phase).toFixed(6)} of $${CAPS[phase]}, total $${spent(all).toFixed(6)} of $${CAPS.total}`);
+        if (stopped) log(`STOPPED: ${stopped}`);
+      } finally {
+        ledger.release();
+      }
+      return;
+    }
+    case 'report': {
+      const stack = await verifiedStack(flags);
+      const root = repoRoot();
+      const frozen = preregisteredManifest<Manifest>(need(flags, 'prereg'), root);
+      if (!frozen.stack.providerName) throw new Error('The pre-registration has no frozen serving-provider name');
+      const ledger = new Ledger(experimentDir(stack.stackId));
+      const { prId } = await lookupIds(stack.api);
+      const runs = new Map<string, SlotRunData | null>();
+      for (const slot of frozen.schedule.slots) {
+        const lookup = await stack.api.get<{
+          runs: Array<{
+            run_id: string;
+            cost_usd: number | null;
+            experiment: Record<string, unknown> | null;
+            intent: unknown;
+            config: { agent?: string; pr?: number | null } | null;
+            skills_block: string | null;
+          }>;
+        }>(`/experiments/slots/${slot.slot_id}`);
+        const found = lookup.runs[0];
+        if (!found?.experiment) {
+          runs.set(slot.slot_id, null);
+          continue;
+        }
+        const reviews = await stack.api.get<Array<{ run_id: string | null; findings: FindingLike[] }>>(`/pulls/${prId(fixtureFor(slot.experiment).number)}/reviews`);
+        runs.set(slot.slot_id, {
+          run_id: found.run_id,
+          cost_usd: found.cost_usd,
+          experiment: found.experiment,
+          intent: found.intent,
+          config: found.config,
+          skills_block: found.skills_block,
+          findings: reviews.find((r) => r.run_id === found.run_id)?.findings ?? [],
+        });
+      }
+      // The target skills as frozen: their current bodies must still hash to the manifest's.
+      const { skills } = await lookupIds(stack.api);
+      const targetBlock = (experiment: string) => {
+        const name = fixtureFor(experiment).targetSkill;
+        const skill = skills.find((s) => s.name === name);
+        const frozenSha = frozen.skills.find((s) => s.name === name)?.body_sha;
+        if (!skill || !frozenSha || sha256(skill.body) !== frozenSha) throw new Error(`Target skill ${name} is missing or differs from the manifest`);
+        return toSkillPromptBlock(skill);
+      };
+      const report = buildReport({
+        execution: {
+          manifestFingerprint: manifestFingerprint(frozen),
+          phase: 'confirmatory',
+          fixture: (experiment) => {
+            const fixture = fixtureFor(experiment);
+            return { reviewer: fixture.reviewer, prNumber: fixture.number, targetSkill: fixture.targetSkill };
+          },
+          skillFingerprint: (experiment, condition) => sha256(canonicalJson(condition === 'with' ? [targetBlock(experiment)] : [])),
+        },
+        schedule: frozen.schedule.slots,
+        ledger: ledger.slots(),
+        runs,
+        rules: frozen.rules,
+        frozenNonSkill: frozen.non_skill_fingerprints,
+        expectations: (experiment) => {
+          const fixture = fixtureFor(experiment);
+          return {
+            providerName: frozen.stack.providerName!,
+            model: frozen.stack.model,
+            intent: { derivation_id: null, head_sha: fixture.headSha, prompt_version: INTENT_PROMPT_VERSION, analysis_sha: sha256(canonicalJson(fixture.intent.analysis)) },
+            expectedDiffSha256: frozen.fixtures.find((f) => f.number === fixture.number)!.diff_sha256,
+          };
+        },
+      });
+      const markdown = renderReport(report);
+      if (typeof flags.out === 'string') writeFileSync(flags.out, `${markdown}\n`);
+      log(markdown);
+      return;
+    }
+    default:
+      log('commands: endpoints | check | plan | manifest | authorize | reconcile | run | report (see docs/plans/HW2-experiment-operator-guide.md)');
+  }
+}
+
+const invokedDirectly = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+if (invokedDirectly) {
+  main(process.argv.slice(2)).catch((err) => {
+    console.error(`hw2-experiments: ${(err as Error).message}`);
+    process.exitCode = 1;
+  });
+}

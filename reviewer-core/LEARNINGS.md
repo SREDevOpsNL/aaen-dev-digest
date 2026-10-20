@@ -34,9 +34,45 @@ correction. Genuinely cross-package findings belong in
   `reviewer-core/src/review/run.ts:104-105` (`ReviewOutcome.assembly`),
   `reviewer-core/src/review/run.ts:142` (`reviewPullRequest`)
 
+- **2026-10-14** — An OpenRouter model ID does not pin the upstream provider,
+  so the same model and a byte-identical prompt can change behaviour between
+  evaluation runs. For `deepseek/deepseek-v4-flash` on one day, one identical
+  review prompt was counted as 1,702 input tokens in some calls and 2,927 in
+  others; between two runs the mean findings dropped from about 5 to 2.7, the
+  cost per token fell, and one review came back in Chinese. When comparing
+  prompt variants, record the response's top-level `provider` field (the engine
+  does not capture it) and pin the provider, or treat run-to-run differences as
+  noise. Evidence: `docs/plans/L03-intent-evaluation.md` (run 2,
+  "Run-to-run drift"), `reviewer-core/src/llm/openrouter.ts`
+  (`OpenRouterProvider.completeStructured`).
+
+- **2026-10-18** — The grounding gate accepts a finding that cites only
+  *unchanged* context lines. `groundFindings` keeps a finding when its range
+  touches any number in a hunk's `newLineNumbers`, and the server's diff parser
+  adds context lines to that list as well as added ones. "Survives grounding"
+  therefore means "inside a changed hunk", not "on a changed line". To pin a
+  finding to the change itself (an experiment anchor, an eval rule), also check
+  the range against the lines the patch adds. Evidence:
+  `reviewer-core/src/grounding.ts` (`buildLineIndex`, `rangeIntersects`),
+  `server/src/adapters/git/diff-parser.ts` (context lines pushed to
+  `newLineNumbers`); in `server/test/seed-content.test.ts`, an anchor moved to
+  context line 16 of `src/api/payments.ts` still passed `groundFindings` and
+  failed only the added-lines check.
+
 ## Decisions
 
 ## Recurring Errors & Fixes
+
+- **2026-10-14** — A reasoning model can return empty structured output because
+  its reasoning tokens consume the whole `max_tokens` budget. With
+  `deepseek/deepseek-v4-flash` on OpenRouter, the intent classifier stopped with
+  `finish_reason=length` and empty or truncated JSON in 3 of 4 calls at 1,500
+  tokens and 3 of 3 calls at 4,000 (all 4,000 were reasoning tokens). Raising
+  the budget does not help; pass `reasoning: { effort: 'low' }` (or a reasoning
+  `max_tokens`), and check `finish_reason` when a structured call fails
+  validation. Evidence: `reviewer-core/src/intent/derive.ts`
+  (`DEFAULT_INTENT_REASONING`), `reviewer-core/src/llm/openrouter.ts`
+  (`OpenRouterProvider.completeStructured`).
 
 ## Session Notes
 

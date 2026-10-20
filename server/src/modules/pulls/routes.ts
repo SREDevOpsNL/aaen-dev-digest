@@ -1,13 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
-import { deriveReviewStatus } from './status.js';
+import {
+  deriveReviewStatus,
+  latestReviewPerAgent,
+  sortFindingPreviews,
+  type CompletedReview,
+} from './status.js';
 const FINDING_PREVIEW_MAX_LENGTH = 180;
 
 function toFindingPreview(rationale: string): string {
@@ -120,34 +125,35 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // Score and PR-list findings use the newest completed review; cost aggregates every completed review run.
+    // Score uses the newest completed review; cost aggregates every completed
+    // review run, once per run; FINDINGS uses each agent's latest successful
+    // review run.
     const prIds = rows.map((row) => row.id);
-    const summaries = new Map<string, { score: number | null; cost: number; missing: boolean }>();
-    const counts = new Map<string, { CRITICAL: number; WARNING: number; SUGGESTION: number }>();
-    const latestReviewIds = new Map<string, string>();
-    const previews = new Map<
+    const summaries = new Map<
       string,
-      {
-        severity: string;
-        title: string;
-        category: string;
-        file: string;
-        start_line: number;
-        confidence: number;
-        rationale: string;
-      }[]
+      { score: number | null; cost: number; missing: boolean; runIds: Set<string> }
     >();
+    const counts = new Map<string, { CRITICAL: number; WARNING: number; SUGGESTION: number }>();
+    const previews = new Map<string, NonNullable<PrMeta['finding_previews']>>();
 
     if (prIds.length > 0) {
+      // The review's own agent, else its run's: grouping and the shown name use the same id.
+      const agentId = sql<string | null>`coalesce(${t.reviews.agentId}, ${t.agentRuns.agentId})`;
       const reviewRows = await container.db
         .select({
           id: t.reviews.id,
           prId: t.reviews.prId,
           score: t.reviews.score,
+          createdAt: t.reviews.createdAt,
+          runId: t.agentRuns.id,
           costUsd: t.agentRuns.costUsd,
+          ranAt: t.agentRuns.ranAt,
+          agentId,
+          agentName: t.agents.name,
         })
         .from(t.reviews)
         .leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId))
+        .leftJoin(t.agents, eq(t.agents.id, agentId))
         .where(
           and(
             inArray(t.reviews.prId, prIds),
@@ -162,21 +168,27 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
           score: review.score,
           cost: 0,
           missing: false,
+          runIds: new Set<string>(),
         };
+        summaries.set(review.prId, summary);
+        // Nothing enforces one review per run (reviews.run_id is not unique),
+        // so a run's cost is counted once however many reviews link to it.
+        if (review.runId === null || summary.runIds.has(review.runId)) continue;
+        summary.runIds.add(review.runId);
         if (typeof review.costUsd === 'number') {
           summary.cost += review.costUsd;
         } else {
           summary.missing = true;
         }
-        summaries.set(review.prId, summary);
-        if (!latestReviewIds.has(review.prId)) latestReviewIds.set(review.prId, review.id);
       }
 
-      // Load findings only for each PR's newest completed review, so the query
-      // does not grow with review history.
-      const latestIds = [...latestReviewIds.values()];
+      // Load findings only for each agent's latest review, so the query does
+      // not grow with review history.
+      const latestReviews = latestReviewPerAgent(reviewRows);
+      const latestIds = [...latestReviews.keys()];
       const findingRows = latestIds.length === 0 ? [] : await container.db
         .select({
+          reviewId: t.findings.reviewId,
           prId: t.reviews.prId,
           severity: t.findings.severity,
           title: t.findings.title,
@@ -190,6 +202,10 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         .innerJoin(t.reviews, eq(t.reviews.id, t.findings.reviewId))
         .where(inArray(t.findings.reviewId, latestIds));
 
+      const unsorted = new Map<
+        string,
+        { preview: NonNullable<PrMeta['finding_previews']>[number]; review: CompletedReview }[]
+      >();
       for (const finding of findingRows) {
         const count = counts.get(finding.prId) ?? {
           CRITICAL: 0,
@@ -201,18 +217,24 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         }
         counts.set(finding.prId, count);
 
-        const list = previews.get(finding.prId) ?? [];
+        const review = latestReviews.get(finding.reviewId)!;
+        const list = unsorted.get(finding.prId) ?? [];
         list.push({
-          severity: finding.severity,
-          title: finding.title,
-          category: finding.category,
-          file: finding.file,
-          start_line: finding.startLine,
-          confidence: finding.confidence,
-          rationale: toFindingPreview(finding.rationale),
+          preview: {
+            severity: finding.severity,
+            title: finding.title,
+            category: finding.category,
+            file: finding.file,
+            start_line: finding.startLine,
+            confidence: finding.confidence,
+            rationale: toFindingPreview(finding.rationale),
+            agent_name: review.agentName,
+          },
+          review,
         });
-        previews.set(finding.prId, list);
+        unsorted.set(finding.prId, list);
       }
+      for (const [prId, list] of unsorted) previews.set(prId, sortFindingPreviews(list));
     }
 
     const now = Date.now();

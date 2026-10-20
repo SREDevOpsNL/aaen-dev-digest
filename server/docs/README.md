@@ -23,4 +23,11 @@ unbuilt work ([`../specs/`](../specs/README.md)), rejected approaches
 
 ## Documents
 
-None yet. Add one when a topic outgrows the module README.
+- [`architecture.md`](architecture.md) — boot sequence, module anatomy, the DI
+  container, tenancy, errors, configuration and secrets, background work, and
+  the migration and seed workflow.
+- [`review-runs.md`](review-runs.md) — how a review request becomes persisted
+  runs, reviews, findings, and traces: execution order, run states,
+  cancellation, reaping, SSE, and cost.
+- [`pr-list-summary.md`](pr-list-summary.md) — `GET /repos/:id/pulls`: GitHub
+  sync, review status, score, cost, and per-agent FINDINGS with previews.

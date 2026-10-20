@@ -33,4 +33,6 @@ missing ones** — an agent reads them as current intent.
 
 ## Index
 
-No reviewer-core specs yet.
+- [`01-provider-cost.md`](01-provider-cost.md) — shipped: authoritative
+  provider-reported cost versus best-available estimate, with the tests that
+  prove it.

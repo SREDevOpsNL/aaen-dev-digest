@@ -58,3 +58,58 @@ says which file a finding goes in.
   event must include both an exit code of zero and the expected injected
   context. Evidence: `.claude/settings.json:9` (`args`),
   `.claude/hooks/engineering-insights-reminder.mjs:13` (`hook_event_name`).
+
+- **2026-10-14** — L03 Intent Layer: a misleading PR description plus derived
+  intent made the reviewer drop the standalone hardcoded-key CRITICAL in 2 of 3
+  runs (it survived only inside the "key sent to the callback" finding), while
+  without intent it was a separate CRITICAL in 3 of 3; with the honest
+  description it was flagged in 6 of 6. Intent otherwise cut unmatched
+  findings from 1.33 to 0.67 per run at about 0.5–1× the cost of one review per
+  derivation. Treat the scope policy's "one finding per root cause" rule as the
+  first suspect and re-evaluate before enabling intent by default. Evidence:
+  `docs/plans/L03-intent-evaluation.md` (n = 3 per variant,
+  `deepseek/deepseek-v4-flash`), `reviewer-core/src/prompt.ts`
+  (`INTENT_SCOPE_POLICY`).
+
+- **2026-10-14** — Follow-up to the L03 entry above: after the scope policy
+  stopped saying "one finding per root cause" and named a hardcoded secret plus
+  its exfiltration as two findings, *misleading / with intent* kept the
+  standalone hardcoded-secret finding in 2 of 3 runs (was 1 of 3), the same as
+  *misleading / without* in the same run. That is not evidence the regression
+  is fixed: the without-intent baseline itself fell from 3 of 3 to 2 of 3 on a
+  byte-identical prompt, so run-to-run model drift is as large as the effect
+  (see the provider-drift entry in `reviewer-core/LEARNINGS.md`). Evidence:
+  `docs/plans/L03-intent-evaluation.md` (run 2), `reviewer-core/src/prompt.ts`
+  (`INTENT_SCOPE_POLICY`, rule 4).
+
+- **2026-10-16** — Homework 2: the approved plan used one-line `@AGENTS.md`
+  imports for the required `CLAUDE.md` files, and a sentinel probe below a
+  package root showed that this would have stopped Claude Code loading project
+  instructions in nested sessions (none at all from `client/src/app`). The
+  repository uses symlinks instead, after approval. A probe started only at the
+  root or a package root would have passed the broken setup. Details and
+  evidence: the 2026-10-16 correction in `LEARNINGS.md`.
+
+- **2026-10-20 — L01 mentor follow-up.** The mentor raised two points: per-agent
+  PR-list FINDINGS, and package docs that were one paragraph each.
+  - **"Latest run" is a business rule.** The aggregation was simple; defining
+    "latest" was not. It means the run that *started* last
+    (`agent_runs.ran_at`), not the review written last, plus one agent identity
+    (`coalesce` of the review's and the run's agent) used for both grouping and
+    the shown name. Details:
+    [`server/INSIGHTS.md`](server/INSIGHTS.md#what-works) (2026-10-20).
+  - **Docs drift silently.** Expanding the docs showed that every package's
+    `docs/README.md` "Documents" list still said "None yet", and both module
+    `specs/README.md` indexes said "no specs yet", although files existed. The
+    e2e prose spec also claimed trace-drawer coverage that flow `04` never had.
+    No check catches this, so update the README index in the same commit as the
+    document, and derive a spec's assertions from the flow or test that proves
+    them.
+  - **Evidence for the aggregation** came from a DB-backed matrix of 9 identity
+    and ordering cases, and from a live hermetic demonstration: two seeded
+    agents, an outdated Critical, and a newer failed run, with the PR-list
+    popover showing exactly the two current findings by name.
+
+  Evidence: `server/test/reviews.it.test.ts` (PR-list FINDINGS matrix),
+  `server/src/modules/pulls/status.ts:81` (`compareReviewRuns`), and
+  `e2e/specs/written/01-pr-findings-ui.md`.

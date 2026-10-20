@@ -35,12 +35,23 @@ settled Timeline run tile and on each PR-list row:
 
 - Show one severity-colored icon and count per non-zero severity in place of
   the "N finding(s)" total, followed by the blocker count.
-- Hovering or focusing the counts opens a read-only "N FINDINGS IN THIS RUN"
-  preview: severity, title, category, `file:line`, confidence, and a short
-  description. It has no Accept/Reject controls.
+- Hovering or focusing the counts opens a read-only preview: severity, title,
+  category, `file:line`, confidence, and a short description. It has no
+  Accept/Reject controls.
+  - On a Timeline tile it reads "N FINDINGS IN THIS RUN".
+  - On a PR-list row it reads "N FINDINGS IN LATEST AGENT RUNS" and names each
+    finding's agent, or "Unknown agent".
+- The preview stays open while its list scrolls by wheel, scrollbar, or keyboard,
+  and while focus moves into the list. It closes when the pointer or focus
+  leaves both the counts and the card, or when the page scrolls.
 - The Timeline preview uses the findings of that run from the reviews already
-  loaded for Review runs; the PR list uses the newest completed review from
-  the list response. Neither adds a request or a model call.
+  loaded for Review runs.
+- The PR list uses the list response: since the 2026-10-20 mentor follow-up,
+  that is each agent's latest successful run
+  ([server spec](../../server/specs/01-pr-list-review-summary.md)), no longer
+  only the newest review.
+- Neither preview adds a request or a model call. Behaviour detail:
+  [`../docs/findings-preview.md`](../docs/findings-preview.md).
 
 ## Copy
 
