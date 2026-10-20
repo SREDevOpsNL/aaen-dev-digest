@@ -108,6 +108,19 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   Evidence: `docs/plans/HW2-walkthrough-log.md` (Observations); a `fetch`
   wrapper recorded no request until the button was scrolled into view.
 
+- **2026-10-20** — `set viewport` persists across flows, because the runner
+  shares one agent-browser session. Flow `07a` pinned 760x1200 for its
+  scrollbar drag and passed 8/8 on the L01 branch, where it ran last. After
+  merging into `main`, flow `11-skills-lab` ran after it at 760px: the skill
+  detail was too narrow, its Versioning tab was clipped, and
+  `wait --text "Version history"` timed out (14/15). No command resets the
+  viewport, so a flow that changes it must end by restoring the session default:
+  1280x577 inner, in a 1280x720 window. When adding a flow, run the **whole**
+  suite, not just the new flow; a state leak only fails a later flow. Evidence:
+  `e2e/specs/07a-findings-preview-scroll.flow.json` (last step),
+  `e2e/test-results/11-skills-lab-fail.png` from the failing run (not
+  committed).
+
 ## Session Notes
 
 ## Open Questions

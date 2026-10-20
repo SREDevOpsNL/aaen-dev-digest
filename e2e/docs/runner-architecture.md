@@ -36,8 +36,9 @@ is in [seed-and-flows.md](seed-and-flows.md).
 
 **Shared session.** A flow inherits the previous flow's page, cookies, storage,
 and viewport. Every flow therefore starts with `open`. A flow that changes
-something lasting must keep it local: `07a`, for example, stubs `fetch` only
-in the document it opened.
+something lasting must keep it local or undo it. `07a`, for example, stubs
+`fetch` only in the document it opened, and it ends by restoring the default
+1280x577 viewport, because its 760px viewport broke a later flow's layout.
 
 ## Hermetic stack (`npm run e2e:hermetic`)
 
