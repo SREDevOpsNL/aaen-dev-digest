@@ -4,7 +4,7 @@ Walkthrough for the final acceptance gate (plan rev. 4.3, Gate 5). A criterion m
 
 - **Environment:** a disposable stack (isolated Postgres on alternate ports), never the development database and never demo PR #3, unless an action is separately authorized.
 - **Order and stacks:** see [Stacks and order](#stacks-and-order). In short: run `npm run e2e:hermetic` (flows 01–14, read-only), then do the API Contract mandatory setup ([`docs/skills/api-contract/README.md`](../skills/api-contract/README.md)) and the manual and SQL steps on an unpaid walkthrough stack; the experiment rows come from the experiment report.
-- **Paid calls:** none. Rows 17 and 18 come from the experiment report (Gates 2–4), and row 19 reuses a completed with-skill Gate 4 trace. Rows 14 and 20 have an [open decision](#open-decision-trace-evidence-for-rows-14-and-20).
+- **Paid calls:** none. Rows 17 and 18 come from the experiment report (Gates 2–4), and row 19 reuses a completed with-skill Gate 4 trace. Rows 14 and 20 use [Option A](#trace-evidence-for-rows-14-and-20--option-a-approved), approved on 2026-10-19. Row 14 is Verified; row 20 stays pending until its Gate 4 trace is collected.
 - **Physical drag (rows 13, 14, 31):** done by a person with a real mouse; agent-browser cannot start a native HTML5 drag (`e2e/LEARNINGS.md`).
 
 | # | Criterion | Method | Automated coverage | Walkthrough step | Result |
@@ -22,13 +22,13 @@ Walkthrough for the final acceptance gate (plan rev. 4.3, Gate 5). A criterion m
 | 11 | Add button offers Create and Import; Create in a modal | Flow 11 | flow 11 | Add skill menu shows Create and Import; Create opens a modal | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 12 | Create Skill modal: name, description, type, Markdown body | Manual (browser) | `page.test.tsx` | create a skill with a Markdown body (write path, so manual) | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 13 | Agent Skills tab: link, enable/disable, drag-and-drop reorder | Manual (browser) | flow 12, `SkillsTab.test.tsx` | link/unlink with the toggle; **physical mouse drag** reorders and survives reload | Verified 2026-10-20, physical drag ([log](HW2-walkthrough-log.md)) |
-| 14 | Drag-and-drop order determines prompt order | Manual (browser) + SQL | `skills-prompt.it.test.ts` | after a physical drag on the Test Quality Reviewer, reload keeps the order and SQL `agent_skills.order` matches it; trace order: [open decision](#open-decision-trace-evidence-for-rows-14-and-20) | Verified 2026-10-20, drag + SQL + Option A test ([log](HW2-walkthrough-log.md)) |
+| 14 | Drag-and-drop order determines prompt order | Manual (browser) + SQL | `skills-prompt.it.test.ts` | after a physical drag on the Test Quality Reviewer, reload keeps the order and SQL `agent_skills.order` matches it; trace order: [Option A](#trace-evidence-for-rows-14-and-20--option-a-approved), approved | Verified 2026-10-20, drag + SQL + Option A test ([log](HW2-walkthrough-log.md)) |
 | 15 | Import from `.md` (or `.zip`) with a content preview before saving | Manual (browser) | `ImportSkillDrawer.test.tsx` | import a `.md`: body visible before saving | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 16 | At least one skill linked to the new agents has imported origin | Manual (browser) + SQL | — | mandatory setup in `docs/skills/api-contract/README.md`: import `deprecation-policy.md`, link it; SQL `source = 'imported_file'`, 4 links | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 17 | Controlled experiment, Test Quality (without skill: missed; with: flagged) | Experiment | — | experiment 17 results (`docs/plans/HW2-skills-experiments.md`) | Pending: Gates 2–4 |
 | 18 | Controlled experiment, API Contract (breaking route change) | Experiment | — | experiment 18 results | Pending: Gates 2–4 |
 | 19 | Run trace: separate Skills block with its own token count | Manual (browser) | `TraceBody.test.tsx`, `skills-prompt.it.test.ts` | on the Gate 4 stack, before it stops: open a completed with-skill trace; the Skills block shows `~N tokens` | Pending: Gate 4 trace |
-| 20 | Enabled skill appears as a block; disabled skill has none | Manual (browser) | `skills-prompt.it.test.ts` | same trace: the target skill appears as a block, and a without-skill trace has no Skills block; disabled skill: [open decision](#open-decision-trace-evidence-for-rows-14-and-20) | Pending: Gate 4 trace (disabled half: Option A test passed) |
+| 20 | Enabled skill appears as a block; disabled skill has none | Manual (browser) | `skills-prompt.it.test.ts` | same trace: the target skill appears as a block, and a without-skill trace has no Skills block; disabled skill: [Option A](#trace-evidence-for-rows-14-and-20--option-a-approved), approved | Pending: Gate 4 trace (disabled half: Option A test passed) |
 | 21 | Manual `pr-self-review` on a mixed diff loads both skill sets; no automatic push hook | Repo/CLI | PR #16 headless run | evidence recorded in the matrix (row 21) | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 22 | Skill card also shows version and `agent_count` | Flow 11 | flow 11 | card shows `vN` and the agent count | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 23 | Delete button on the skill card | Flow 11 | flow 11 | Delete button on the card | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
@@ -65,28 +65,25 @@ Walkthrough for the final acceptance gate (plan rev. 4.3, Gate 5). A criterion m
 
 ## Stacks and order
 
-Prepared 2026-10-19; nothing below has been run. Both stacks are disposable and
-neither uses the development database.
+All stacks are disposable and none uses the development database.
 
-- **Walkthrough stack W (unpaid).** Used for every row except 17–20. Start
-  `scripts/e2e.sh --serve` (operator guide §2) with valid provisional
-  `DEVDIGEST_EXPERIMENT_*` values. If you start it before the Gate 2 key file
-  exists, the server has no OpenRouter key at all. Even with the key, experiment
-  mode refuses every generation before it reaches the provider unless an
-  authorized slot is open (operator guide, "One door to paid generation"), and
-  W gets no capability. So nothing on W can spend. Web
-  `http://localhost:3250`, API `:3251`; the Postgres container and database are
-  printed at start.
-- **Experiment stack E (Gate 4).** Used for rows 17–20 only.
-  - Stopping a stack removes its database (`docker rm -f` of the container) and
-    every trace in it; only the ledger under `~/.devdigest/hw2-experiments/`
-    survives. Open the row 19/20 trace **before** stopping E.
-  - Start E in your own terminal, not as an agent's background task: a
-    background task, and with it the stack and its traces, ends with the agent
-    session.
-  - The runner relinks each reviewer's skills before every slot (target only,
-    or none), so E no longer has the seeded links. Do not use E for rows 13,
-    14, 16, 42 or 43.
+| Stack | Purpose | Status |
+| --- | --- | --- |
+| W, `hw2f-d5b65f48` | Unpaid walkthrough, every row except 17–20 | **Completed 2026-10-19/20.** Results in the [walkthrough log](HW2-walkthrough-log.md). The stack ended with the agent session that ran it. |
+| R, `hw2f-a2c6f244` | Retest of row 32 after PR #25, from `main` at `3403eb0` | **Completed 2026-10-20.** [Log](HW2-walkthrough-log.md#retest-of-row-32-2026-10-20). Stopped after the retest. |
+| E (future) | Gate 4 confirmatory runs: rows 17–20 | **Not started.** It needs the separate Gate 2, 3 and 4 authorizations. |
+
+### Procedure used on stack W (completed; kept for a re-run)
+
+- Start `scripts/e2e.sh --serve` (operator guide §2) with valid provisional
+  `DEVDIGEST_EXPERIMENT_*` values.
+- If it starts before the Gate 2 key file exists, the server has no OpenRouter
+  key at all.
+- Even with a key, experiment mode refuses every generation before it reaches
+  the provider unless an authorized slot is open (operator guide, "One door to
+  paid generation"), and W gets no capability. So nothing on W can spend.
+- Web `http://localhost:3250`, API `:3251`; the Postgres container and database
+  are printed at start.
 
 Order:
 1. Before starting W, run `npm run e2e:hermetic` in `e2e/`. It starts and
@@ -98,6 +95,20 @@ Order:
    Reviewer is done by a person; row 33 deletes a throwaway agent.
 5. Conventions rows 46, 47, 48, 49, 50, 51, 41, 42 and 52, on the synthetic
    candidates (below). Press neither Run Scan nor ReScan.
+
+### Procedure for stack E (Gate 4, future)
+
+- Start E in your own terminal, not as an agent's background task. A
+  background task ends with the agent session, and the stack and its traces
+  end with it.
+- The runner relinks each reviewer's skills before every slot (target only, or
+  none), so E no longer has the seeded links. Do not use E for rows 13, 14, 16,
+  42 or 43.
+- Before checking rows 19 and 20 in the browser, and **before stopping E**,
+  export the evidence. Follow
+  [Export the evidence before teardown](HW2-experiment-operator-guide.md#export-the-evidence-before-teardown-gate-4).
+  Stopping a stack removes its database (`docker rm -f` of the container) and
+  every trace in it.
 
 ## SQL on a disposable stack
 
@@ -117,7 +128,9 @@ docker exec -it <container> psql -U devdigest -d <database>
 | 42 | `select s.name, s.source, a.name from skills s join agent_skills ak on ak.skill_id = s.id join agents a on a.id = ak.agent_id where s.name = 'repo-conventions';` | one row, linked to the chosen agent |
 | 48 | `select rule, status from conventions order by created_at;` | the rejected candidate is still `rejected` |
 
-## Open decision: trace evidence for rows 14 and 20
+## Trace evidence for rows 14 and 20 — Option A approved
+
+Decided on 2026-10-19: Option A.
 
 Each experiment slot links one skill or none. No planned trace therefore shows
 two or more skills in a dragged order (row 14), or a skill that is linked but
@@ -127,13 +140,15 @@ disabled (row 20). The prompt side of both is covered by
 - a relinked order reaches the Skills block in that order;
 - a disabled skill linked between enabled ones never reaches the prompt.
 
-- **A (recommended):** accept that test as the prompt-side evidence. The
-  walkthrough adds the physical drag and SQL order (row 14), and the Gate 4
-  with-skill trace for the enabled block (row 20).
-- **B:** a separate paid trace with two or more enabled skills in a dragged
-  order plus a linked, disabled one. Experiment slots relink target-only, so B
-  needs a design change, its own authorization and its own budget. It is not
-  planned.
+- **Option A (approved):** that test is the prompt-side evidence.
+  - **Row 14 is Verified:** the physical drag and SQL order on stack W, plus the
+    test.
+  - **Row 20 stays pending:** it also needs a completed with-skill Gate 4 trace
+    showing the enabled skill's block.
+- **Option B (not chosen):** a separate paid trace with two or more enabled
+  skills in a dragged order plus a linked, disabled one. Experiment slots
+  relink target-only, so B would have needed a design change, its own
+  authorization and its own budget.
 
 ## Conventions evidence (rows 38, 46, 47, 49) — decided
 

@@ -183,6 +183,105 @@ outcome: success, negative, inconclusive, incomplete, or *invalid* when any
 otherwise eligible slot broke the frozen fingerprint or did not execute its
 preregistered slot, condition or Skills.
 
+### Export the evidence before teardown (Gate 4)
+
+Stopping the stack deletes its database and every trace in it (`docker rm -f`).
+Only `~/.devdigest/hw2-experiments/<stack-id>/` survives. Before the row 19/20
+browser check and **before stopping E**, export the evidence into that
+directory.
+
+- Run the stack itself in your own terminal: an agent's background task ends
+  with the agent session.
+- Run these steps from `server/` in a second terminal.
+- The export reads only the local API on loopback (no credentials), the
+  stack's own database (which never holds keys) and the ledger. It never copies
+  `secrets.json`, `capability.json` or `capability.token`, and no step prints a
+  key.
+
+1. Set the stack id and create the evidence directory (mode 0700):
+
+```bash
+ID=<stack id>; EV=~/.devdigest/hw2-experiments/$ID/evidence
+```
+
+```bash
+(umask 077 && mkdir -p "$EV/traces")
+```
+
+2. Write the final report:
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts report --prereg ../docs/plans/HW2-experiment-preregistration.md --api http://127.0.0.1:3251 --stack $ID --database devdigest_hw2f_${ID#hw2f-} --container devdigest-hw2f-${ID#hw2f-} --out "$EV/report.md"
+```
+
+3. Export the trace of every run the ledger names, one file per slot. A slot
+   whose trace cannot be fetched is listed in `traces/MISSING.txt`; the export
+   does not stop.
+
+```bash
+python3 -I - "$EV" ~/.devdigest/hw2-experiments/$ID/ledger.jsonl http://127.0.0.1:3251 <<'EOF'
+import json, pathlib, sys, urllib.error, urllib.request
+ev, ledger, api = sys.argv[1:4]
+runs = {}
+for line in open(ledger):
+    event = json.loads(line)
+    if event.get("run_id"):
+        runs[event["slot_id"]] = event["run_id"]
+missing = []
+for slot, run in sorted(runs.items()):
+    try:
+        with urllib.request.urlopen(f"{api}/runs/{run}/trace", timeout=30) as response:
+            pathlib.Path(ev, "traces", f"{slot}.json").write_bytes(response.read())
+    except urllib.error.URLError as err:
+        missing.append(f"{slot} {run} {err}")
+pathlib.Path(ev, "traces", "MISSING.txt").write_text("".join(m + "\n" for m in missing))
+print(f"{len(runs) - len(missing)} of {len(runs)} traces exported; missing: {len(missing)}")
+EOF
+```
+
+4. Dump the run, trace, review and finding rows (data only):
+
+```bash
+(umask 077 && docker exec devdigest-hw2f-${ID#hw2f-} pg_dump -U devdigest -d devdigest_hw2f_${ID#hw2f-} --data-only -t agent_runs -t run_traces -t reviews -t findings -t agents -t agent_skills -t skills > "$EV/db-data.sql")
+```
+
+5. Rows 19 and 20, by hand: on `http://localhost:3250`, open a completed
+   **with**-skill trace (Skills block with `~N tokens`, only the target skill)
+   and a **without**-skill trace (no Skills block). Save a screenshot of each
+   into `$EV/`.
+6. Check that no secret was exported. The script reads the dedicated key into
+   memory and prints only file names and what was found, never the key. Expect
+   `clean`:
+
+```bash
+python3 -I - "$EV" <<'EOF'
+import json, pathlib, sys
+ev = pathlib.Path(sys.argv[1])
+secrets = pathlib.Path.home() / ".devdigest" / "hw2-experiments" / "secrets.json"
+key = json.loads(secrets.read_text()).get("OPENROUTER_API_KEY", "") if secrets.exists() else ""
+needles = {"the experiment key": key, "an sk-or- key": "sk-or-", "a bearer header": "Bearer "}
+hits = [f"{p.relative_to(ev)}: {label}" for p in sorted(ev.rglob("*")) if p.is_file()
+        for label, needle in needles.items() if needle and needle in p.read_text(errors="replace")]
+print("clean" if not hits else "\n".join(hits))
+EOF
+```
+
+7. Record checksums:
+
+```bash
+(cd "$EV" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && wc -l SHA256SUMS)
+```
+
+8. Only now stop E (Ctrl-C in its terminal). The ledger and `$EV` stay under
+   `~/.devdigest/hw2-experiments/$ID/`, outside git.
+9. Commit only normalized, secret-free results, and only after step 6 printed
+   `clean`:
+   - per-slot results and outcomes from `report.md`, into
+     [`HW2-skills-experiments.md`](HW2-skills-experiments.md);
+   - the row 19/20 screenshots.
+
+   Raw traces and `db-data.sql` stay outside git.
+
 ## Safety rules the code enforces
 
 ### Per slot, before any model request (zero cost on refusal)
