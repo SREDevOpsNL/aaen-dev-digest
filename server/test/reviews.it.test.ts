@@ -397,7 +397,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(body.runs.length).toBeGreaterThanOrEqual(2);
     await app.close();
   });
-  it('scopes PR-list findings to the newest completed review run', async () => {
+  it('keeps one unattributed group when neither the review nor its run names an agent', async () => {
     const app = await appWith(REVIEW_FIXTURE);
     const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
     const [olderRun] = await pg.handle.db
@@ -426,7 +426,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(listed.has_successful_review).toBe(true);
     expect(listed.findings_by_severity).toEqual({ CRITICAL: 0, WARNING: 1, SUGGESTION: 0 });
     expect(listed.finding_previews).toEqual([
-      expect.objectContaining({ title: 'Latest warning', severity: 'WARNING', file: 'src/new.ts', start_line: 2, rationale: 'Newest ' + 'x'.repeat(172) + '…' }),
+      expect.objectContaining({ title: 'Latest warning', severity: 'WARNING', file: 'src/new.ts', start_line: 2, rationale: 'Newest ' + 'x'.repeat(172) + '…', agent_name: null }),
     ]);
     await app.close();
   });
@@ -454,5 +454,222 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(listed.findings_by_severity).toBeNull();
     expect(listed.finding_previews).toEqual([]);
     await app.close();
+  });
+
+  describe("PR-list FINDINGS: each agent's latest successful review run", () => {
+    const at = (time: string) => new Date(`2026-10-20T${time}:00Z`);
+
+    async function insertAgent(name: string) {
+      const [agent] = await pg.handle.db
+        .insert(t.agents)
+        .values({ workspaceId, name, provider: 'openrouter', model: 'test/model', systemPrompt: 'Review the diff.' })
+        .returning();
+      return agent!.id;
+    }
+
+    /** One review run on the PR; `agent` sets both ids unless `reviewAgent` / `runAgent` override one. */
+    async function insertReviewRun(
+      prId: string,
+      o: {
+        agent?: string | null;
+        reviewAgent?: string | null;
+        runAgent?: string | null;
+        status?: 'done' | 'failed';
+        ranAt: string;
+        createdAt: string;
+        reviewId?: string;
+        findings?: { severity: string; title: string }[];
+      },
+    ) {
+      const [run] = await pg.handle.db
+        .insert(t.agentRuns)
+        .values({
+          workspaceId,
+          prId,
+          agentId: o.runAgent !== undefined ? o.runAgent : o.agent ?? null,
+          status: o.status ?? 'done',
+          costUsd: 0.01,
+          ranAt: at(o.ranAt),
+        })
+        .returning();
+      const [review] = await pg.handle.db
+        .insert(t.reviews)
+        .values({
+          ...(o.reviewId ? { id: o.reviewId } : {}),
+          workspaceId,
+          prId,
+          agentId: o.reviewAgent !== undefined ? o.reviewAgent : o.agent ?? null,
+          runId: run!.id,
+          kind: 'review',
+          score: 50,
+          createdAt: at(o.createdAt),
+        })
+        .returning();
+      if (o.findings?.length) {
+        await pg.handle.db.insert(t.findings).values(
+          o.findings.map((f, i) => ({
+            reviewId: review!.id,
+            severity: f.severity,
+            category: 'bug',
+            title: f.title,
+            file: 'src/a.ts',
+            startLine: i + 1,
+            endLine: i + 1,
+            rationale: f.title,
+            confidence: 0.9,
+          })),
+        );
+      }
+    }
+
+    async function listFindings(repoId: string, prId: string) {
+      const app = await appWith(REVIEW_FIXTURE);
+      const listed = (await app.inject({ method: 'GET', url: '/repos/' + repoId + '/pulls' })).json()
+        .find((item: { id: string }) => item.id === prId);
+      await app.close();
+      return {
+        counts: listed.findings_by_severity,
+        previews: (listed.finding_previews as { title: string; agent_name?: string | null }[]).map((p) => [
+          p.title,
+          p.agent_name,
+        ]),
+      };
+    }
+
+    it('includes the latest review of every agent, names each agent, and orders by severity', async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const security = await insertAgent('Security Reviewer');
+      const performance = await insertAgent('Performance Reviewer');
+      await insertReviewRun(pr.id, {
+        agent: security, ranAt: '12:00', createdAt: '12:05',
+        findings: [{ severity: 'SUGGESTION', title: 'Security suggestion' }, { severity: 'CRITICAL', title: 'Security critical' }],
+      });
+      await insertReviewRun(pr.id, {
+        agent: performance, ranAt: '11:00', createdAt: '11:05',
+        findings: [{ severity: 'WARNING', title: 'Performance warning' }],
+      });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 1, WARNING: 1, SUGGESTION: 1 },
+        previews: [
+          ['Security critical', 'Security Reviewer'],
+          ['Performance warning', 'Performance Reviewer'],
+          ['Security suggestion', 'Security Reviewer'],
+        ],
+      });
+    });
+
+    it("counts only an agent's newest review when it reviewed the PR twice", async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const agent = await insertAgent('General Reviewer');
+      await insertReviewRun(pr.id, { agent, ranAt: '10:00', createdAt: '10:05', findings: [{ severity: 'CRITICAL', title: 'Old critical' }] });
+      await insertReviewRun(pr.id, { agent, ranAt: '11:00', createdAt: '11:05', findings: [{ severity: 'WARNING', title: 'New warning' }] });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+        previews: [['New warning', 'General Reviewer']],
+      });
+    });
+
+    it("keeps an agent's last successful review when its newer run failed", async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const agent = await insertAgent('Security Reviewer');
+      await insertReviewRun(pr.id, { agent, ranAt: '10:00', createdAt: '10:05', findings: [{ severity: 'WARNING', title: 'Successful warning' }] });
+      await insertReviewRun(pr.id, {
+        agent, status: 'failed', ranAt: '11:00', createdAt: '11:05',
+        findings: [{ severity: 'CRITICAL', title: 'Failed-run critical' }],
+      });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+        previews: [['Successful warning', 'Security Reviewer']],
+      });
+    });
+
+    it("groups a review under its own agent when its run has none, and resolves that agent's name", async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const agent = await insertAgent('Review-Only Agent');
+      await insertReviewRun(pr.id, { agent, ranAt: '10:00', createdAt: '10:05', findings: [{ severity: 'CRITICAL', title: 'Older' }] });
+      await insertReviewRun(pr.id, {
+        reviewAgent: agent, runAgent: null, ranAt: '11:00', createdAt: '11:05',
+        findings: [{ severity: 'WARNING', title: 'Newer, review names the agent' }],
+      });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+        previews: [['Newer, review names the agent', 'Review-Only Agent']],
+      });
+    });
+
+    it("uses the run's agent when the review has none", async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const agent = await insertAgent('Run-Only Agent');
+      await insertReviewRun(pr.id, { agent, ranAt: '10:00', createdAt: '10:05', findings: [{ severity: 'CRITICAL', title: 'Older' }] });
+      await insertReviewRun(pr.id, {
+        reviewAgent: null, runAgent: agent, ranAt: '11:00', createdAt: '11:05',
+        findings: [{ severity: 'WARNING', title: 'Newer, run names the agent' }],
+      });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+        previews: [['Newer, run names the agent', 'Run-Only Agent']],
+      });
+    });
+
+    it('picks the higher review id when two runs of an agent share their timestamps', async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const agent = await insertAgent('Tied Agent');
+      await insertReviewRun(pr.id, {
+        agent, ranAt: '10:00', createdAt: '10:05', reviewId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+        findings: [{ severity: 'WARNING', title: 'Higher id wins' }],
+      });
+      await insertReviewRun(pr.id, {
+        agent, ranAt: '10:00', createdAt: '10:05', reviewId: '00000000-0000-4000-8000-000000000000',
+        findings: [{ severity: 'CRITICAL', title: 'Lower id loses' }],
+      });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+        previews: [['Higher id wins', 'Tied Agent']],
+      });
+    });
+
+    it("drops an agent's older findings when its latest review found nothing", async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const cleaned = await insertAgent('Cleaned-Up Agent');
+      const other = await insertAgent('Other Agent');
+      await insertReviewRun(pr.id, { agent: cleaned, ranAt: '10:00', createdAt: '10:05', findings: [{ severity: 'CRITICAL', title: 'Stale critical' }] });
+      await insertReviewRun(pr.id, { agent: cleaned, ranAt: '11:00', createdAt: '11:05' });
+      await insertReviewRun(pr.id, { agent: other, ranAt: '09:00', createdAt: '09:05', findings: [{ severity: 'WARNING', title: 'Other warning' }] });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+        previews: [['Other warning', 'Other Agent']],
+      });
+    });
+
+    it('takes the run that started last when two runs of an agent overlap', async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const agent = await insertAgent('Overlapping Agent');
+      await insertReviewRun(pr.id, { agent, ranAt: '12:00', createdAt: '12:20', findings: [{ severity: 'CRITICAL', title: 'Started 12:00, finished 12:20' }] });
+      await insertReviewRun(pr.id, { agent, ranAt: '12:10', createdAt: '12:15', findings: [{ severity: 'WARNING', title: 'Started 12:10, finished 12:15' }] });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+        previews: [['Started 12:10, finished 12:15', 'Overlapping Agent']],
+      });
+    });
+
+    it('keeps the group of an agent that no longer exists, without a name', async () => {
+      const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+      const deletedAgent = crypto.randomUUID();
+      await insertReviewRun(pr.id, { reviewAgent: deletedAgent, runAgent: null, ranAt: '10:00', createdAt: '10:05', findings: [{ severity: 'CRITICAL', title: 'Older' }] });
+      await insertReviewRun(pr.id, { reviewAgent: deletedAgent, runAgent: null, ranAt: '11:00', createdAt: '11:05', findings: [{ severity: 'WARNING', title: 'Deleted agent, latest' }] });
+
+      expect(await listFindings(repo.id, pr.id)).toEqual({
+        counts: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+        previews: [['Deleted agent, latest', null]],
+      });
+    });
   });
 });
