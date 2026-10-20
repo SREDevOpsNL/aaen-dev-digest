@@ -21,9 +21,14 @@ is how the suite works **today**.
 | `05-pr-diff.flow.json`           | PR detail Files changed tab renders the seeded diff            |
 | `06-onboarding.flow.json`        | Onboarding add-repository screen renders                       |
 | `07-settings.flow.json`          | Settings renders the API Keys and Feature Models sections      |
+| `07a-findings-preview-scroll.flow.json` | Timeline findings preview stays open while its findings scroll |
 
-Flows `01`, `02`, `04` and `05` enter at `{BASE}/` and follow the home redirect to
-the **first** repo, so they assume the seeded demo repo is the only one.
+Flows `01`, `02`, `04`, `05` and `07a` enter at `{BASE}/` and follow the home
+redirect to the **first** repo, so they assume the seeded demo repo is the only one.
+
+The seed has no completed agent run, so flow `07a` stubs, in its own page only, the
+two read-only GETs behind the Timeline (`/pulls/:id/runs`, `/pulls/:id/reviews`);
+its `description` says why and how.
 
 ## Adding a written spec
 

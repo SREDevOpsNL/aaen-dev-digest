@@ -39,7 +39,7 @@ Flows target **read-only seeded data** (the demo repo `acme/payments-api`, PR
 > the *first* repo, so it assumes the seeded demo repo is the only one. CI
 > guarantees this — `e2e-web.yml` brings up an empty Postgres and seeds it.
 > Your local dev DB usually has other imported repos, so running `npm test`
-> straight against it makes flows 02/04/05 land on the wrong repo and fail.
+> straight against it makes flows 02/04/05/07a land on the wrong repo and fail.
 > **Use the hermetic runner below** — it spins up its own isolated, freshly-seeded
 > stack and leaves your dev DB untouched.
 >
@@ -66,7 +66,7 @@ npm i -g agent-browser && agent-browser install
 
 The isolated Postgres is ephemeral (no persistent volume), so it's empty every
 run and the seeded demo repo `acme/payments-api` is the only one — which is
-exactly what flows 02/04/05 need.
+exactly what flows 02/04/05/07a need.
 
 ### Against your own running stack
 
@@ -100,3 +100,4 @@ a CI artifact by `.github/workflows/e2e-web.yml`).
 | `05-pr-diff` | PR #482 → Files changed tab → seeded file renders in the diff viewer |
 | `06-onboarding` | `/onboarding` → add-repository form renders (no submit) |
 | `07-settings` | `/settings/api-keys` + `/settings/models` → section titles render |
+| `07a-findings-preview-scroll` | PR #482 → Agent runs tab → Timeline severity counters (runs/reviews GETs stubbed in the page) → preview stays open through a scrollbar drag, an in-place list scroll, and keyboard PageDown; closes on pointer leave, Tab-out, and page scroll |

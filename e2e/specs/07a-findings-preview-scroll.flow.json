@@ -1,0 +1,75 @@
+{
+  "name": "Timeline findings preview stays open while its findings scroll",
+  "description": "Regression flow for the findings preview closing as soon as its own list scrolled: a capture-phase page-scroll listener heard the list's scroll event. The seed has no completed agent run, so before opening PR #482 the flow stubs, in this page only, the two read-only GETs the Timeline reads (/pulls/:id/runs and /pulls/:id/reviews) with one finished Security Reviewer run of 3 Critical and 2 Warning findings — no write and no model call. agent-browser 0.27's `network route --body` did not intercept these API calls, so the stub replaces window.fetch; the soft navigation into the PR keeps it, and the next flow's `open` starts a fresh document without it. The 760px viewport clamps the preview's left edge to x=392, so its findings scrollbar is at x=734 whatever the fonts; a precondition step checks the scrollbar thumb is under the pointer before the real mouse drag. agent-browser's `mouse wheel` always fires at (0,0), so the in-place scroll uses `scroll --selector`, which scrolls the list and fires the same native scroll event a wheel does; the keyboard check pages the list with a real PageDown. Finally, leaving the counters and preview, Tabbing out of it, and scrolling the page each still close it.",
+  "steps": [
+    { "cmd": ["set", "viewport", "760", "1200"], "label": "use a viewport that clamps the preview to a known x" },
+    { "cmd": ["open", "{BASE}/"], "label": "load the app root" },
+    { "cmd": ["wait", "--url", "/pulls"], "label": "land on the PR list" },
+    {
+      "cmd": ["eval", "(() => { const findings = ['CRITICAL', 'CRITICAL', 'CRITICAL', 'WARNING', 'WARNING'].map((severity, i) => ({ id: 'e2e-finding-' + i, review_id: 'e2e-review', severity, category: severity === 'CRITICAL' ? 'security' : 'bug', title: i === 4 ? 'Last previewed finding' : 'Previewed finding ' + (i + 1), file: 'src/api/limiter.ts', start_line: 10 + i, end_line: 10 + i, rationale: 'Stubbed finding for the findings preview scroll flow.', confidence: 0.9, accepted_at: null, dismissed_at: null })); const stubs = { runs: [{ run_id: 'e2e-run', agent_id: null, agent_name: 'Security Reviewer', provider: 'openrouter', model: 'e2e/stub', status: 'done', error: null, duration_ms: 1000, tokens_in: 100, tokens_out: 50, cost_usd: 0.001, findings_count: 5, severity_counts: { CRITICAL: 3, WARNING: 2, SUGGESTION: 0 }, grounding: '5/5 passed', ran_at: '2026-10-19T12:00:00.000Z', score: 0, blockers: 3 }], reviews: [{ id: 'e2e-review', pr_id: 'e2e-pr', agent_id: null, run_id: 'e2e-run', agent_name: 'Security Reviewer', kind: 'review', verdict: 'request_changes', summary: 'Stubbed review for the findings preview scroll flow.', score: 0, cost_usd: 0.001, model: 'e2e/stub', created_at: '2026-10-19T12:00:00.000Z', findings }] }; const realFetch = window.fetch.bind(window); window.fetch = (input, init) => { const parts = new URL(input instanceof Request ? input.url : String(input), location.href).pathname.split('/'); const body = parts.length === 4 && parts[1] === 'pulls' && Object.hasOwn(stubs, parts[3]) ? stubs[parts[3]] : null; return body ? Promise.resolve(new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })) : realFetch(input, init); }; return 'fetch stubbed'; })()"],
+      "label": "stub this page's runs and reviews GETs with one finished run of 5 findings",
+      "assert": { "stdoutIncludes": "fetch stubbed" }
+    },
+    { "cmd": ["find", "text", "Add rate limiting to public API endpoints", "click"], "label": "open the PR row (a soft navigation keeps the stub)" },
+    { "cmd": ["wait", "--url", "/pulls/482"], "label": "navigate to the PR detail route" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "PR detail data settles" },
+    { "cmd": ["find", "role", "button", "click", "--name", "Agent runs"], "label": "switch to the Agent runs tab" },
+    { "cmd": ["wait", "--url", "tab=findings"], "label": "findings tab is active in the URL" },
+    { "cmd": ["wait", "[role=group][aria-label='Findings: 3 CRITICAL, 2 WARNING']"], "label": "the Timeline run shows its severity counters" },
+
+    { "cmd": ["hover", "[role=group][aria-label^=Findings]"], "label": "hover the severity counters" },
+    { "cmd": ["wait", "[role=tooltip]"], "label": "the findings preview opens" },
+    {
+      "cmd": ["wait", "--fn", "(() => { const list = document.querySelector('[role=tooltip] > span:last-child'); if (!list) return false; const box = list.getBoundingClientRect(); const thumbEnd = box.top + list.clientHeight * list.clientHeight / list.scrollHeight; return list.scrollHeight > list.clientHeight && document.elementFromPoint(734, 800) === list && 734 >= box.left + list.clientWidth && 800 > box.top && 800 < thumbEnd; })()"],
+      "label": "precondition: the findings list overflows and its scrollbar thumb is under (734, 800)"
+    },
+
+    { "cmd": ["mouse", "move", "734", "800"], "label": "move the pointer onto the preview's scrollbar thumb" },
+    { "cmd": ["mouse", "down", "left"], "label": "press the scrollbar thumb" },
+    { "cmd": ["mouse", "move", "734", "830"], "label": "drag the thumb down" },
+    { "cmd": ["wait", "300"], "label": "let the list's scroll event dispatch" },
+    {
+      "cmd": ["eval", "(() => { const list = document.querySelector('[role=tooltip] > span:last-child'); return list ? 'open, scrollTop ' + (list.scrollTop > 0 ? '> 0' : '= 0') : 'closed'; })()"],
+      "label": "the preview stays open while the scrollbar is dragged",
+      "assert": { "stdoutIncludes": "open, scrollTop > 0" }
+    },
+    { "cmd": ["mouse", "move", "734", "900"], "label": "drag the thumb to the end of its track" },
+    { "cmd": ["mouse", "up", "left"], "label": "release the scrollbar" },
+    { "cmd": ["wait", "300"], "label": "let the list's scroll event dispatch" },
+    {
+      "cmd": ["eval", "(() => { const list = document.querySelector('[role=tooltip] > span:last-child'); if (!list) return 'closed'; const box = list.getBoundingClientRect(); const last = list.lastElementChild.getBoundingClientRect(); const atEnd = list.scrollTop + list.clientHeight >= list.scrollHeight - 1; const lastVisible = last.top >= box.top - 1 && last.bottom <= box.bottom + 1 && list.lastElementChild.textContent.includes('Last previewed finding'); return 'open' + (atEnd ? ', at end' : '') + (lastVisible ? ', last finding visible' : ''); })()"],
+      "label": "the preview stays open and the last finding is reachable",
+      "assert": { "stdoutIncludes": "open, at end, last finding visible" }
+    },
+
+    { "cmd": ["scroll", "up", "1000", "--selector", "[role=tooltip] > span:last-child"], "label": "scroll the findings list back up in place" },
+    { "cmd": ["wait", "300"], "label": "let the list's scroll event dispatch" },
+    {
+      "cmd": ["eval", "(() => { const list = document.querySelector('[role=tooltip] > span:last-child'); return list ? 'open, scrollTop ' + list.scrollTop : 'closed'; })()"],
+      "label": "the preview stays open while its list scrolls in place",
+      "assert": { "stdoutIncludes": "open, scrollTop 0" }
+    },
+
+    { "cmd": ["mouse", "move", "20", "1180"], "label": "move the pointer off the counters and the preview" },
+    { "cmd": ["wait", "--fn", "!document.querySelector('[role=tooltip]')"], "label": "the preview closes once the pointer has left both" },
+
+    { "cmd": ["eval", "document.activeElement.blur(); 'blurred'"], "label": "start the keyboard check with nothing focused", "assert": { "stdoutIncludes": "blurred" } },
+    { "cmd": ["focus", "[role=group][aria-label^=Findings]"], "label": "focus the severity counters" },
+    { "cmd": ["wait", "[role=tooltip]"], "label": "keyboard focus opens the preview" },
+    { "cmd": ["press", "Tab"], "label": "Tab into the preview's scrollable findings list" },
+    { "cmd": ["press", "PageDown"], "label": "page the findings list down" },
+    { "cmd": ["wait", "300"], "label": "let the list's scroll event dispatch" },
+    {
+      "cmd": ["eval", "(() => { const list = document.querySelector('[role=tooltip] > span:last-child'); if (!list) return 'closed'; return 'open' + (list.contains(document.activeElement) ? ', focus in list' : '') + (list.scrollTop > 0 ? ', scrolled' : ''); })()"],
+      "label": "the preview stays open while the keyboard scrolls its list",
+      "assert": { "stdoutIncludes": "open, focus in list, scrolled" }
+    },
+    { "cmd": ["press", "Tab"], "label": "Tab out of the preview" },
+    { "cmd": ["wait", "--fn", "!document.querySelector('[role=tooltip]')"], "label": "the preview closes once focus has left it" },
+
+    { "cmd": ["hover", "[role=group][aria-label^=Findings]"], "label": "hover the severity counters again" },
+    { "cmd": ["wait", "[role=tooltip]"], "label": "the findings preview reopens" },
+    { "cmd": ["scroll", "down", "200", "--selector", "main"], "label": "scroll the page underneath the preview" },
+    { "cmd": ["wait", "--fn", "!document.querySelector('[role=tooltip]')"], "label": "a page scroll still closes the fixed-position preview" }
+  ]
+}
