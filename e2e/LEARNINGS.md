@@ -28,6 +28,19 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   `npm ci` in `e2e/` first. Evidence: `scripts/e2e.sh:150-151`
   (`install_if_needed`); the run passed 13/13 after `npm ci`.
 
+- **2026-10-20** — A `scripts/e2e.sh --serve` stack started as an agent's
+  background task lives only as long as that agent session. When the session
+  ended, the harness stopped the task, the script's exit trap removed the
+  ephemeral Postgres container, and the walkthrough stack's database went with
+  it (API unreachable, container gone, no change by the next session). Only
+  `~/.devdigest/hw2-experiments/<stack-id>/` survives. Record evidence before a
+  session ends. A stack whose data must outlive the session, such as the Gate 4
+  stack whose trace row 19 reuses, should run in the operator's own terminal.
+  Evidence: the session-end notice "Background shell command didn't finish
+  before the previous session ended"; `docker ps` no longer listed
+  `devdigest-hw2f-d5b65f48`; `scripts/e2e.sh` (`cleanup` trap,
+  `docker rm -f`).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-10-17** — `agent-browser drag <src> <tgt>` cannot exercise native

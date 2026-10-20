@@ -81,6 +81,9 @@ neither uses the development database.
   - Stopping a stack removes its database (`docker rm -f` of the container) and
     every trace in it; only the ledger under `~/.devdigest/hw2-experiments/`
     survives. Open the row 19/20 trace **before** stopping E.
+  - Start E in your own terminal, not as an agent's background task: a
+    background task, and with it the stack and its traces, ends with the agent
+    session.
   - The runner relinks each reviewer's skills before every slot (target only,
     or none), so E no longer has the seeded links. Do not use E for rows 13,
     14, 16, 42 or 43.
