@@ -24,4 +24,13 @@ link, do not copy.
 
 ## Documents
 
-None yet. Add one when a topic outgrows the module README.
+- [`review-engine.md`](review-engine.md) — `reviewPullRequest` step by step:
+  mode selection, per-chunk calls with cancellation, reduce, grounding and
+  rescoring, structured output with repair, providers and the two cost
+  fields, and the scaffolded CI payload.
+- [`grounding-and-scoring.md`](grounding-and-scoring.md) — exactly which
+  findings the citation gate keeps or drops, the deterministic score
+  penalties, and verdict versus blockers.
+- [`prompt-assembly.md`](prompt-assembly.md) — the two messages, section
+  order, untrusted fencing and the injection guard, what the studio passes
+  today, and the size budget.

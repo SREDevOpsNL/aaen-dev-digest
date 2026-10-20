@@ -44,6 +44,14 @@ correction. Genuinely cross-package findings belong in
   `client/src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/FindingsPanel.tsx:75`
   (`FindingsPanel`), `e2e/specs/04-pr-findings.flow.json:17`.
 
+- **2026-10-19** — A popover that closes on page scroll or blur must ignore
+  scroll events and focus moves that stay inside it, or a scrollable popover
+  closes as soon as it is scrolled, Tabbed into, or its scrollbar is dragged.
+  Full finding: [`INSIGHTS.md`](INSIGHTS.md#recurring-errors--fixes)
+  (2026-10-19). Evidence:
+  `client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/FindingsPreview.tsx:49`
+  (`onScroll`).
+
 ## Session Notes
 
 ## Open Questions

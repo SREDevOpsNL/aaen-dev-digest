@@ -20,4 +20,12 @@ specs live there alongside the flow files), rejected approaches
 
 ## Documents
 
-None yet. Add one when a topic outgrows the module README.
+- [`runner-architecture.md`](runner-architecture.md) — how `run.ts` turns a
+  flow into pass/fail, the shared session, the hermetic stack's lifecycle and
+  teardown, and how CI differs.
+- [`seed-and-flows.md`](seed-and-flows.md) — what the seed guarantees (and
+  does not), which flow depends on which seeded data, and the stubbed run in
+  `07a`.
+- [`agent-browser-usage.md`](agent-browser-usage.md) — the commands the
+  flows use as assertions, coordinate-safe pointer steps, and debugging a
+  failing flow.

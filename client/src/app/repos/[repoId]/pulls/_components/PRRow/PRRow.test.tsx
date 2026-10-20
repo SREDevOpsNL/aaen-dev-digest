@@ -5,7 +5,8 @@ import type { PrMeta } from "@devdigest/shared";
 import messages from "../../../../../../../messages/en/prReview.json";
 import { PRRow } from "./PRRow";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
 afterEach(cleanup);
 
@@ -55,7 +56,7 @@ describe("PRRow", () => {
     expect(screen.getByTestId("pr-list-cost")).toHaveTextContent("");
   });
 
-  it("shows a run-scoped, read-only tooltip with a bounded description", () => {
+  it("shows each agent's latest findings read-only, naming the agent, with a bounded description", () => {
     const rationale = "x".repeat(220);
     renderRow({
       ...PR,
@@ -68,13 +69,14 @@ describe("PRRow", () => {
         start_line: 42,
         confidence: 0.87,
         rationale,
+        agent_name: "Performance Reviewer",
       }],
     });
 
     const trigger = screen.getByRole("group", { name: "Findings: 1 WARNING" });
     fireEvent.mouseEnter(trigger);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("1 FINDINGS IN THIS RUN");
-    expect(screen.getByRole("tooltip")).toHaveTextContent("WARNING Current warning · performance");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("1 FINDINGS IN LATEST AGENT RUNS");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("WARNING Current warning · performance · Performance Reviewer");
     expect(screen.getByRole("tooltip")).toHaveTextContent("src/api.ts:42 · 87%");
     expect(screen.getByRole("tooltip")).toHaveTextContent("x".repeat(179) + "…");
     expect(screen.queryByRole("button", { name: /accept|reject/i })).not.toBeInTheDocument();
@@ -82,5 +84,54 @@ describe("PRRow", () => {
     fireEvent.mouseLeave(trigger);
     fireEvent.focus(trigger);
     expect(screen.getByRole("tooltip")).toBeInTheDocument();
+  });
+
+  it("names the agent behind every aggregated finding, and an unknown agent", () => {
+    const finding = { category: "bug", file: "src/api.ts", start_line: 1, confidence: 0.9, rationale: "Why." };
+    renderRow({
+      ...PR,
+      findings_by_severity: { CRITICAL: 1, WARNING: 1, SUGGESTION: 1 },
+      finding_previews: [
+        { ...finding, severity: "CRITICAL", title: "Leaked key", agent_name: "Security Reviewer" },
+        { ...finding, severity: "WARNING", title: "N+1 query", agent_name: "Performance Reviewer" },
+        { ...finding, severity: "SUGGESTION", title: "Rename helper", agent_name: null },
+      ],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("group", { name: "Findings: 1 CRITICAL, 1 WARNING, 1 SUGGESTION" }));
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent("3 FINDINGS IN LATEST AGENT RUNS");
+    expect(tooltip).toHaveTextContent("Leaked key · bug · Security Reviewer");
+    expect(tooltip).toHaveTextContent("N+1 query · bug · Performance Reviewer");
+    expect(tooltip).toHaveTextContent("Rename helper · bug · Unknown agent");
+  });
+
+  it("keeps the findings preview open while it scrolls, without opening the PR", () => {
+    renderRow({
+      ...PR,
+      findings_by_severity: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+      finding_previews: [{
+        severity: "WARNING",
+        title: "Current warning",
+        category: "performance",
+        file: "src/api.ts",
+        start_line: 42,
+        confidence: 0.87,
+        rationale: "Loop issues one query per user.",
+      }],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("group", { name: "Findings: 1 WARNING" }));
+    const list = screen.getByRole("tooltip").lastElementChild as HTMLElement;
+    fireEvent.wheel(list, { deltaY: 120 });
+    fireEvent.scroll(list, { target: { scrollTop: 120 } });
+    fireEvent.mouseDown(list);
+    fireEvent.mouseUp(list);
+    fireEvent.click(list);
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    expect(push).not.toHaveBeenCalled();
+
+    fireEvent.scroll(window);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 });

@@ -57,6 +57,24 @@ check popovers in a browser, not only in component tests. Evidence:
 client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/helpers.ts:17,
 client/src/app/repos/[repoId]/pulls/styles.ts:94.
 
+- **2026-10-19** — Extends the 2026-10-02 popover entry above: "close them on
+scroll" through a capture-phase `window` scroll listener also closed the
+FindingsPreview whenever its own findings list scrolled, by mouse wheel or by
+dragging its scrollbar. `scroll` does not bubble, but capture listeners on
+`window` still hear it from every element. A headless-Chrome trace showed
+`wheel` and then `scroll` on the list span with no `mouseleave`, and the card
+closed. The fix ignores scroll events whose target is inside the card. Its
+keyboard twin: Chrome makes a scroller with no focusable children a Tab stop, so
+Tab from the counts moved focus into the list. `onBlur={hide}` (with
+`relatedTarget` = the list) unmounted it mid-move, and focus fell to `<body>`.
+Blur now closes only when `relatedTarget` is outside the trigger. Adding
+`overscroll-behavior: contain` was tried and removed: a `position: fixed` card
+chains its scroll to the viewport, which never scrolls in this shell, because
+`<main>` does. Evidence:
+client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/FindingsPreview.tsx:49
+(`onScroll`), FindingsPreview.tsx:78 (`onBlur`),
+FindingsPreview.test.tsx:90, e2e/specs/07a-findings-preview-scroll.flow.json:33.
+
 
 ## Session Notes
 

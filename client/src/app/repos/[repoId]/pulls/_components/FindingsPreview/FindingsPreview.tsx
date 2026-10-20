@@ -20,6 +20,7 @@ export function FindingsPreview({
   counts,
   items,
   align = "left",
+  scope = "run",
 }: {
   /** Findings per severity; zero and missing severities are not shown. */
   counts: Partial<Record<string, number>>;
@@ -27,9 +28,12 @@ export function FindingsPreview({
   items: PreviewFinding[];
   /** Which edge of the counts the preview aligns to. */
   align?: "left" | "right";
+  /** One run's findings (Timeline), or each agent's latest run (PR list), which names each finding's agent. */
+  scope?: "run" | "latestAgentRuns";
 }) {
   const t = useTranslations("prReview");
   const triggerRef = React.useRef<HTMLSpanElement>(null);
+  const previewRef = React.useRef<HTMLSpanElement>(null);
   const [position, setPosition] = React.useState<React.CSSProperties | null>(null);
   const tooltipId = React.useId();
   const open = position !== null;
@@ -40,11 +44,17 @@ export function FindingsPreview({
   };
   const hide = () => setPosition(null);
 
-  // A fixed card would detach from the counts on scroll; close it instead.
+  // A fixed card would detach from the counts when the page scrolls; close it
+  // instead. The capture-phase listener also hears scrolls of the card's own
+  // findings list, which must keep it open.
   React.useEffect(() => {
     if (!open) return;
-    window.addEventListener("scroll", hide, true);
-    return () => window.removeEventListener("scroll", hide, true);
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && previewRef.current?.contains(event.target)) return;
+      hide();
+    };
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
   }, [open]);
 
   const shown = PREVIEW_SEVERITIES.filter((severity) => (counts[severity] ?? 0) > 0);
@@ -66,7 +76,11 @@ export function FindingsPreview({
       onMouseEnter={show}
       onMouseLeave={hide}
       onFocus={show}
-      onBlur={hide}
+      // Tab can move focus into the scrollable findings list (browsers make a
+      // scroller a tab stop); only focus leaving the counts and card closes it.
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) hide();
+      }}
       onClick={(event) => event.stopPropagation()}
     >
       {shown.map((severity) => {
@@ -81,11 +95,11 @@ export function FindingsPreview({
       })}
 
       {position && interactive && (
-        <span style={s.tooltipFrame(position)}>
+        <span ref={previewRef} style={s.tooltipFrame(position)}>
           <span id={tooltipId} role="tooltip" style={s.tooltipCard}>
             <span style={s.heading}>
               <Icon.AlertOctagon size={12} aria-hidden />
-              {t("list.findingsInRun", { count: items.length })}
+              {t(scope === "run" ? "list.findingsInRun" : "list.findingsInLatestAgentRuns", { count: items.length })}
             </span>
             <span style={s.list}>
               {items.map((finding, index) => {
@@ -103,6 +117,11 @@ export function FindingsPreview({
                         {t("panel.severity." + finding.severity.toLowerCase())}
                       </span>{" "}
                       <strong>{finding.title}</strong> · <span style={s.category}>{finding.category}</span>
+                      {scope === "latestAgentRuns" && (
+                        <>
+                          {" "}· <span style={s.agent}>{finding.agent_name ?? t("list.unknownAgent")}</span>
+                        </>
+                      )}
                     </span>
                     <span className="mono" style={s.location}>
                       {finding.file}:{lines} · {Math.round(finding.confidence * 100)}%

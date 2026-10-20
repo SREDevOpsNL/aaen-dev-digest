@@ -14,7 +14,8 @@ export const SEVERITY_META: Record<PreviewSeverity, { color: string; icon: IconN
 
 /**
  * The fields the preview renders. Both the PR-list summary preview and a full
- * FindingRecord satisfy it; end_line is absent from the PR-list projection.
+ * FindingRecord satisfy it; end_line is absent from the PR-list projection,
+ * and only the PR-list projection names the agent (null when unknown).
  */
 export type PreviewFinding = {
   severity: string;
@@ -25,4 +26,5 @@ export type PreviewFinding = {
   end_line?: number;
   confidence: number;
   rationale: string;
+  agent_name?: string | null;
 };
