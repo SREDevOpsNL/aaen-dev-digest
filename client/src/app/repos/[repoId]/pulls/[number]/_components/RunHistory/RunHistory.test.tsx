@@ -128,6 +128,19 @@ describe("RunHistory — severity counts and findings preview", () => {
     expect(tooltip.querySelector("button")).toBeNull();
   });
 
+  it("keeps the preview open while its findings list scrolls, and closes it when the page scrolls", () => {
+    renderWithFindings(run({ findings_count: 3, blockers: 1, score: 17 }));
+    fireEvent.mouseEnter(screen.getByRole("group", { name: /^Findings/ }));
+    const list = screen.getByRole("tooltip").lastElementChild as HTMLElement;
+
+    fireEvent.wheel(list, { deltaY: 120 });
+    fireEvent.scroll(list, { target: { scrollTop: 120 } });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Untested service");
+
+    fireEvent.scroll(window);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it("falls back to the server's per-run counts, without a preview, before reviews load", () => {
     renderRuns([
       run({

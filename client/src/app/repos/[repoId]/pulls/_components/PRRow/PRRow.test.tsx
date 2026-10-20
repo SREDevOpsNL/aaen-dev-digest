@@ -5,7 +5,8 @@ import type { PrMeta } from "@devdigest/shared";
 import messages from "../../../../../../../messages/en/prReview.json";
 import { PRRow } from "./PRRow";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
 afterEach(cleanup);
 
@@ -82,5 +83,34 @@ describe("PRRow", () => {
     fireEvent.mouseLeave(trigger);
     fireEvent.focus(trigger);
     expect(screen.getByRole("tooltip")).toBeInTheDocument();
+  });
+
+  it("keeps the findings preview open while it scrolls, without opening the PR", () => {
+    renderRow({
+      ...PR,
+      findings_by_severity: { CRITICAL: 0, WARNING: 1, SUGGESTION: 0 },
+      finding_previews: [{
+        severity: "WARNING",
+        title: "Current warning",
+        category: "performance",
+        file: "src/api.ts",
+        start_line: 42,
+        confidence: 0.87,
+        rationale: "Loop issues one query per user.",
+      }],
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("group", { name: "Findings: 1 WARNING" }));
+    const list = screen.getByRole("tooltip").lastElementChild as HTMLElement;
+    fireEvent.wheel(list, { deltaY: 120 });
+    fireEvent.scroll(list, { target: { scrollTop: 120 } });
+    fireEvent.mouseDown(list);
+    fireEvent.mouseUp(list);
+    fireEvent.click(list);
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    expect(push).not.toHaveBeenCalled();
+
+    fireEvent.scroll(window);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 });
