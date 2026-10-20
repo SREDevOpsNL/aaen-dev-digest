@@ -32,6 +32,12 @@ server/src/vendor/shared/contracts/platform.ts:178.
   server/test/reviews.it.test.ts ("takes the run that started last when two
   runs of an agent overlap").
 
+- **2026-10-20** — PR-list cost now sums each successful run **once**, even
+  when several review rows link to it. No current code path creates such rows,
+  so this is a defensive fix. See the matching
+  [LEARNINGS entry](LEARNINGS.md#codebase-patterns--tool--library-notes).
+  Evidence: server/src/modules/pulls/routes.ts:176.
+
 ## What Doesn't Work
 
 ## Codebase Patterns & Tool / Library Notes

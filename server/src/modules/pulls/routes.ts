@@ -126,9 +126,13 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
     }
 
     // Score uses the newest completed review; cost aggregates every completed
-    // review run; FINDINGS uses each agent's latest successful review run.
+    // review run, once per run; FINDINGS uses each agent's latest successful
+    // review run.
     const prIds = rows.map((row) => row.id);
-    const summaries = new Map<string, { score: number | null; cost: number; missing: boolean }>();
+    const summaries = new Map<
+      string,
+      { score: number | null; cost: number; missing: boolean; runIds: Set<string> }
+    >();
     const counts = new Map<string, { CRITICAL: number; WARNING: number; SUGGESTION: number }>();
     const previews = new Map<string, NonNullable<PrMeta['finding_previews']>>();
 
@@ -141,6 +145,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
           prId: t.reviews.prId,
           score: t.reviews.score,
           createdAt: t.reviews.createdAt,
+          runId: t.agentRuns.id,
           costUsd: t.agentRuns.costUsd,
           ranAt: t.agentRuns.ranAt,
           agentId,
@@ -163,13 +168,18 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
           score: review.score,
           cost: 0,
           missing: false,
+          runIds: new Set<string>(),
         };
+        summaries.set(review.prId, summary);
+        // Nothing enforces one review per run (reviews.run_id is not unique),
+        // so a run's cost is counted once however many reviews link to it.
+        if (review.runId === null || summary.runIds.has(review.runId)) continue;
+        summary.runIds.add(review.runId);
         if (typeof review.costUsd === 'number') {
           summary.cost += review.costUsd;
         } else {
           summary.missing = true;
         }
-        summaries.set(review.prId, summary);
       }
 
       // Load findings only for each agent's latest review, so the query does

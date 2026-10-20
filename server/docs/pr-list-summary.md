@@ -44,9 +44,14 @@ own scope:
 | Field | Scope | Rule |
 | --- | --- | --- |
 | `score` | Newest successful review overall, by `reviews.created_at` | Its 0–100 score. |
-| `cost_usd` | **All** successful runs | Sum of provider-reported `agent_runs.cost_usd` (`routes.ts:168`). If any of them has no reported cost, the total is `null` (unknown), never a partial sum. |
+| `cost_usd` | **All** successful runs | Sum of provider-reported `agent_runs.cost_usd`, **once per distinct run** (`routes.ts:179`). If any of them has no reported cost, the total is `null` (unknown), never a partial sum. |
 | `has_successful_review` | Any successful run | Lets the UI tell "no review" (empty Cost cell) from "unknown cost" (`—`). |
 | `findings_by_severity`, `finding_previews` | **Each agent's latest successful run** | The union of those reviews' findings (below). `null` / `[]` when the union is empty. |
+
+Cost is summed per **run**, not per review row. Today every successful run
+writes exactly one `kind = 'review'` row (`run-executor.ts`, one
+`insertReview` per `runOneAgent`), but `reviews.run_id` has no unique
+constraint, so the route deduplicates by run id rather than rely on that.
 
 ### Each agent's latest run
 
@@ -55,8 +60,8 @@ The selection rules are pure functions in
 database:
 
 - **Agent identity** is `coalesce(reviews.agent_id, agent_runs.agent_id)`
-  (`routes.ts:137`).
-  - The agent's name is joined on that **same** expression (`routes.ts:151`),
+  (`routes.ts:141`).
+  - The agent's name is joined on that **same** expression (`routes.ts:156`),
     so grouping and the shown name never disagree.
   - Rows where both ids are null form one unattributed group.
 - **"Latest"** is decided by `compareReviewRuns` (`status.ts:81`):
@@ -66,7 +71,7 @@ database:
 
   An overlapping run that started later therefore wins even if it finished
   first, and ties resolve the same way every time. `latestReviewPerAgent`
-  (`status.ts:95`) keeps one review per `(PR, agent)` (`routes.ts:177`).
+  (`status.ts:95`) keeps one review per `(PR, agent)` (`routes.ts:187`).
 - **No fallback:** an agent's latest review replaces its older findings even
   when it found nothing. A newer *failed* run is not eligible, so that agent's
   last successful review stays.
@@ -75,7 +80,7 @@ database:
     row no longer exists or for the unattributed group.
   - They are sorted by `sortFindingPreviews` (`status.ts:106`): severity
     (Critical, Warning, Suggestion, then unknown), the newer run, file, and
-    line (`routes.ts:227`).
+    line (`routes.ts:237`).
   - The rationale is whitespace-collapsed and cut to 180 characters with `…`
     (`FINDING_PREVIEW_MAX_LENGTH`, `routes.ts:16`). The stored rationale is
     unchanged.
@@ -95,8 +100,10 @@ each finding's agent; see
 
 - `test/pulls-status.test.ts` (hermetic): status derivation, the latest-run
   comparator, the per-agent grouping, and the preview order.
-- `test/reviews.it.test.ts` (Docker): cost aggregation, a PR with no successful
-  run, and the per-agent matrix. The matrix covers two agents, a re-review, a
-  newer failed run, review-only and run-only agent ids, no agent at all,
+- `test/reviews.it.test.ts` (Docker): cost aggregation, a run's cost counted
+  once when two reviews share it, unknown cost when that shared run has no
+  reported cost, a PR with no successful run, and the
+  per-agent matrix. The matrix covers two agents, a re-review, a newer failed
+  run, review-only and run-only agent ids, no agent at all,
   identical timestamps, a clean latest review, overlapping runs, and a deleted
   agent.

@@ -40,6 +40,19 @@ correction. Repo-intel remains server-scoped;
   `server/src/db/migrate.ts:30` (`runMigrations`); `migrate()` in
   `drizzle-orm/pg-core/dialect.js`; commit `2006964`.
 
+- **2026-10-20** — "One `kind = 'review'` row per agent run" is a convention of
+  the code, not a guarantee in the schema. Today `ReviewRunExecutor.runOneAgent` inserts
+  exactly one review per run, and `runReview` creates a fresh run per agent per
+  request. But `reviews.run_id` has no unique constraint and no foreign key, so
+  any per-run aggregate read through `reviews` (such as PR-list cost) must
+  deduplicate by run id. Otherwise it is counted once per review row. Evidence:
+  `server/src/db/schema/reviews.ts:19` (`runId`),
+  `server/src/db/migrations/0008_striped_lady_deathstrike.sql:1`,
+  `server/src/modules/reviews/run-executor.ts:219` (single `insertReview`),
+  `server/src/modules/pulls/routes.ts:176` (distinct-run guard), and
+  `server/test/reviews.it.test.ts` ("counts a run's cost once…"), which fails
+  against the earlier per-row sum (0.09 instead of 0.05).
+
 ## Decisions
 
 ## Recurring Errors & Fixes

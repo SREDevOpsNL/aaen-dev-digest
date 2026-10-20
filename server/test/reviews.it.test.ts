@@ -310,6 +310,57 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     await app.close();
   });
 
+  it("counts a run's cost once when two review rows link to the same run", async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const [sharedRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'done', costUsd: 0.04 })
+      .returning();
+    const [otherRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'done', costUsd: 0.01 })
+      .returning();
+    await pg.handle.db.insert(t.reviews).values([
+      { workspaceId, prId: pr.id, agentId: null, runId: otherRun!.id, kind: 'review', score: 70, createdAt: new Date('2026-09-20T09:00:00Z') },
+      { workspaceId, prId: pr.id, agentId: null, runId: sharedRun!.id, kind: 'review', score: 80, createdAt: new Date('2026-09-20T10:00:00Z') },
+      { workspaceId, prId: pr.id, agentId: null, runId: sharedRun!.id, kind: 'review', score: 90, createdAt: new Date('2026-09-20T11:00:00Z') },
+    ]);
+
+    const listed = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json()
+      .find((item: { id: string }) => item.id === pr.id);
+    expect(listed.cost_usd).toBeCloseTo(0.05, 10);
+    expect(listed.score).toBe(90);
+
+    await app.close();
+  });
+
+  it('reports unknown cost when a run without a reported cost is linked to two reviews', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const [unpricedRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'done', costUsd: null })
+      .returning();
+    const [pricedRun] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, prId: pr.id, status: 'done', costUsd: 0.01 })
+      .returning();
+    await pg.handle.db.insert(t.reviews).values([
+      { workspaceId, prId: pr.id, agentId: null, runId: pricedRun!.id, kind: 'review', score: 70, createdAt: new Date('2026-09-20T09:00:00Z') },
+      { workspaceId, prId: pr.id, agentId: null, runId: unpricedRun!.id, kind: 'review', score: 80, createdAt: new Date('2026-09-20T10:00:00Z') },
+      { workspaceId, prId: pr.id, agentId: null, runId: unpricedRun!.id, kind: 'review', score: 90, createdAt: new Date('2026-09-20T11:00:00Z') },
+    ]);
+
+    const listed = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json()
+      .find((item: { id: string }) => item.id === pr.id);
+    expect(listed.has_successful_review).toBe(true);
+    expect(listed.cost_usd).toBeNull();
+    expect(listed.score).toBe(90);
+
+    await app.close();
+  });
+
   it('dual-provider structured output: anthropic provider returns the same Review shape', async () => {
     const app = await appWith(REVIEW_FIXTURE, 'anthropic');
     const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
