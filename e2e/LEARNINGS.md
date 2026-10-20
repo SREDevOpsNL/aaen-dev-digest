@@ -23,6 +23,22 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
 
 ## Codebase Patterns & Tool / Library Notes
 
+- **2026-10-19** — agent-browser 0.27.0 cannot express three things a pointer
+  flow tends to need. `mouse wheel` always fires at (0,0), whatever `mouse move`
+  set; a page log showed `wheel` on the sidebar `ASIDE` at `0,0`. `scroll
+  --selector` calls `element.scrollBy`, which fires a real `scroll` event but no
+  `wheel`. `network route --body` intercepted neither same-origin nor
+  cross-origin `fetch`: `/health` still returned the real body. What works: an
+  `eval` that replaces `window.fetch` after the first `open`. The app's soft
+  navigation keeps it, and the next flow's `open` drops it. A real scrollbar
+  drag needs static `mouse` coordinates, so pin the geometry first and add a
+  `wait --fn` precondition that `elementFromPoint` hits the scroller's
+  scrollbar. The studio scrolls `<main>`, not the window, and the PR header is
+  sticky (432px tall at a 760px viewport), so it covers content scrolled to the
+  top of `<main>`. Evidence: `e2e/specs/07a-findings-preview-scroll.flow.json:9`
+  (fetch stub), `e2e/specs/07a-findings-preview-scroll.flow.json:28` (scrollbar
+  drag).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
