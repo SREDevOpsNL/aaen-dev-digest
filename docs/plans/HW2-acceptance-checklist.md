@@ -3,7 +3,7 @@
 Walkthrough for the final acceptance gate (plan rev. 4.3, Gate 5). A criterion moves to **Verified** in [`HW2-compliance-matrix.md`](HW2-compliance-matrix.md) only when its walkthrough step below is done and its evidence is recorded; tests and flows alone keep it at *Implemented* or *Pass (static)*.
 
 - **Environment:** a disposable stack (isolated Postgres on alternate ports), never the development database and never demo PR #3, unless an action is separately authorized.
-- **Order and stacks:** see [Stacks and order](#stacks-and-order). In short: run `npm run e2e:hermetic` (flows 01–13, read-only), then do the API Contract mandatory setup ([`docs/skills/api-contract/README.md`](../skills/api-contract/README.md)) and the manual and SQL steps on an unpaid walkthrough stack; the experiment rows come from the experiment report.
+- **Order and stacks:** see [Stacks and order](#stacks-and-order). In short: run `npm run e2e:hermetic` (flows 01–14, read-only), then do the API Contract mandatory setup ([`docs/skills/api-contract/README.md`](../skills/api-contract/README.md)) and the manual and SQL steps on an unpaid walkthrough stack; the experiment rows come from the experiment report.
 - **Paid calls:** none. Rows 17 and 18 come from the experiment report (Gates 2–4), and row 19 reuses a completed with-skill Gate 4 trace. Rows 14 and 20 have an [open decision](#open-decision-trace-evidence-for-rows-14-and-20).
 - **Physical drag (rows 13, 14, 31):** done by a person with a real mouse; agent-browser cannot start a native HTML5 drag (`e2e/LEARNINGS.md`).
 
@@ -40,7 +40,7 @@ Walkthrough for the final acceptance gate (plan rev. 4.3, Gate 5). A criterion m
 | 29 | Restore button per version | Manual (browser) + SQL | `skills.it.test.ts` | Restore an older version → new version, reload persists; SQL `skill_versions` keeps history | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 30 | Search/filter in the agent Skills tab | Manual (browser) | `SkillsTab` | filter the agent Skills tab | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 31 | Drag-and-drop only for enabled skills | Manual (browser) | flow 12, `SkillsTab.test.tsx` | a disabled skill cannot be dragged | Verified 2026-10-20, physical drag ([log](HW2-walkthrough-log.md)) |
-| 32 | Agent card: name, description, model, toggle, linked-skill count | Flow 03 | `AgentCard.test.tsx` | card shows name, description, model, toggle, skill count | **FAIL** 2026-10-19: no linked-skill count on agent cards ([log](HW2-walkthrough-log.md)) |
+| 32 | Agent card: name, description, model, toggle, linked-skill count | Flow 03 | `AgentCard.test.tsx` | card shows name, description, model, toggle, skill count | Verified 2026-10-20, retest after PR #25 (original 2026-10-19 FAIL kept in the [log](HW2-walkthrough-log.md)) |
 | 33 | Agent card Delete removes it from the database | Manual (browser) + SQL | `AgentCard.test.tsx` | delete a throwaway agent → row gone from `agents` | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 34 | Agent delete confirmation modal (Confirm, Cancel, X) | Flow 11 | flow 11 (Cancel, X) | Confirm deletes (manual) | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |
 | 35 | `/agents/:id` has exactly two tabs: Config and Skills | Manual (browser) | `AgentEditor/constants.ts` | agent editor has exactly Config and Skills | Verified 2026-10-19 ([log](HW2-walkthrough-log.md)) |

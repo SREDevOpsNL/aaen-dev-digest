@@ -5,7 +5,7 @@ Tracks the official Neoversity **Homework No. 2** pass/fail rubric (L02: Skills,
 - **Baseline:** read-only static audit of `main` at `8a7ffbb` (2026-10-16): 25 pass, 8 partial, 19 fail, 1 no evidence. A static pass means the code supports the behaviour; it still needs a browser or API check at final acceptance.
 - **Plan:** seven PRs, all merged: A–E (#16–#20), F1 (#21) and F2 (#22, `6927930`). They are followed by the gated experiments and the final acceptance walkthrough ([acceptance checklist](HW2-acceptance-checklist.md), [status report](HW2-status-report.md)). The remediation plan summary is in [PR #16](https://github.com/SREDevOpsNL/aaen-dev-digest/pull/16).
 - **Reconciled 2026-10-19,** after PR #22 merged. No status changed and no row is *Verified*: no walkthrough step or experiment has run yet.
-- **Unpaid walkthrough 2026-10-19/20** on the keyless stack W ([log](HW2-walkthrough-log.md)): 47 rows *Verified*, including the physical drag rows 13, 14 and 31. Row 32 failed (agent cards show no linked-skill count), and row 36 is partial (the model list needs a key). Rows 17–20 wait for Gates 2–4.
+- **Unpaid walkthrough 2026-10-19/20** on the keyless stack W ([log](HW2-walkthrough-log.md)): 47 rows *Verified*, including the physical drag rows 13, 14 and 31. Row 32 failed (agent cards showed no linked-skill count) and was fixed in PR #25 (`3403eb0`). Its retest on a fresh keyless stack passed on 2026-10-20, giving **48 Verified**. Row 36 is partial (the model list needs a key), and rows 17–20 wait for Gates 2–4.
 - **Columns:** *implementation evidence* = file, route or function. *Behavioural evidence* = API or unit test, SQL query, browser result or experiment trace. *Regression watch* = what must keep working when a later PR touches the area.
 
 Status values: `Fail`, `Partial`, `No evidence`, `Pass (static)` (audit only), `Implemented (PR #n)` (open or merged, behaviour shown in that PR), `Verified` (final acceptance done).
@@ -43,7 +43,7 @@ Status values: `Fail`, `Partial`, `No evidence`, `Pass (static)` (audit only), `
 | 29 | Restore button per version | Verified (walkthrough) | C | Restore on each non-current version (restoring the current one would be a no-op) behind `ConfirmModal`; `POST /skills/:id/versions/:version/restore` → `SkillsRepository.restoreVersion` (one transaction, row lock, appends v(n+1)) | `skills.it.test.ts`: restore → v4 with v1's body, history kept, no-op, 404s, cross-workspace 404, concurrent restores/edit sequential 1–6 (fails without the lock); `VersionsTab.test.tsx` Cancel/X/Confirm. Browser restore + reload in the walkthrough. Walkthrough 2026-10-19: verified ([log](HW2-walkthrough-log.md)) | Version numbering of `PUT /skills/:id` |
 | 30 | Search/filter in the agent Skills tab | Verified (walkthrough) | — | `SkillsTab` filter input | Walkthrough 2026-10-19: verified ([log](HW2-walkthrough-log.md)) | PR-D |
 | 31 | Drag-and-drop only for enabled skills | Verified (walkthrough) | D | `SkillsTab`: `draggable = linked && skill.enabled && !save.isPending`; no drop handler otherwise | `SkillsTab.test.tsx`: disabled/unlinked rows `draggable="false"` and drags from or onto them never save (fails if the enabled check is removed); e2e flow 12 checks exactly the 4 linked + enabled rows are draggable. Walkthrough 2026-10-20: physical drag verified ([log](HW2-walkthrough-log.md)) | — |
-| 32 | Agent card: name, description, model, toggle, linked-skill count | Fail (walkthrough) | — | `AgentCard` | `AgentCard.test.tsx` (name, model, count) still passes with the PR #17 delete modal. Walkthrough 2026-10-19: **no linked-skill count** on the cards; `AgentCard` gets no `skillCount` from either call site ([log](HW2-walkthrough-log.md)) | PR-B |
+| 32 | Agent card: name, description, model, toggle, linked-skill count | Verified (walkthrough) | #25 | `AgentCard`; PR #25 (`3403eb0`): `GET /agents` returns `skill_count` (one workspace-scoped statement, disabled skills counted), both `AgentCard` call sites pass it, `["agents"]` is invalidated on link changes and skill deletion | `AgentCard.test.tsx` (name, model, count) still passes with the PR #17 delete modal. Walkthrough 2026-10-19: **no linked-skill count** on the cards; `AgentCard` gets no `skillCount` from either call site ([log](HW2-walkthrough-log.md)). Retest 2026-10-20 on a fresh keyless stack: seeded counts in both locations; refresh without reload after link, unlink and skill deletion. Also `agent-skill-count.it.test.ts`, `AgentsListView.test.tsx`, e2e flow 14 ([log](HW2-walkthrough-log.md#retest-of-row-32-2026-10-20)) | PR-B |
 | 33 | Agent card Delete removes it from the database | Verified (walkthrough) | — | `useDeleteAgent` → `DELETE /agents/:id` | `AgentCard.test.tsx`: Confirm calls the delete mutation (PR #17). Walkthrough 2026-10-19: verified ([log](HW2-walkthrough-log.md)) | PR-B (modal) |
 | 34 | Agent delete confirmation modal (Confirm, Cancel, X) | Verified (walkthrough) | B | `AgentCard` uses `ConfirmModal`, rendered as a sibling of the card so dialog clicks never open the agent | `AgentCard.test.tsx`: Cancel and X do nothing, Confirm calls `DELETE`, card `onClick` untouched; e2e 11: Cancel and X on a seeded agent. Walkthrough 2026-10-19: verified ([log](HW2-walkthrough-log.md)) | — |
 | 35 | `/agents/:id` has exactly two tabs: Config and Skills | Verified (walkthrough) | — | `AgentEditor/constants.ts` `TABS` | Walkthrough 2026-10-19: verified ([log](HW2-walkthrough-log.md)) | — |
@@ -70,10 +70,9 @@ Status values: `Fail`, `Partial`, `No evidence`, `Pass (static)` (audit only), `
 
 | Status | Count |
 | --- | --- |
-| Verified (walkthrough) | 47 (1–16, 21–31, 33–35, 37–53) |
+| Verified (walkthrough) | 48 (1–16, 21–35, 37–53) |
 | Implemented (PR #19), Gate 4 trace pending | 1 (19) |
 | Pass (static), Gate 4 trace pending | 1 (20) |
 | No evidence (experiments, Gates 2–4) | 2 (17, 18) |
-| Fail (walkthrough) | 1 (32) |
 | Partial (walkthrough) | 1 (36) |
 | **Total** | **53** |

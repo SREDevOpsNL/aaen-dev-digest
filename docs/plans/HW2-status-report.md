@@ -1,6 +1,6 @@
 # Homework 2 — status of the 53 criteria (2026-10-19)
 
-> **Superseded in part, 2026-10-19:** the unpaid walkthrough has since run. See the [walkthrough log](HW2-walkthrough-log.md) and the [matrix](HW2-compliance-matrix.md): 47 rows Verified, row 32 failed, row 36 partial, and rows 17–20 pending. The rest of this report is the earlier snapshot.
+> **Superseded in part, 2026-10-19:** the unpaid walkthrough has since run. See the [walkthrough log](HW2-walkthrough-log.md) and the [matrix](HW2-compliance-matrix.md): 48 rows Verified (row 32 failed, was fixed in PR #25, and passed its retest), row 36 partial, and rows 17–20 pending. The rest of this report is the earlier snapshot.
 
 A snapshot taken after PR #22 merged (`6927930`). Statuses and evidence are kept
 in the [compliance matrix](HW2-compliance-matrix.md), and the walkthrough steps

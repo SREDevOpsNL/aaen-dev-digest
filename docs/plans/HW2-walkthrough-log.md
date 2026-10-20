@@ -96,7 +96,7 @@ only when its checklist step ran and succeeded. Screenshots are in
 | 29 | **Verified** | Restore v1 → confirmation "Restore v1? … becomes a new version, v4" → v4. After a reload the list is v4…v1. SQL: versions 1–4 are kept and v4's body equals v1's (`restore-confirm.png`, `after-restore.png`) |
 | 30 | **Verified** | Typing "schema" in "Filter skills…" leaves only response-schema; clearing it with the keyboard restores all rows (`agent-skills-filter.png`) |
 | 31 | **Verified** | `Test Isolation and Determinism` was disabled globally for this check. DOM: `draggable="true"` only on the three linked, enabled rows; `"false"` on the disabled one and on unlinked rows. The user's physical attempt to drag it did not move it. In all 9 saved versions it is last or unlinked, never moved by a drag. It was re-enabled afterwards (SQL `enabled = t`) |
-| 32 | **FAIL** | The cards show name, description, model and toggle, but **no linked-skill count** (`agents.png`). `AgentCard` renders the count only when given a `skillCount` prop, and neither call site passes it (`AgentsListView.tsx`, `agents/[id]/page.tsx`). `GET /agents` has no skill-count field. The unit test passes the prop itself, which is why the static audit missed this |
+| 32 | **Verified** (retest 2026-10-20, after PR #25) | **Original result, 2026-10-19 on stack W: FAIL.** The cards show name, description, model and toggle, but **no linked-skill count** (`agents.png`). `AgentCard` renders the count only when given a `skillCount` prop, and neither call site passes it (`AgentsListView.tsx`, `agents/[id]/page.tsx`). `GET /agents` has no skill-count field. The unit test passes the prop itself, which is why the static audit missed this. **Retest, 2026-10-20 on stack R (`main` at `3403eb0`): passed;** see [Retest of row 32](#retest-of-row-32-2026-10-20) |
 | 33 | **Verified** | A throwaway agent created through `POST /agents` was deleted from its card → Confirm. SQL: 0 rows (`delete-agent-confirm.png`) |
 | 34 | **Verified** | Flow 11 (Cancel, X). Confirm: "Delete agent “…”? This cannot be undone." → deleted |
 | 35 | **Verified** | The agent editor has exactly two tab buttons, Config and Skills (`agent-config.png`) |
@@ -126,10 +126,52 @@ rows 19 and 20 (the Gate 4 trace).
 
 | Result | Rows |
 | --- | --- |
-| Verified | 47: 1–16, 21–31, 33–35, 37–53 |
-| Fail | 1: 32 (no linked-skill count on agent cards) |
+| Verified | 48: 1–16, 21–35, 37–53 (row 32 after its retest) |
 | Partial | 1: 36 (model list needs a key) |
 | Not in this walkthrough | 4: 17–20 |
+
+## Retest of row 32 (2026-10-20)
+
+The original failure is kept in the Results table above. PR #25 added the
+linked-skill count. It was squash-merged as `3403eb0` after review, and the
+retest ran on the merged code.
+
+- **Checks on `main` at `3403eb0`:**
+  - server: typecheck; 242/242 unit tests; 31/31 DB-backed tests (including
+    `agent-skill-count.it.test.ts`);
+  - client: typecheck, lint, 111/111 tests;
+  - e2e: typecheck; `npm run e2e:hermetic` **14/14 flows**, flow 14 with 9/9
+    steps;
+  - GitHub CI on `main`: all six workflows passed.
+- **Stack R:** a fresh, keyless `scripts/e2e.sh --serve` stack from `main`.
+
+  | Item | Value |
+  | --- | --- |
+  | Stack | `hw2f-a2c6f244` |
+  | Database | `devdigest_hw2f_a2c6f244` |
+  | API | `:3251` |
+  | Web | `:3250` |
+  | Isolation | `openrouter_key_configured: false`, no `capability.json`, `check` passed |
+- **Seeded counts:** `GET /agents`, SQL, the Agents page and the agent editor's
+  agent list all showed General 0, Security 0, Performance 0, Test Quality 4 and
+  API Contract 3 (`r32-agents-list.png`, `r32-editor-list.png`).
+- **Refresh without reload:**
+  - A marker set on `window` survived every step below, so no step reloaded the
+    page.
+  - Queries are cached for 30 s (`staleTime`), so the client-side navigations,
+    each under 30 s, show a new count only if the list was invalidated.
+
+  | Change | Result |
+  | --- | --- |
+  | Unlink and relink a Test Quality skill in the editor | The editor's list showed 4 → 3 → 4 (`r32-editor-after-unlink.png`) |
+  | Link a skill to General Reviewer | The editor's list showed 1 skill, and so did the Agents page after a sidebar navigation (`r32-list-after-link.png`) |
+  | Delete a linked throwaway skill on the Skills page | The confirmation said "Currently linked to: General Reviewer". General went 2 → 1 on the Agents page after navigation (`r32-list-after-skill-delete.png`) |
+  | Unlink the last skill | General went to 0 in both locations (`r32-agents-list-final.png`) |
+
+  Final SQL counts were back at the seeded values. The throwaway skill is gone.
+- **Stack W:** it ended with the previous agent session on 2026-10-20. Its
+  background task was stopped and `scripts/e2e.sh` tore it down. Its results
+  above were recorded before that.
 
 ## Observations
 
