@@ -87,7 +87,7 @@ describe('OpenRouter experiment mode', () => {
     expect(result).toMatchObject({ data: { ok: true }, attempts: 1, providerCostUsd: 0.0001 });
     expect(create).toHaveBeenCalledTimes(1);
     const [body, options] = create.mock.calls[0]!;
-    expect(body).toMatchObject({ provider: { order: ['deepinfra'], only: ['deepinfra'], allow_fallbacks: false }, max_tokens: 4000, temperature: 0 });
+    expect(body).toMatchObject({ provider: { order: ['deepinfra'], only: ['deepinfra'], allow_fallbacks: false, require_parameters: true }, max_tokens: 4000, temperature: 0 });
     expect(options).toMatchObject({ maxRetries: 0, headers: { 'X-OpenRouter-Metadata': 'enabled' } });
     expect(attempts).toHaveLength(1);
     expect(attempts[0]).toMatchObject({
@@ -176,6 +176,21 @@ describe('OpenRouter experiment mode', () => {
     await expect(provider.completeStructured(request({ experiment: options }))).rejects.toThrow(/refused before dispatch/);
     expect(create).not.toHaveBeenCalled();
     expect(attempts).toEqual([expect.objectContaining({ dispatch: 'refused', outcome: 'refused' })]);
+  });
+
+  it('serializes exactly one provider, no fallbacks, required parameters and a strict json_schema', () => {
+    const body = JSON.parse(
+      JSON.stringify(
+        experimentRequestBody(
+          { model: 'deepseek/deepseek-v4-flash', schema: Result, schemaName: 'Result', messages: [{ role: 'user', content: 'x' }], temperature: 0 },
+          experiment(),
+        ),
+      ),
+    );
+    // toEqual: exactly these routing keys, one provider in each list.
+    expect(body.provider).toEqual({ order: ['deepinfra'], only: ['deepinfra'], allow_fallbacks: false, require_parameters: true });
+    expect(body.response_format).toMatchObject({ type: 'json_schema', json_schema: { name: 'Result', strict: true } });
+    expect(body).toMatchObject({ model: 'deepseek/deepseek-v4-flash', max_tokens: 4000, temperature: 0 });
   });
 
   it('leaves ordinary calls unchanged: no provider routing, no output cap, no options', async () => {

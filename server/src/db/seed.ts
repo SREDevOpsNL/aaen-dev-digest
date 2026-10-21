@@ -15,10 +15,21 @@ import { assertDisposableDatabase } from './disposable.js';
 import type { IntentAnalysis } from '@devdigest/shared';
 import { INTENT_PROMPT_VERSION } from '@devdigest/reviewer-core';
 import { contextHash, identifyLinkedIssue, issueHash } from '../modules/intent/helpers.js';
+import { AgentsRepository } from '../modules/agents/repository.js';
 
 /** Default provider/model for the built-in reviewer agents. */
 const DEFAULT_PROVIDER = 'openrouter' as const;
 const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
+
+/**
+ * The review shape every HW2 experiment reviewer must have (the executor
+ * refuses anything else, see modules/reviews/experiment-run.ts): one
+ * whole-diff call and no repo-intel context. The API Contract Reviewer is
+ * always seeded this way; the Test Quality Reviewer (experiment 17) gets it
+ * only with `experimentFixtures`, so a normal seed keeps its default config.
+ */
+export const EXPERIMENT_REVIEWER_SHAPE = { strategy: 'single-pass', repoIntel: false } as const;
+const EXPERIMENT_17_REVIEWER = 'Test Quality Reviewer';
 
 /**
  * Seed the starter's demo data. Idempotent: re-running upserts the default
@@ -392,11 +403,19 @@ export async function seed(
   };
   const agentIds: Record<string, string> = {};
   for (const a of seedAgents) {
+    // Fixture mode (disposable databases only) gives the experiment 17 reviewer
+    // the experiment shape; a normal seed leaves its default config alone.
+    const shape = options.experimentFixtures && a.name === EXPERIMENT_17_REVIEWER ? EXPERIMENT_REVIEWER_SHAPE : null;
     let [existing] = await db
       .select()
       .from(t.agents)
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, a.name)));
-    if (!existing) [existing] = await db.insert(t.agents).values(a).returning();
+    if (!existing) [existing] = await db.insert(t.agents).values({ ...a, ...shape }).returning();
+    else if (shape && (existing.strategy !== shape.strategy || existing.repoIntel !== shape.repoIntel)) {
+      // Seeded earlier without fixtures: change it as a new config version (the
+      // repository bumps the version and snapshots the current links).
+      existing = await new AgentsRepository(db).update(workspaceId, existing.id, { ...shape });
+    }
     agentIds[a.name] = existing!.id;
 
     await db

@@ -50,6 +50,25 @@ server/src/vendor/shared/contracts/platform.ts:178.
 
 ## What Doesn't Work
 
+- **2026-10-20** — HW2 experiment 17 could never have run, and three PRs of
+  experiment tooling did not show it. The experiment executor refuses any
+  reviewer with repo intel on. The seeded Test Quality Reviewer sets no
+  `repoIntel`, so it got the schema default `true`.
+  - Only experiment 18 (the API Contract Reviewer, seeded single-pass without
+    repo intel) had a happy-path test.
+  - The refusal test used the Test Quality Reviewer as its *negative* example,
+    so a gap read as passing coverage.
+  - The free preview and the Gate 4 `manifest` would have refused it too.
+
+  It was found in a read-only Gate 3 review, before any paid request. Fixture
+  mode now seeds that reviewer with the experiment shape. When one guard covers
+  several actors, give each of them a positive test, and make a refusal test
+  build an explicitly invalid input rather than reuse a real one. Evidence:
+  `server/src/db/schema/agents.ts:31` (`repoIntel` default),
+  `server/src/modules/reviews/experiment-run.ts` (`prepareExperimentSlot`),
+  `server/src/db/seed.ts` (`EXPERIMENT_REVIEWER_SHAPE`),
+  `server/test/experiments.it.test.ts`.
+
 ## Codebase Patterns & Tool / Library Notes
 
 ## Decisions
@@ -74,3 +93,16 @@ server/src/vendor/shared/contracts/platform.ts:178.
   `server/src/modules/intent/constants.ts` (`INTENT_TIMEOUT_MS`,
   `INTENT_TIMEOUT_MARGIN_MS`); the general cancellation pitfall is in the root
   `LEARNINGS.md` (2026-10-14, `withTimeout`).
+
+- **2026-10-21** — Is "a review batch never injects intent derived from an
+  outdated linked issue" a flaky test or a real race? In 1 of 3 full DB-backed
+  runs on the PR #28 merge of `main` `58dabc5`, the batch's trace held the
+  superseded **v1** analysis (`source: 'derived'`, `status: 'used'`,
+  `claimed_purpose: 'from issue v1'`) instead of `superseded`. The file passed
+  5 of 5 times on its own, and the failing run had all 16 DB files in
+  parallel. The branch changes no intent code. If the run order can really let
+  a superseded derivation through, a review could use intent from an outdated
+  issue, so investigate before treating it as test-only. The other bad run
+  failed with `Failed to connect to Reaper`, because the previous run's
+  testcontainers Ryuk container was still exiting. Waiting for it to exit
+  fixed that. Evidence: `server/test/intent.it.test.ts:490`.

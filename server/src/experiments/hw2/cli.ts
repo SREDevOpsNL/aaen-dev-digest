@@ -155,6 +155,196 @@ async function previewFingerprints(stack: Stack, reservationUsd: number): Promis
   return out;
 }
 
+/** The Skill fingerprint of a prompt with no Skills (`requestFingerprints` hashes the empty list). */
+export const EMPTY_SKILL_FINGERPRINT = sha256(canonicalJson([]));
+
+/**
+ * The Skill fingerprint a slot of `condition` must carry: the target skill's
+ * prompt block alone, or no Skills. The same value the report expects.
+ */
+export function expectedSkillFingerprint(condition: 'with' | 'without', target: { name: string; body: string }): string {
+  return sha256(canonicalJson(condition === 'with' ? [toSkillPromptBlock(target)] : []));
+}
+
+export interface ConditionPreview {
+  ok: boolean;
+  problems: string[];
+  experiment: string;
+  condition: 'with' | 'without';
+  reviewer: string;
+  target_skill: string;
+  linked_skills: string[];
+  refusal_reason: string | null;
+  input_upper_bound: number | null;
+  output_cap: number | null;
+  price_input_per_token: number | null;
+  price_output_per_token: number | null;
+  price_source: string | null;
+  worst_case_usd: number | null;
+  reservation_usd: number;
+  non_skill_fingerprint: string | null;
+  skill_fingerprint: string | null;
+  expected_skill_fingerprint: string;
+}
+
+/**
+ * A free preview that reflects its condition: the preview API builds the
+ * prompt from the reviewer's current links (its `condition` is only a label),
+ * so this links exactly what a slot of that condition links (the target skill,
+ * or none, as in `slotRuns`), previews, checks that the links and the Skill
+ * fingerprint match the condition, and always restores the original links.
+ */
+export async function conditionPreview(
+  api: ExperimentApi,
+  args: { experiment: string; condition: string; reservationUsd: number; phase?: Phase },
+): Promise<ConditionPreview> {
+  if (args.condition !== 'with' && args.condition !== 'without') throw new Error('--condition must be with or without');
+  if (!(args.experiment in EXPERIMENT_FIXTURE)) throw new Error(`--experiment must be one of ${Object.keys(EXPERIMENT_FIXTURE).join(', ')}`);
+  const condition = args.condition;
+  const fixture = fixtureFor(args.experiment);
+  const { prId, agents, skills } = await lookupIds(api);
+  const agent = agents.find((a) => a.name === fixture.reviewer);
+  const target = skills.find((s) => s.name === fixture.targetSkill);
+  const pr = prId(fixture.number);
+  if (!agent || !target || !pr) throw new Error(`Experiment ${args.experiment}: reviewer, target skill or PR missing`);
+  const intended = condition === 'with' ? [target.id] : [];
+  const linksOf = async () => (await api.get<Array<{ skill_id: string }>>(`/agents/${agent.id}/skills`)).map((l) => l.skill_id);
+  const nameOf = (id: string) => skills.find((s) => s.id === id)?.name ?? id;
+
+  const original = await linksOf();
+  try {
+    await api.post(`/agents/${agent.id}/skills`, { skill_ids: intended });
+    const linked = await linksOf();
+    const preview = await api.post<{
+      ok: boolean;
+      reason: string | null;
+      block: {
+        non_skill_fingerprint: string | null;
+        skill_fingerprint: string | null;
+        preflight: {
+          input_upper_bound: number;
+          output_cap: number;
+          price_input_per_token: number;
+          price_output_per_token: number;
+          price_source: string;
+          worst_case_usd: number;
+        } | null;
+      };
+    }>('/experiments/preview', {
+      pr_id: pr,
+      agent_id: agent.id,
+      experiment: args.experiment,
+      condition,
+      phase: args.phase ?? 'exploration',
+      reservation_usd: args.reservationUsd,
+      expected_diff_sha256: await fixtureDiffSha(fixture),
+    });
+    const skillFingerprint = preview.block.skill_fingerprint;
+    const problems: string[] = [];
+    if (!preview.ok) problems.push(`the preview was refused: ${preview.reason}`);
+    if (linked.join(',') !== intended.join(',')) {
+      problems.push(`linked skills are [${linked.map(nameOf).join(', ')}], expected [${intended.map(nameOf).join(', ')}]`);
+    }
+    const expectedSkill = expectedSkillFingerprint(condition, target);
+    if (skillFingerprint !== expectedSkill) {
+      problems.push(condition === 'without' ? 'a without preview carried a Skill' : `the Skill fingerprint is not that of ${target.name} alone`);
+    }
+    const flight = preview.block.preflight;
+    return {
+      ok: problems.length === 0,
+      problems,
+      experiment: args.experiment,
+      condition,
+      reviewer: fixture.reviewer,
+      target_skill: target.name,
+      linked_skills: linked.map(nameOf),
+      refusal_reason: preview.reason,
+      input_upper_bound: flight?.input_upper_bound ?? null,
+      output_cap: flight?.output_cap ?? null,
+      price_input_per_token: flight?.price_input_per_token ?? null,
+      price_output_per_token: flight?.price_output_per_token ?? null,
+      price_source: flight?.price_source ?? null,
+      worst_case_usd: flight?.worst_case_usd ?? null,
+      reservation_usd: args.reservationUsd,
+      non_skill_fingerprint: preview.block.non_skill_fingerprint,
+      skill_fingerprint: skillFingerprint,
+      expected_skill_fingerprint: expectedSkill,
+    };
+  } finally {
+    await api.post(`/agents/${agent.id}/skills`, { skill_ids: original });
+    const restored = await linksOf();
+    if (restored.join(',') !== original.join(',')) {
+      throw new Error(`Could not restore ${fixture.reviewer}'s links: now [${restored.map(nameOf).join(', ')}]`);
+    }
+  }
+}
+
+/** The four Phase 0 previews, by saved file name (`<experiment>-<condition>.json`). */
+export const PHASE0_PAIRS = ['18-with', '18-without', '17-with', '17-without'] as const;
+
+const FINGERPRINT = /^[0-9a-f]{64}$/;
+
+/**
+ * Phase 0 over the four saved condition previews. Each must be ok at the
+ * approved reservation and output cap, link exactly what its condition links,
+ * and carry the Skill fingerprint recomputed here from the current target
+ * skill (never taken from the preview). Within each experiment the non-Skill
+ * fingerprint must be equal across `with` and `without`. The reservation must
+ * cover 1.2 × the largest worst case. Returns the problems; empty means pass.
+ */
+export function phase0Problems(
+  previews: Partial<Record<string, ConditionPreview>>,
+  expected: { reservationUsd: number; outputCap: number; targets: Partial<Record<string, { name: string; body: string }>> },
+): string[] {
+  const problems: string[] = [];
+  const worst: number[] = [];
+  for (const pair of PHASE0_PAIRS) {
+    const [experiment, condition] = pair.split('-') as [string, 'with' | 'without'];
+    const fixture = fixtureFor(experiment);
+    const p = previews[pair];
+    if (!p) {
+      problems.push(`${pair}: no saved preview`);
+      continue;
+    }
+    if (p.experiment !== experiment || p.condition !== condition) problems.push(`${pair}: holds the preview of ${p.experiment} / ${p.condition}`);
+    if (p.ok !== true || (p.problems ?? []).length > 0) problems.push(`${pair}: not ok: ${(p.problems ?? []).join('; ') || p.refusal_reason}`);
+    if (p.reservation_usd !== expected.reservationUsd) problems.push(`${pair}: previewed at reservation ${p.reservation_usd}, not ${expected.reservationUsd}`);
+    if (p.output_cap !== expected.outputCap) problems.push(`${pair}: output cap ${p.output_cap}, not ${expected.outputCap}`);
+    if (p.reviewer !== fixture.reviewer || p.target_skill !== fixture.targetSkill) {
+      problems.push(`${pair}: reviewer ${p.reviewer} / target ${p.target_skill}, expected ${fixture.reviewer} / ${fixture.targetSkill}`);
+    }
+    const links = condition === 'with' ? [fixture.targetSkill] : [];
+    if (JSON.stringify(p.linked_skills) !== JSON.stringify(links)) problems.push(`${pair}: linked skills ${JSON.stringify(p.linked_skills)}, expected ${JSON.stringify(links)}`);
+    const target = expected.targets[experiment];
+    if (!target || target.name !== fixture.targetSkill) problems.push(`${pair}: target skill ${fixture.targetSkill} not found on the stack`);
+    else if (p.skill_fingerprint !== expectedSkillFingerprint(condition, target)) {
+      problems.push(`${pair}: Skill fingerprint ${p.skill_fingerprint} is not the expected ${condition === 'with' ? `${target.name} alone` : 'no Skills'}`);
+    }
+    if (!FINGERPRINT.test(p.non_skill_fingerprint ?? '')) problems.push(`${pair}: no non-Skill fingerprint`);
+    if (typeof p.worst_case_usd === 'number' && p.worst_case_usd > 0) worst.push(p.worst_case_usd);
+    else problems.push(`${pair}: no worst case`);
+  }
+  for (const experiment of new Set(PHASE0_PAIRS.map((pair) => pair.split('-')[0]!))) {
+    const withP = previews[`${experiment}-with`];
+    const withoutP = previews[`${experiment}-without`];
+    if (withP && withoutP && withP.non_skill_fingerprint !== withoutP.non_skill_fingerprint) {
+      problems.push(`experiment ${experiment}: non-Skill fingerprints differ between with (${withP.non_skill_fingerprint}) and without (${withoutP.non_skill_fingerprint})`);
+    }
+  }
+  if (worst.length > 0 && 1.2 * Math.max(...worst) > expected.reservationUsd + 1e-12) {
+    problems.push(`1.2 × the largest worst case ($${(1.2 * Math.max(...worst)).toFixed(6)}) exceeds the reservation $${expected.reservationUsd}`);
+  }
+  return problems;
+}
+
+function readPreview(file: string): ConditionPreview | undefined {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as ConditionPreview;
+  } catch {
+    return undefined;
+  }
+}
+
 async function currentManifest(flags: Flags, stack: Stack, root: string): Promise<Manifest> {
   const { agents, skills } = await lookupIds(stack.api);
   const seed = Number(need(flags, 'seed'));
@@ -212,6 +402,36 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
   switch (command) {
     case 'endpoints': {
       log(JSON.stringify(await new ExperimentApi(need(flags, 'api')).get('/experiments/endpoints'), null, 2));
+      return;
+    }
+    case 'preview': {
+      const stack = await verifiedStack(flags);
+      const result = await conditionPreview(stack.api, {
+        experiment: need(flags, 'experiment'),
+        condition: need(flags, 'condition'),
+        reservationUsd: Number(need(flags, 'reservation')),
+        ...(flags.phase === 'confirmatory' ? { phase: 'confirmatory' as const } : {}),
+      });
+      log(JSON.stringify(result, null, 2));
+      if (!result.ok) throw new Error(`Preview does not reflect its condition or was refused: ${result.problems.join('; ')}`);
+      return;
+    }
+    case 'phase0-check': {
+      const stack = await verifiedStack(flags);
+      const dir = need(flags, 'dir');
+      const { skills } = await lookupIds(stack.api);
+      const targets = Object.fromEntries(
+        Object.keys(EXPERIMENT_FIXTURE).map((experiment) => [experiment, skills.find((s) => s.name === fixtureFor(experiment).targetSkill)]),
+      );
+      const previews = Object.fromEntries(PHASE0_PAIRS.map((pair) => [pair, readPreview(join(dir, `${pair}.json`))]));
+      const reservationUsd = Number(need(flags, 'reservation'));
+      const problems = phase0Problems(previews, { reservationUsd, outputCap: Number(need(flags, 'cap')), targets });
+      for (const pair of PHASE0_PAIRS) {
+        const p = previews[pair];
+        log(`${pair}: skills [${p?.linked_skills?.join(', ') ?? '?'}], input bound ${p?.input_upper_bound ?? '?'}, worst case $${p?.worst_case_usd ?? '?'}, non-Skill ${p?.non_skill_fingerprint?.slice(0, 12) ?? '?'}…`);
+      }
+      if (problems.length > 0) throw new Error(`Phase 0 previews failed:\n- ${problems.join('\n- ')}`);
+      log(`Phase 0 previews pass on ${stack.stackId}: Skill fingerprints as expected, non-Skill fingerprints equal per experiment, reservation $${reservationUsd} covers 1.2 × the worst case`);
       return;
     }
     case 'check': {
@@ -381,7 +601,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       return;
     }
     default:
-      log('commands: endpoints | check | plan | manifest | authorize | reconcile | run | report (see docs/plans/HW2-experiment-operator-guide.md)');
+      log('commands: endpoints | check | preview | phase0-check | plan | manifest | authorize | reconcile | run | report (see docs/plans/HW2-experiment-operator-guide.md)');
   }
 }
 

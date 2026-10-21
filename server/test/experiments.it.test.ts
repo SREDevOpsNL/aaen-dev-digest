@@ -19,8 +19,8 @@ import * as t from '../src/db/schema.js';
 import { loadConfig } from '../src/platform/config.js';
 import { diffFromPrFiles } from '../src/modules/reviews/diff-loader.js';
 import type { ReviewRepository } from '../src/modules/reviews/repository.js';
-import { sha256 } from '../src/modules/_shared/experiment.js';
-import { writeCapability } from '../src/experiments/hw2/cli.js';
+import { canonicalJson, sha256 } from '../src/modules/_shared/experiment.js';
+import { expectedSkillFingerprint, writeCapability } from '../src/experiments/hw2/cli.js';
 import { dockerAvailable, startPg, type PgFixture } from './helpers/pg.js';
 
 const hasDocker = await dockerAvailable();
@@ -374,12 +374,76 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     expect(run).toMatchObject({ status: 'failed', tokensIn: 0, tokensOut: 0, costUsd: 0 });
   });
 
-  it('refuses an agent that is not single-pass with repo intel off', async () => {
+  it.each([
+    ['repo intel on', { strategy: 'single-pass', repo_intel: true }, /repo intel must be off/],
+    ['a map-reduce strategy', { strategy: 'map-reduce', repo_intel: false }, /strategy must be single-pass/],
+  ])('refuses an explicitly invalid agent (%s) before any model request', async (label, config, reason) => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/agents',
+      payload: { name: `Invalid reviewer: ${label}`, provider: 'openrouter', model: MODEL, system_prompt: 'Review.', ...config },
+    });
+    expect(created.statusCode).toBeLessThan(300);
+    expect(created.json()).toMatchObject(config);
     const before = modelCalls();
-    const response = await start({ pr_id: pr501, agent_id: tqrAgent, experiment: '17', expected_diff_sha256: await fixtureDiffSha(501) });
-    const { trace } = await settledTrace(response.json().run_id);
+    const response = await start({ agent_id: created.json().id });
+    const { run, trace } = await settledTrace(response.json().run_id);
     expect(modelCalls()).toBe(before);
-    expect(trace.experiment.refusal_reason).toMatch(/single-pass|repo intel/);
+    expect(trace.experiment.dispatch_state).toBe('refused');
+    expect(trace.experiment.refusal_reason).toMatch(reason);
+    expect(run).toMatchObject({ status: 'failed', tokensIn: 0, tokensOut: 0, costUsd: 0 });
+  });
+
+  it('the seeded Test Quality Reviewer is experiment-ready: a free preview of experiment 17 passes', async () => {
+    const [tqr] = await pg.handle.db.select().from(t.agents).where(eq(t.agents.id, tqrAgent));
+    expect(tqr).toMatchObject({ strategy: 'single-pass', repoIntel: false });
+    const before = modelCalls();
+    const runsBefore = (await pg.handle.db.select().from(t.agentRuns)).length;
+    const preview = await app.inject({
+      method: 'POST',
+      url: '/experiments/preview',
+      payload: { pr_id: pr501, agent_id: tqrAgent, experiment: '17', condition: 'without', phase: 'exploration', reservation_usd: 0.05, expected_diff_sha256: await fixtureDiffSha(501) },
+    });
+    expect(preview.statusCode).toBe(200);
+    const body = preview.json();
+    expect(body).toMatchObject({
+      ok: true,
+      reason: null,
+      block: { non_skill_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/), skill_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) },
+    });
+    expect(body.block.preflight.worst_case_usd).toBeGreaterThan(0);
+    expect(body.block.preflight.worst_case_usd).toBeLessThanOrEqual(0.05);
+    expect(modelCalls()).toBe(before);
+    expect((await pg.handle.db.select().from(t.agentRuns)).length).toBe(runsBefore);
+  });
+
+  it('a preview reflects the linked skills, not its condition label', async () => {
+    const links = (await app.inject({ url: `/agents/${tqrAgent}/skills` })).json() as Array<{ skill_id: string; skill: { name: string } }>;
+    const target = links.find((l) => l.skill.name === 'Edge Cases and Error Paths')!.skill_id;
+    const previewWith = async (skillIds: string[], condition: 'with' | 'without') => {
+      await app.inject({ method: 'POST', url: `/agents/${tqrAgent}/skills`, payload: { skill_ids: skillIds } });
+      const response = await app.inject({
+        method: 'POST',
+        url: '/experiments/preview',
+        payload: { pr_id: pr501, agent_id: tqrAgent, experiment: '17', condition, phase: 'exploration', reservation_usd: 0.05, expected_diff_sha256: await fixtureDiffSha(501) },
+      });
+      return response.json().block as { non_skill_fingerprint: string; skill_fingerprint: string; preflight: { input_upper_bound: number } };
+    };
+    try {
+      const labelledWithButUnlinked = await previewWith([], 'with');
+      const labelledWithoutButLinked = await previewWith([target], 'without');
+      const empty = sha256(canonicalJson([]));
+      expect(labelledWithButUnlinked.skill_fingerprint).toBe(empty); // the label "with" added no Skill
+      expect(labelledWithoutButLinked.skill_fingerprint).not.toBe(empty); // the label "without" removed none
+      // The runner's Phase 0 check recomputes this value from the target skill.
+      const [skill] = await pg.handle.db.select().from(t.skills).where(eq(t.skills.id, target));
+      expect(labelledWithoutButLinked.skill_fingerprint).toBe(expectedSkillFingerprint('with', skill!));
+      expect(labelledWithButUnlinked.skill_fingerprint).toBe(expectedSkillFingerprint('without', skill!));
+      expect(labelledWithoutButLinked.preflight.input_upper_bound).toBeGreaterThan(labelledWithButUnlinked.preflight.input_upper_bound);
+      expect(labelledWithButUnlinked.non_skill_fingerprint).toBe(labelledWithoutButLinked.non_skill_fingerprint);
+    } finally {
+      await app.inject({ method: 'POST', url: `/agents/${tqrAgent}/skills`, payload: { skill_ids: links.map((l) => l.skill_id) } });
+    }
   });
 
   it('refuses when the cached intent is not fresh, and never derives one', async () => {
