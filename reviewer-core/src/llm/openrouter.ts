@@ -76,6 +76,10 @@ export function experimentRequestBody(
       order: options.routing.order,
       only: options.routing.only,
       allow_fallbacks: false,
+      // Never route to an endpoint that would ignore a parameter of this
+      // request (above all the strict json_schema response format): OpenRouter
+      // filters such providers out instead of letting them drop it silently.
+      require_parameters: true,
     },
   } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
 }

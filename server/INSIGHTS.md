@@ -48,6 +48,25 @@ server/src/vendor/shared/contracts/platform.ts:178.
   decoy. Details: the 2026-10-24 entry in `LEARNINGS.md`. Evidence:
   `server/test/seed.it.test.ts` (fixture review case).
 
+- **2026-10-20** — HW2 experiment 17 could never have run, and three PRs of
+  experiment tooling did not show it. The experiment executor refuses any
+  reviewer with repo intel on. The seeded Test Quality Reviewer sets no
+  `repoIntel`, so it got the schema default `true`.
+  - Only experiment 18 (the API Contract Reviewer, seeded single-pass without
+    repo intel) had a happy-path test.
+  - The refusal test used the Test Quality Reviewer as its *negative* example,
+    so a gap read as passing coverage.
+  - The free preview and the Gate 4 `manifest` would have refused it too.
+
+  It was found in a read-only Gate 3 review, before any paid request. Fixture
+  mode now seeds that reviewer with the experiment shape. When one guard covers
+  several actors, give each of them a positive test, and make a refusal test
+  build an explicitly invalid input rather than reuse a real one. Evidence:
+  `server/src/db/schema/agents.ts:31` (`repoIntel` default),
+  `server/src/modules/reviews/experiment-run.ts` (`prepareExperimentSlot`),
+  `server/src/db/seed.ts` (`EXPERIMENT_REVIEWER_SHAPE`),
+  `server/test/experiments.it.test.ts`.
+
 ## Codebase Patterns & Tool / Library Notes
 
 ## Decisions

@@ -55,9 +55,27 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
       'Test Quality Reviewer',
     ]);
 
+    // The default seed keeps the Test Quality Reviewer's normal configuration.
+    expect(await agentNamed('Test Quality Reviewer')).toMatchObject({ strategy: 'single-pass', repoIntel: true, version: 1 });
+
     // Opting in on this disposable database (devdigest_test) adds them; twice is idempotent.
     await seed(db(), { experimentFixtures: true });
     await seed(db(), { experimentFixtures: true });
+  });
+
+  it('fixture mode makes the experiment 17 reviewer experiment-ready as one new config version', async () => {
+    // Seeded first without fixtures (above), then twice with them: one update, one new version.
+    const tqr = await agentNamed('Test Quality Reviewer');
+    expect(tqr).toMatchObject({ strategy: 'single-pass', repoIntel: false, version: 2 });
+    const versions = await db().select().from(t.agentVersions).where(eq(t.agentVersions.agentId, tqr.id)).orderBy(asc(t.agentVersions.version));
+    expect(versions.map((v) => v.version)).toEqual([1, 2]);
+    expect(versions[0]!.configJson).toMatchObject({ strategy: 'single-pass', repo_intel: true });
+    expect(versions[1]!.configJson).toMatchObject({ strategy: 'single-pass', repo_intel: false });
+    const links = await db().select({ skillId: t.agentSkills.skillId }).from(t.agentSkills).where(eq(t.agentSkills.agentId, tqr.id)).orderBy(asc(t.agentSkills.order));
+    expect((versions[1]!.configJson as { skills: string[] }).skills).toEqual(links.map((l) => l.skillId)); // the snapshot holds the current links
+    // The other reviewers keep their configuration.
+    expect(await agentNamed('General Reviewer')).toMatchObject({ repoIntel: true, version: 1 });
+    expect(await agentNamed('API Contract Reviewer')).toMatchObject({ strategy: 'single-pass', repoIntel: false, version: 1 });
   });
 
   it('seeds the API Contract Reviewer once, single-pass without repo intel, with three ordered skills', async () => {
@@ -160,5 +178,43 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
     const before = await db().select().from(t.pullRequests);
     await expect(seed(db(), { experimentFixtures: true })).rejects.toThrow(/holds other repositories \(someone\/real-repo\)/);
     expect(await db().select().from(t.pullRequests)).toHaveLength(before.length);
+  });
+});
+
+d('seed: a fresh fixture database (insert path and workspace isolation)', () => {
+  let pg: PgFixture;
+  let other: { workspaceId: string; agentId: string };
+
+  beforeAll(async () => {
+    pg = await startPg();
+    // Another workspace's Test Quality Reviewer, with repo intel on, exists before the seed.
+    const [workspace] = await pg.handle.db.insert(t.workspaces).values({ name: 'someone-else' }).returning();
+    const [agent] = await pg.handle.db
+      .insert(t.agents)
+      .values({ workspaceId: workspace!.id, name: 'Test Quality Reviewer', provider: 'openrouter', model: 'deepseek/deepseek-v4-flash', systemPrompt: 'theirs' })
+      .returning();
+    other = { workspaceId: workspace!.id, agentId: agent!.id };
+    await seed(pg.handle.db, { experimentFixtures: true });
+    await seed(pg.handle.db, { experimentFixtures: true }); // repeated: idempotent
+  });
+  afterAll(async () => pg?.stop());
+
+  it('inserts the experiment 17 reviewer experiment-ready at version 1, once', async () => {
+    const [workspace] = await pg.handle.db.select().from(t.workspaces).where(eq(t.workspaces.name, 'default'));
+    const rows = await pg.handle.db
+      .select()
+      .from(t.agents)
+      .where(and(eq(t.agents.workspaceId, workspace!.id), eq(t.agents.name, 'Test Quality Reviewer')));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ strategy: 'single-pass', repoIntel: false, version: 1 });
+    const versions = await pg.handle.db.select().from(t.agentVersions).where(eq(t.agentVersions.agentId, rows[0]!.id));
+    expect(versions).toHaveLength(1);
+    expect(versions[0]!.configJson).toMatchObject({ strategy: 'single-pass', repo_intel: false });
+  });
+
+  it("leaves another workspace's Test Quality Reviewer untouched", async () => {
+    const [agent] = await pg.handle.db.select().from(t.agents).where(eq(t.agents.id, other.agentId));
+    expect(agent).toMatchObject({ workspaceId: other.workspaceId, repoIntel: true, version: 1, systemPrompt: 'theirs' });
+    expect(await pg.handle.db.select().from(t.agentVersions).where(eq(t.agentVersions.agentId, other.agentId))).toEqual([]);
   });
 });

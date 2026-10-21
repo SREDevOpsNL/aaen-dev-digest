@@ -112,6 +112,21 @@ correction. Repo-intel remains server-scoped;
   `server/test/experiments.it.test.ts` was refused for a diff-hash mismatch
   until the test used the empty diff.
 
+- **2026-10-21** — A fake API that makes up its own hash can only show that
+  a value exists, not that it is right. The HW2 runner's `FakePreviewApi`
+  returned `sha256(canonicalJson(skill ids))` as the Skill fingerprint, while
+  the server hashes the skills' prompt blocks (`toSkillPromptBlock`). So
+  `conditionPreview` could only check "non-empty for `with`, empty for
+  `without`", and a preview carrying the wrong skill would have passed Phase 0.
+  Have the fake use the production formula. Recompute the expected value in
+  the code under test from the real input (here the target skill's current
+  body). Add one DB-backed assertion that the real server produces exactly
+  that value, so fake and server cannot drift apart. Evidence:
+  `server/src/experiments/hw2/cli.ts` (`expectedSkillFingerprint`,
+  `phase0Problems`), `server/test/hw2-runner.test.ts` (the "wrong-skill" mode;
+  disabling the check fails 5 tests), and `server/test/experiments.it.test.ts`
+  ("a preview reflects the linked skills").
+
 ## Decisions
 
 ## Recurring Errors & Fixes

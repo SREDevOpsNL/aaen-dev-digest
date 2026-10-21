@@ -47,6 +47,26 @@ correction. Genuinely cross-package findings belong in
   context line 16 of `src/api/payments.ts` still passed `groundFindings` and
   failed only the added-lines check.
 
+- **2026-10-20** — On OpenRouter, structured-output support differs between
+  the providers of one model. For `deepseek/deepseek-v4-flash`, DeepInfra and
+  StreamLake list `structured_outputs` in their endpoint `supported_parameters`;
+  GMICloud and SiliconFlow list only `response_format`.
+  - Without `provider.require_parameters: true`, a provider that lacks a
+    parameter still receives the request and silently ignores it. A strict
+    `json_schema` request can then come back unstructured.
+  - With it, OpenRouter does not route to that provider at all.
+  - Provider slugs have the shape `provider[/variant][/region][/tier]`. A base
+    slug (`deepinfra`) matches every endpoint of that provider, while a full
+    slug (`deepinfra/fp8`) names one.
+  - The endpoints `tag` is not documented as a routing value; the documented
+    source of exact slugs is the copy button on the model page.
+
+  Check `supported_parameters` with the free public
+  `GET /api/v1/models/{author}/{slug}/endpoints` before pinning a provider.
+  Evidence: that endpoint (2026-10-20);
+  https://openrouter.ai/docs/guides/routing/provider-selection;
+  `reviewer-core/src/llm/openrouter.ts` (`experimentRequestBody`).
+
 ## Decisions
 
 ## Recurring Errors & Fixes

@@ -1,0 +1,208 @@
+# HW2 Gate 3 — exploration plan
+
+**Status (2026-10-21):** prepared; **Gate 3 is not authorized.**
+- No spending capability exists.
+- No paid request has been made; the dedicated key's usage is 0.
+
+Phase 0 is the unpaid part of Gate 3: the free endpoint check and the four
+free previews, on the final stack X. Execution of paid slots needs your
+separate, explicit Gate 3 authorization after Phase 0 passes. The commands are
+in the [operator guide](HW2-experiment-operator-guide.md#gate-3-exploration-on-stack-x--usd-050).
+Facts are marked **[F]** and estimates **[E]**.
+
+## Preconditions (GO checklist)
+
+| # | Condition | State |
+| --- | --- | --- |
+| 1 | The preparation PR (#28) is merged, with green CI: experiment 17 reviewer seeding, condition-faithful `preview`, `require_parameters` | draft, synced with `main` `58dabc5`; awaiting your merge approval |
+| 2 | Phase 0 endpoint check passes for the confirmed endpoint-specific slug (exactly one live endpoint, `structured_outputs`, status 0) | **[F]** passes for `deepinfra/fp8` (2026-10-20); metadata unchanged 2026-10-21; rerun on X |
+| 3 | Phase 0 previews pass for all four experiment/condition pairs | **[F]** pass on `hw2f-14e8ba66` (below); rerun on X |
+| 4 | Endpoint-specific routing slug confirmed from the model page's copy button (no provider-wide fallback) | pending your confirmation; without it, blocker |
+| 5 | Key `limit_remaining` is 2, usage 0 | **[F]** 2 / 0 after the previews (2026-10-20); recheck on X |
+| 6 | Explicit Gate 3 authorization | not given |
+
+## Provider and routing
+
+Live metadata comes from the public `GET /api/v1/models/deepseek/deepseek-v4-flash/endpoints`,
+which needs no key (2026-10-20; rechecked 2026-10-21 07:20 UTC with the same
+tags, `structured_outputs` flags, status and prices) **[F]**:
+
+| Provider | Tag | `structured_outputs` | Status | Uptime 30 min / 1 day | Max completion | In / Out USD per 1M tokens | Role |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| DeepInfra | `deepinfra/fp8` | yes | 0 | 100 / 100 | 65,536 | 0.090 / 0.180 | **preferred** |
+| StreamLake | `streamlake/fp8` | yes | 0 | 100 / 99.7 | 384,000 | 0.0826 / 0.1652 | planning alternative |
+| GMICloud | `gmicloud/fp8` | **no** | 0 | 100 / 100 | 943,717 | 0.091 / 0.182 | unsuitable (below) |
+
+- **Routing.** The request sends `order = only = [slug]`,
+  `allow_fallbacks: false` and `require_parameters: true`.
+  - OpenRouter therefore never routes it to an endpoint that would ignore the
+    strict `json_schema` response format.
+  - It never falls back to another provider. An alternative is for planning
+    only: switching provider means new settings, a new exploration slot on the
+    new slug and, at Gate 4, a new manifest.
+- **DeepInfra** is the preferred provider, subject to the endpoint check on
+  the final stack X.
+- **StreamLake** is the planning alternative. Using it at Gate 3 means
+  starting X with its slug and prices, and rerunning Phase 0 there.
+- **GMICloud** is not an alternative. It advertises only `response_format`,
+  not `structured_outputs`, so `require_parameters` filters it out. This
+  holds unless fresh metadata shows `structured_outputs` for it.
+- **Slug.** OpenRouter documents full slugs as
+  `provider[/variant][/region][/tier]` (e.g. `deepinfra/turbo`, `baseten/fp4`).
+  - Gate 3 requires an **endpoint-specific** slug that you confirm from the
+    model page's copy button, expected to be `deepinfra/fp8`. It must match
+    exactly one live endpoint.
+  - A provider-wide selector (`deepinfra`) matches every endpoint of that
+    provider, including ones added later, so it is never used and the checks
+    refuse it.
+  - The endpoints `tag` is not documented as a routing value. Phase 0
+    compares the confirmed slug with it, so a slug that matches no tag is a
+    blocker too.
+  - If the copy button shows no endpoint-specific slug, or the confirmed slug
+    does not match exactly one live endpoint, that is a **blocker**: stop and
+    decide (for example StreamLake's endpoint-specific slug) before Phase 0.
+
+## Real free-preview figures [F]
+
+These measured bounds replace the earlier planning estimate of 20,000 input
+tokens per call. They are 10,009–12,051 tokens.
+
+Measured on a keyed disposable stack (`hw2f-14e8ba66`) from the preparation
+branch, with:
+- `deepinfra/fp8`, frozen prices equal to live (9e-8 / 1.8e-7 USD per token);
+- a 16,000 output cap;
+- the runner's condition-faithful `preview` command;
+- no capability.
+
+Key usage was 0 before and after, and no run was created.
+
+| Pair | Linked skills | Input bound | Worst case (× 1.5) |
+| --- | --- | --- | --- |
+| 18 / with | breaking-change | 12,051 | $0.005947 |
+| 18 / without | — | 10,009 | $0.005671 |
+| 17 / with | Edge Cases and Error Paths | 11,177 | $0.005829 |
+| 17 / without | — | 10,670 | $0.005760 |
+
+The preflight checks held for every pair:
+- one live endpoint matched (`deepinfra/fp8`);
+- the bound plus the cap fit the 1,048,576-token context;
+- the cap is within the 65,536 maximum completion.
+
+The non-Skill fingerprint is equal across conditions within each experiment.
+The `without` previews carry the empty-list Skill fingerprint, and the `with`
+previews carry a real one.
+
+## Schedule and costs
+
+| Value | Proposed | Unchanged limit |
+| --- | --- | --- |
+| Capability budget (`authorize --budget`) | **$0.15**, the hard cap for Gate 3 | formal Gate 3 ceiling $0.50 |
+| Per-slot reservation | **$0.01**: the smallest round value ≥ 1.2 × the largest worst case (1.2 × $0.005947 = $0.0071) | — |
+| Slots | **4** initial, **2** optional | — |
+| Output cap | **16,000** tokens | endpoint maximum completion 65,536 |
+| Total across Gates 3 and 4 | — | $1.50 |
+| Dedicated key | — | $2 limit, never resets |
+
+Every Gate 3 command in the operator guide uses these values, and its checks
+fail if a capability or reservation differs. If 1.2 × the largest worst case on
+X exceeds $0.01, Phase 0 fails: a higher reservation needs a new approval.
+
+| Order | Slot | Fixture / reviewer | Condition |
+| --- | --- | --- | --- |
+| 1 | `x-18-with-1` | #502 / API Contract Reviewer | with `breaking-change` |
+| 2 | `x-18-without-1` | #502 | without |
+| 3 | `x-17-with-1` | #501 / Test Quality Reviewer | with `Edge Cases and Error Paths` |
+| 4 | `x-17-without-1` | #501 | without |
+| 5 (optional) | `x-18-with-2` | #502 | with |
+| 6 (optional) | `x-17-with-2` | #501 | with |
+
+Slots 5–6 run only if the first four leave the output cap or provenance in
+doubt.
+
+| Quantity | Value |
+| --- | --- |
+| Reserved per slot | $0.01 **[F, derived]** |
+| Maximum reserved, 4 / 6 slots | $0.04 / $0.06 |
+| Expected actual per call | about $0.0008–0.0025 **[E]** (L03 reviews: about 1.7k–2.9k input and 2.6k–2.75k output tokens) |
+| Expected actual, 6 slots | about $0.005–0.015 **[E]** |
+| Gate 4 projection | 20 × about $0.01 ≈ $0.20, under $1.00 **[E]**; recomputed on stack E |
+
+## Revalidate on the final stack X
+
+Values measured on another stack, or on an earlier day, do not carry over.
+Before Gate 3 authorization, Phase 0 on X must show:
+
+| # | Item | How (operator guide, Gate 3) | Expected |
+| --- | --- | --- | --- |
+| R1 | Exact routing slug | the model page's copy button | one endpoint-specific slug, confirmed by you and frozen for X; a provider-wide selector is refused |
+| R2 | Strict structured-output support | step 2 endpoint check | exactly one live endpoint for the slug, `structured_outputs` advertised, status 0 |
+| R3 | Live endpoint prices and limits | step 2 settings check | X's frozen prices equal the live ones; 16,000 ≤ maximum completion; bound + cap within context |
+| R4 | Key usage and remaining limit | Gate 2 checklist, `GET /api/v1/key` | usage 0 (or the recorded total), limit 2, `limit_remaining` covers $0.15 |
+| R5 | Four free previews | step 3, `phase0-check` | all four `ok`, at the $0.01 reservation and the 16,000 cap, each with exactly its condition's links |
+| R6 | Reservation | step 3 check | 1.2 × the largest worst case ≤ $0.01 |
+| R7 | Prompt fingerprints | step 3, `phase0-check` | non-Skill fingerprint equal across `with` and `without` per experiment; Skill fingerprint equal to the one recomputed from the current target skill (`with`) or from no Skills (`without`) |
+| R8 | Fixture identity | `check` (§3) | PRs #501 and #502 only, fresh intents, frozen diff hashes; no PR #3 |
+| R9 | Isolation | `check` (§3) | disposable database, loopback non-development port, empty per-stack clone directory, dedicated key file |
+| R10 | No spending capability | step 3, capability check (fails closed) | neither `capability.json` nor `capability.token` exists for X before the previews |
+
+## Per-slot checks
+
+Never judge a slot from the runner's exit code. Judge it from the ledger state
+and the trace:
+- the selected endpoint;
+- router `attempt` = `attempts` = 1, or a single `provider_responses` entry;
+- the serving provider's display name and the served model;
+- a generation id that the lookup accepts, or its unavailability recorded;
+- a known reported cost that agrees with the change in the key's usage
+  (`GET /api/v1/key`) to within $0.001;
+- `finish_reason: stop` and a valid schema;
+- completion tokens: the largest must be ≤ 50% of the cap.
+
+## Stops
+
+**Operational, checked by the operator after every slot.** Stop at the **first**
+occurrence of any of these and investigate manually before any further paid
+slot:
+- unknown cost, or an `ambiguous` slot;
+- truncation (`finish_reason: length`);
+- a schema failure;
+- a timeout;
+- insufficient or conflicting provenance;
+- a provider, model or fallback mismatch, or more than one attempt;
+- any refusal;
+- charged (actual plus reserved) above $0.10;
+- the key's usage exceeding the ledger total by more than $0.01.
+
+**Built-in, enforced by the code:**
+- The runner stops on a refusal, a budget refusal, a fingerprint mismatch,
+  2 consecutive unknown-cost slots or 3 consecutive infrastructure failures.
+- The server enforces the capability (phase, gate, budget, expiry), the phase
+  and total budgets (409), one slot in flight, and no replay of a used slot id.
+- The preflight refuses at zero cost when the worst case exceeds the
+  reservation.
+
+The operational stops are stricter than the built-in ones. They do not replace
+them.
+
+## Evidence and the Gate 3 report
+
+Before X stops:
+- export in exploration mode (operator guide, *Export the evidence before
+  teardown*, with steps 2 and 5 skipped and step 7 run with `exploration`);
+- the secret scan must be clean;
+- record the checksums;
+- the offline settlement must equal the runner's charged total.
+
+Then stop X and write the Gate 3 report, proposing the frozen Gate 4 values:
+- slug and display name;
+- served model and endpoint;
+- prices and retrieval time;
+- output cap: at least 2× the largest observed completion, within 65,536;
+- per-slot reservation;
+- generation-lookup policy.
+
+## Methodology
+
+Exploration validates infrastructure only. Detection outcomes are never used to
+tune fixtures, skills or rules; any change and its reason is recorded.
+Exploration slots are excluded from the experiment result.

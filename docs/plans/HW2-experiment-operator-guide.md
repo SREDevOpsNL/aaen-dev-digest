@@ -91,10 +91,13 @@ direct API call therefore cannot bypass the gate. After a gate is explicitly
 authorized:
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget 0.50 --hours 12 \
-  --api … --stack … --database … --container …
+pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget 0.15 --hours 12 "${STACK[@]}"
 ```
 
+- `--budget 0.15` is the capability budget of the approved
+  [Gate 3 plan](HW2-gate3-plan.md#schedule-and-costs). USD 0.50 is the formal
+  Gate 3 ceiling that `authorize` and the server enforce, not a budget to
+  authorize. A different budget needs a new approval.
 - This writes `~/.devdigest/hw2-experiments/<stack-id>/capability.json`
   (0600): the stack id, phase, gate, budget, expiry and the **sha256** of a
   random token. The token itself goes to `capability.token` (0600), which
@@ -112,11 +115,260 @@ pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authori
 
 ## Paid
 
-### Gate 3: exploration (≤ USD 0.50)
+Each paid phase runs on its own disposable stack:
+
+| Stack | Phase | Rule |
+| --- | --- | --- |
+| X | Gate 3, exploration | Started per §2 with provisional or candidate settings. Its evidence is exported before it stops. |
+| E | Gate 4, confirmatory | A **new** stack with the final settings. The manifest, the preregistration commit and the confirmatory run all happen on E, and E is **not restarted** in between. |
+
+Why one E:
+- The manifest freezes `stack.database`.
+- Every `scripts/e2e.sh --serve` start creates a new database, `devdigest_hw2f_<nonce>`.
+- A manifest generated on any other stack, or before a restart, never matches the one `run` recomputes, so `run` refuses before any request.
+
+`server/test/hw2-manifest-identity.test.ts` shows both halves of this:
+- a different database identity changes the fingerprint;
+- a preregistration-only commit on the same stack does not.
+
+### Gate 3: exploration on stack X (≤ USD 0.50)
+
+The schedule, the cost figures from real free previews, and the stop rules are
+in the [Gate 3 plan](HW2-gate3-plan.md). The approved plan uses only part of the
+USD 0.50 ceiling, and every command below uses these values:
+
+| Value | Approved | Formal limit (unchanged) |
+| --- | --- | --- |
+| Capability budget (`authorize --budget`) | USD 0.15 | Gate 3 ceiling USD 0.50 |
+| Per-slot reservation (`X_RESERVATION`) | USD 0.01 | — |
+| Slots | 4 initial, 2 optional | — |
+| Output cap (`DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS`) | 16,000 tokens | endpoint maximum completion |
+| Dedicated key limit | — | USD 2, never resets |
+
+Changing any approved value needs a new approval before a paid slot.
+
+1. **Start X** (§2) with `DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS=16000` and
+   the slug's live prices from the endpoint check below. Set
+   `DEVDIGEST_EXPERIMENT_PROVIDER` to an **endpoint-specific** routing slug,
+   `provider/variant[/region][/tier]` such as `deepinfra/fp8`, that you have
+   confirmed from the provider's copy button on the model page.
+   - A provider-wide selector such as `deepinfra` matches **every** endpoint
+     of that provider, including ones added later. Gate 3 never uses one, and
+     the checks below refuse it.
+   - If the copy button gives no endpoint-specific slug, or a slug that does
+     not match exactly one live endpoint, stop: that is a blocker that needs a
+     decision, not a reason to fall back to a broader selector.
+
+   In the runner terminal, set the §3 variables for X and run its checks. Then
+   set the approved values:
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend \
-  --api … --stack … --database … --container … --experiment 18 --condition with --count 1 --reservation <USD>
+X_RESERVATION=0.01; X_CAP=16000   # APPROVED Gate 3 plan values: USD reserved per slot, output cap in tokens
+```
+
+2. **Phase 0, free: the provider's endpoint.** The slug must be
+   endpoint-specific and match exactly one live endpoint, which must advertise
+   `structured_outputs` (the request
+   requires every parameter it sends, see
+   [One request](#one-request)) and be up. This reads OpenRouter's public
+   model metadata; no key is sent.
+
+```bash
+SLUG=   # required: the endpoint-specific slug you confirmed from the copy button and started X with, e.g. deepinfra/fp8
+```
+
+```bash
+python3 -I - "$SLUG" <<'EOF'
+import json, sys, urllib.request
+slug = sys.argv[1]
+if not slug:
+    sys.exit("FAILED: SLUG is not set; confirm the endpoint-specific slug from the model page's copy button")
+if "/" not in slug:
+    sys.exit(f"FAILED: {slug!r} is a provider-wide selector; Gate 3 needs a confirmed endpoint-specific slug. BLOCKER: request a decision")
+request = urllib.request.Request("https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-flash/endpoints", headers={"User-Agent": "devdigest-hw2-phase0"})
+endpoints = json.load(urllib.request.urlopen(request, timeout=30))["data"]["endpoints"]
+matching = [e for e in endpoints if e.get("tag") == slug]
+problems = []
+if len(matching) != 1:
+    problems.append(f"{len(matching)} live endpoints match {slug}, not exactly 1. BLOCKER: request a decision")
+for e in matching:
+    if "structured_outputs" not in (e.get("supported_parameters") or []):
+        problems.append(f"{e.get('tag')} does not advertise structured_outputs")
+    if e.get("status") != 0:
+        problems.append(f"{e.get('tag')} status is {e.get('status')}")
+    print(f"{e.get('tag')}: max completion {e.get('max_completion_tokens')}, context {e.get('context_length')}, uptime 30m {e.get('uptime_last_30m')}")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print(f"{slug}: endpoint ready")
+EOF
+```
+
+   Then confirm that X runs the approved settings against that live endpoint:
+   the slug, the model, the 16,000 cap (within the endpoint's maximum
+   completion), the live prices, and a configured key.
+
+```bash
+python3 -I - "$API" "$SLUG" "$X_RESERVATION" "$X_CAP" <<'EOF'
+import json, sys, urllib.request
+api, slug, reservation, cap = sys.argv[1:5]
+problems = []
+if reservation != "0.01":
+    problems.append(f"X_RESERVATION={reservation!r}: the approved Gate 3 plan reserves 0.01 per slot")
+if cap != "16000":
+    problems.append(f"X_CAP={cap!r}: the approved Gate 3 plan caps output at 16000 tokens")
+try:
+    identity = json.load(urllib.request.urlopen(f"{api}/experiments/identity", timeout=30))
+except (OSError, ValueError) as err:
+    sys.exit(f"FAILED: cannot read {api}/experiments/identity: {err}")
+if "/" not in slug:
+    problems.append(f"SLUG={slug!r} is not an endpoint-specific slug")
+if identity.get("provider") != slug:
+    problems.append(f"X routes to {identity.get('provider')!r}, not {slug!r}")
+if identity.get("model") != "deepseek/deepseek-v4-flash":
+    problems.append(f"X uses the model {identity.get('model')!r}")
+if str(identity.get("max_output_tokens")) != cap:
+    problems.append(f"X caps output at {identity.get('max_output_tokens')}, not {cap}")
+if not identity.get("openrouter_key_configured"):
+    problems.append("X has no OpenRouter key (start it after the dedicated key file exists)")
+request = urllib.request.Request("https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-flash/endpoints", headers={"User-Agent": "devdigest-hw2-phase0"})
+endpoints = json.load(urllib.request.urlopen(request, timeout=30))["data"]["endpoints"]
+matching = [e for e in endpoints if e.get("tag") == slug]
+if len(matching) != 1:
+    problems.append(f"{len(matching)} live endpoints match {slug}, not exactly 1")
+prices = identity.get("prices") or {}
+for e in matching:
+    live = e.get("pricing") or {}
+    for field, key in (("input", "prompt"), ("output", "completion")):
+        if float(live.get(key) or "nan") != prices.get(field):
+            problems.append(f"{e.get('tag')}: live {field} price {live.get(key)} differs from X's {prices.get(field)}")
+    if int(cap) > (e.get("max_completion_tokens") or 0):
+        problems.append(f"{e.get('tag')}: cap {cap} exceeds the maximum completion {e.get('max_completion_tokens')}")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print(f"X {identity.get('stack_id', '')} matches the approved Gate 3 settings on {slug}: cap {cap}, prices {prices.get('input')} / {prices.get('output')} USD per token")
+EOF
+```
+
+3. **Phase 0, free: condition-faithful previews.** The preview API builds the
+   prompt from the reviewer's **current** links, and its `condition` is only a
+   label. The runner's `preview` command therefore does the following, and
+   returns nonzero on any mismatch:
+   - links exactly what a slot of that condition links (the target skill, or
+     none);
+   - checks the links, and that the Skill fingerprint is the target skill's
+     own (recomputed from its current body) or that of no Skills;
+   - prints the input bound and the worst case;
+   - always restores the original links.
+
+   First prove that X holds no spending capability. The previews are free only
+   while neither file exists:
+
+```bash
+CAPDIR="$HOME/.devdigest/hw2-experiments/$ID"; if [ ! -d "$CAPDIR" ] || [ ! -x "$CAPDIR" ]; then echo "FAILED: $CAPDIR is not a readable stack directory (check ID)"; false; elif [ -e "$CAPDIR/capability.json" ] || [ -L "$CAPDIR/capability.json" ] || [ -e "$CAPDIR/capability.token" ] || [ -L "$CAPDIR/capability.token" ]; then echo "FAILED: a spending capability exists for $ID before Phase 0; stop and investigate"; ls -l "$CAPDIR"/capability.*; false; else echo "no spending capability for $ID"; fi
+```
+
+   Each preview runs at the approved reservation and saves its result into a
+   new directory, so an older preview can never be counted:
+
+```bash
+PV=$(mktemp -d "$HOME/.devdigest/hw2-experiments/$ID/previews.XXXXXX") && echo "previews: $PV" || { echo "FAILED: cannot create a preview directory for $ID"; false; }
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 18 --condition with --reservation "$X_RESERVATION" > "$PV/18-with.json"; status=$?; cat "$PV/18-with.json"; [ "$status" -eq 0 ] || { echo "FAILED: preview 18 / with"; false; }
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 18 --condition without --reservation "$X_RESERVATION" > "$PV/18-without.json"; status=$?; cat "$PV/18-without.json"; [ "$status" -eq 0 ] || { echo "FAILED: preview 18 / without"; false; }
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 17 --condition with --reservation "$X_RESERVATION" > "$PV/17-with.json"; status=$?; cat "$PV/17-with.json"; [ "$status" -eq 0 ] || { echo "FAILED: preview 17 / with"; false; }
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 17 --condition without --reservation "$X_RESERVATION" > "$PV/17-without.json"; status=$?; cat "$PV/17-without.json"; [ "$status" -eq 0 ] || { echo "FAILED: preview 17 / without"; false; }
+```
+
+   Then check the four previews together. `phase0-check` fails unless:
+   - each preview is `ok`, at the approved reservation and output cap, for its
+     own experiment and condition, with exactly its condition's links;
+   - each Skill fingerprint equals the one recomputed from the stack's current
+     target skill (`with`) or from no Skills (`without`);
+   - within each experiment, the non-Skill fingerprint is the same for `with`
+     and `without`;
+   - the reservation covers 1.2 × the largest worst case.
+
+   If it fails, stop: raising the reservation needs a new approval.
+
+```bash
+if [ "$X_RESERVATION" = 0.01 ] && [ "$X_CAP" = 16000 ]; then pnpm exec tsx src/experiments/hw2/cli.ts phase0-check "${STACK[@]}" --dir "$PV" --reservation "$X_RESERVATION" --cap "$X_CAP"; else echo "FAILED: X_RESERVATION=$X_RESERVATION and X_CAP=$X_CAP are not the approved 0.01 and 16000"; false; fi
+```
+
+4. **Authorize.** Only after Gate 3 is explicitly authorized, create the
+   exploration capability with `--budget 0.15`
+   ([Authorizing a paid phase](#authorizing-a-paid-phase-server-side-capability)).
+5. **Run.** Before **every** slot, check the capability and the reservation:
+
+```bash
+python3 -I - "$HOME/.devdigest/hw2-experiments/$ID/capability.json" "$ID" "$X_RESERVATION" <<'EOF'
+import datetime, json, sys
+path, stack, reservation = sys.argv[1:4]
+try:
+    cap = json.load(open(path))
+except (OSError, ValueError) as err:
+    sys.exit(f"FAILED: no readable capability: {err}")
+problems = []
+if cap.get("stack_id") != stack:
+    problems.append(f"capability is for {cap.get('stack_id')!r}, not {stack!r}")
+if cap.get("phase") != "exploration" or cap.get("gate") != 3:
+    problems.append(f"capability is for {cap.get('phase')} / Gate {cap.get('gate')}, not exploration / Gate 3")
+if cap.get("budget_usd") != 0.15:
+    problems.append(f"capability budget is {cap.get('budget_usd')}, not the approved 0.15")
+try:
+    if datetime.datetime.fromisoformat(cap["expires_at"].replace("Z", "+00:00")) <= datetime.datetime.now(datetime.timezone.utc):
+        problems.append(f"capability expired at {cap['expires_at']}")
+except (KeyError, ValueError) as err:
+    problems.append(f"capability expiry is unreadable: {err}")
+if reservation != "0.01":
+    problems.append(f"X_RESERVATION={reservation!r}, not the approved 0.01")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print(f"capability: exploration, Gate 3, budget $0.15, expires {cap['expires_at']}; reservation ${reservation}")
+EOF
+```
+
+   Then run one slot per invocation, in this order, and judge each from the
+   ledger and the trace, never from the exit code
+   ([Gate 3 plan](HW2-gate3-plan.md#per-slot-checks)). Stop at the first
+   operational stop.
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment 18 --condition with --count 1 --reservation "$X_RESERVATION"
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment 18 --condition without --count 1 --reservation "$X_RESERVATION"
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment 17 --condition with --count 1 --reservation "$X_RESERVATION"
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment 17 --condition without --count 1 --reservation "$X_RESERVATION"
+```
+
+   Only if the first four leave the output cap or provenance in doubt, the two
+   optional slots (`x-18-with-2`, `x-17-with-2`; `run` picks the next free
+   trial):
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment 18 --condition with --count 1 --reservation "$X_RESERVATION"
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment 17 --condition with --count 1 --reservation "$X_RESERVATION"
 ```
 
 Exploration confirms what the implementation must not assume:
@@ -129,7 +381,11 @@ Exploration confirms what the implementation must not assume:
 
 Fixtures and settings may be refined only here.
 
-### Gate 4: confirmatory (≤ USD 1.00)
+6. Preserve the exploration evidence before stopping X. Follow
+   [Export the evidence before teardown](#export-the-evidence-before-teardown-gate-4)
+   with these changes:
+   - skip steps 2 and 5 (the report and the screenshots belong to Gate 4);
+   - give step 7 `exploration` as its last argument instead of `confirmatory`.
 
 1. Fill `docs/plans/HW2-experiment-preregistration.md`, paste the manifest into
    its ```` ```json manifest ```` block, and **commit** it.
@@ -215,6 +471,9 @@ preview, are free metadata and still work. Normal mode is unaffected.
 The request carries:
 - SDK retries 0 and no reprompt;
 - `provider.order` = `provider.only` = [slug], with `allow_fallbacks: false`;
+- `provider.require_parameters: true`: OpenRouter never routes it to an
+  endpoint that would ignore one of its parameters, above all the strict
+  `json_schema` response format;
 - `max_tokens` = the cap;
 - `X-OpenRouter-Metadata: enabled`.
 
