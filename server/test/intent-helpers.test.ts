@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   contextHash,
+  derivationStartedAt,
   identifyLinkedIssue,
   issueHash,
   staleReasons,
@@ -93,5 +94,24 @@ describe('staleness and view', () => {
     expect(toView('p', { ...row, lastError: 'timeout' }, current)).toMatchObject({ state: 'ready', last_error: 'timeout' });
     expect(toView('p', { ...row, analysis: null, status: 'failed' }, current).state).toBe('failed');
     expect(toView('p', { ...row, analysis: null, status: 'skipped_no_key' }, current).state).toBe('skipped_no_key');
+  });
+});
+
+describe('derivationStartedAt', () => {
+  it('keeps increasing when the wall clock steps backwards or stands still', () => {
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'], now: now + 7_000 });
+    try {
+      const first = derivationStartedAt();
+      vi.setSystemTime(now); // the clock steps back 7 s
+      const second = derivationStartedAt();
+      const third = derivationStartedAt(); // same wall-clock millisecond
+      expect(second.getTime()).toBeGreaterThan(first.getTime());
+      expect(third.getTime()).toBeGreaterThan(second.getTime());
+      vi.setSystemTime(now + 60_000); // follows the wall clock again once it is ahead
+      expect(derivationStartedAt().getTime()).toBe(now + 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

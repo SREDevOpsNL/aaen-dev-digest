@@ -56,6 +56,13 @@ server/src/vendor/shared/contracts/platform.ts:178.
 
 ## Recurring Errors & Fixes
 
+- **2026-10-21** — Answer to the 2026-10-21 open question recorded on PR #28's
+  branch (`hw2/gate3-prep`): the intent test failure was a real production
+  race, not a test flake. A backward wall-clock step let a superseded
+  derivation win the cache and be injected into a review. It is fixed with a
+  start stamp that never runs backwards. Details and evidence: the 2026-10-21
+  entry under Recurring Errors & Fixes in [`LEARNINGS.md`](LEARNINGS.md).
+
 ## Session Notes
 
 ## Open Questions

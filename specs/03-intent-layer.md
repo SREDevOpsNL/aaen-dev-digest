@@ -40,7 +40,9 @@ from an intended one.
   not abandoned; an interrupted request marks the PR's classifier cost as
   incomplete, since the provider may have billed it without reporting usage.
 - A result is written only if its derivation started no earlier than the stored
-  one, so an older result never overwrites a newer one. A superseded result is
+  one, so an older result never overwrites a newer one. Start order is a
+  per-process stamp that never runs backwards, even when the wall clock steps
+  back (NTP, VM resume, WSL2). A superseded result is
   reported as `superseded`, and its cost is still added to the PR's total. An
   older failure never overwrites the error or attempt time of a newer attempt.
 - Single flight and the ordering guard are in-process: they assume one API

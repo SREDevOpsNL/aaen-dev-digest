@@ -508,6 +508,38 @@ d('Intent Layer (Testcontainers pg)', () => {
       await app.close();
     });
 
+    it('a wall clock that steps backwards never lets the outdated-issue derivation win', async () => {
+      // Derivations are ordered by start time. The wall clock can step back
+      // (NTP, VM resume; on WSL2 it jumps +7 s for ~90 ms every ~5.5 s), so a
+      // later derivation can read an earlier time than one already running.
+      const github = new MutableIssueGitHub();
+      const { app, llm, pr, run } = await reviewBatch(1, { body: 'Fixes #12', github });
+      llm.callGates = [deferred(), deferred()];
+      llm.fixtureFor = (call) => ({ ...INTENT_RAW, claimed_purpose: call === 1 ? 'from issue v1' : 'from issue v2' });
+      const realNow = Date.now();
+      vi.useFakeTimers({ toFake: ['Date'], now: realNow + 7_000 }); // the clock is ahead as the batch starts
+      try {
+        const batch = run(); // reads issue v1; its derivation is call 1
+        await vi.waitFor(() => expect(llm.intentCalls).toBe(1));
+        vi.setSystemTime(realNow); // ...and steps back before the Recompute starts
+        github.issueBody = ISSUE_V2;
+        const recompute = app.inject({ method: 'POST', url: `${intentUrl(pr.id)}/recompute` });
+        await vi.waitFor(() => expect(llm.intentCalls).toBe(2));
+        llm.callGates[1]!.resolve();
+        await recompute; // the v2 derivation started later, so it must keep the cache
+        llm.callGates[0]!.resolve();
+
+        const { traces } = await batch;
+        expect(traces[0]!.intent).toMatchObject({ source: 'none', status: 'superseded', analysis: null });
+        expect(traces[0]!.prompt_assembly.intent ?? null).toBeNull();
+        const view = (await app.inject({ method: 'GET', url: intentUrl(pr.id) })).json();
+        expect(view.analysis.claimed_purpose).toBe('from issue v2');
+      } finally {
+        vi.useRealTimers();
+        await app.close();
+      }
+    });
+
     it('an older failed attempt never overwrites newer success metadata, but still marks cost incomplete', async () => {
       const { pr } = await setup();
       const repo = new IntentRepository(pg.handle.db);
