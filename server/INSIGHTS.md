@@ -93,3 +93,16 @@ server/src/vendor/shared/contracts/platform.ts:178.
   `server/src/modules/intent/constants.ts` (`INTENT_TIMEOUT_MS`,
   `INTENT_TIMEOUT_MARGIN_MS`); the general cancellation pitfall is in the root
   `LEARNINGS.md` (2026-10-14, `withTimeout`).
+
+- **2026-10-21** — Is "a review batch never injects intent derived from an
+  outdated linked issue" a flaky test or a real race? In 1 of 3 full DB-backed
+  runs on the PR #28 merge of `main` `58dabc5`, the batch's trace held the
+  superseded **v1** analysis (`source: 'derived'`, `status: 'used'`,
+  `claimed_purpose: 'from issue v1'`) instead of `superseded`. The file passed
+  5 of 5 times on its own, and the failing run had all 16 DB files in
+  parallel. The branch changes no intent code. If the run order can really let
+  a superseded derivation through, a review could use intent from an outdated
+  issue, so investigate before treating it as test-only. The other bad run
+  failed with `Failed to connect to Reaper`, because the previous run's
+  testcontainers Ryuk container was still exiting. Waiting for it to exit
+  fixed that. Evidence: `server/test/intent.it.test.ts:490`.

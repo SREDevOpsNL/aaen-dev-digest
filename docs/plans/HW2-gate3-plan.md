@@ -1,10 +1,12 @@
 # HW2 Gate 3 — exploration plan
 
-**Status (2026-10-20):** prepared; **Gate 3 is not authorized.**
+**Status (2026-10-21):** prepared; **Gate 3 is not authorized.**
 - No spending capability exists.
 - No paid request has been made; the dedicated key's usage is 0.
 
-Execution needs your separate, explicit Gate 3 authorization. The commands are
+Phase 0 is the unpaid part of Gate 3: the free endpoint check and the four
+free previews, on the final stack X. Execution of paid slots needs your
+separate, explicit Gate 3 authorization after Phase 0 passes. The commands are
 in the [operator guide](HW2-experiment-operator-guide.md#gate-3-exploration-on-stack-x--usd-050).
 Facts are marked **[F]** and estimates **[E]**.
 
@@ -12,22 +14,23 @@ Facts are marked **[F]** and estimates **[E]**.
 
 | # | Condition | State |
 | --- | --- | --- |
-| 1 | The preparation PR is merged, with green CI: experiment 17 reviewer seeding, condition-faithful `preview`, `require_parameters` | pending review |
-| 2 | Phase 0 endpoint check passes for the chosen slug (`structured_outputs`, status 0, one endpoint for a full slug) | **[F]** passes for `deepinfra/fp8` (2026-10-20) |
-| 3 | Phase 0 previews pass for all four experiment/condition pairs | **[F]** pass (below) |
+| 1 | The preparation PR (#28) is merged, with green CI: experiment 17 reviewer seeding, condition-faithful `preview`, `require_parameters` | draft, synced with `main` `58dabc5`; awaiting your merge approval |
+| 2 | Phase 0 endpoint check passes for the chosen slug (`structured_outputs`, status 0, one endpoint for a full slug) | **[F]** passes for `deepinfra/fp8` (2026-10-20); metadata unchanged 2026-10-21; rerun on X |
+| 3 | Phase 0 previews pass for all four experiment/condition pairs | **[F]** pass on `hw2f-14e8ba66` (below); rerun on X |
 | 4 | Routing slug decided: copy it from the model page's provider copy button | pending your confirmation |
-| 5 | Key `limit_remaining` is 2, usage 0 | **[F]** 2 / 0 after the previews |
+| 5 | Key `limit_remaining` is 2, usage 0 | **[F]** 2 / 0 after the previews (2026-10-20); recheck on X |
 | 6 | Explicit Gate 3 authorization | not given |
 
 ## Provider and routing
 
 Live metadata comes from the public `GET /api/v1/models/deepseek/deepseek-v4-flash/endpoints`,
-which needs no key (2026-10-20) **[F]**:
+which needs no key (2026-10-20; rechecked 2026-10-21 07:20 UTC with the same
+tags, `structured_outputs` flags, status and prices) **[F]**:
 
 | Provider | Tag | `structured_outputs` | Status | Uptime 30 min / 1 day | Max completion | In / Out USD per 1M tokens | Role |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | DeepInfra | `deepinfra/fp8` | yes | 0 | 100 / 100 | 65,536 | 0.090 / 0.180 | **preferred** |
-| StreamLake | `streamlake/fp8` | yes | 0 | 100 / 100 | 384,000 | 0.0826 / 0.1652 | proposed planning alternative |
+| StreamLake | `streamlake/fp8` | yes | 0 | 100 / 99.7 | 384,000 | 0.0826 / 0.1652 | planning alternative |
 | GMICloud | `gmicloud/fp8` | **no** | 0 | 100 / 100 | 943,717 | 0.091 / 0.182 | unsuitable (below) |
 
 - **Routing.** The request sends `order = only = [slug]`,
@@ -37,9 +40,13 @@ which needs no key (2026-10-20) **[F]**:
   - It never falls back to another provider. An alternative is for planning
     only: switching provider means new settings, a new exploration slot on the
     new slug and, at Gate 4, a new manifest.
-- **GMICloud.** It advertises only `response_format`, not `structured_outputs`,
-  so `require_parameters` filters it out. That is why StreamLake is proposed in
-  its place, subject to your decision.
+- **DeepInfra** is the preferred provider, subject to the endpoint check on
+  the final stack X.
+- **StreamLake** is the planning alternative. Using it at Gate 3 means
+  starting X with its slug and prices, and rerunning Phase 0 there.
+- **GMICloud** is not an alternative. It advertises only `response_format`,
+  not `structured_outputs`, so `require_parameters` filters it out. This
+  holds unless fresh metadata shows `structured_outputs` for it.
 - **Slug.** OpenRouter documents full slugs as
   `provider[/variant][/region][/tier]` (e.g. `deepinfra/turbo`, `baseten/fp4`).
   - A base slug (`deepinfra`) matches every endpoint of that provider.
@@ -49,6 +56,9 @@ which needs no key (2026-10-20) **[F]**:
     endpoint today.
 
 ## Real free-preview figures [F]
+
+These measured bounds replace the earlier planning estimate of 20,000 input
+tokens per call. They are 10,009–12,051 tokens.
 
 Measured on a keyed disposable stack (`hw2f-14e8ba66`) from the preparation
 branch, with:
@@ -77,10 +87,18 @@ previews carry a real one.
 
 ## Schedule and costs
 
-- **Reservation per slot:** the smallest round value ≥ 1.2 × the largest worst
-  case (1.2 × $0.005947 = $0.0071), which is **$0.01**.
-- **Capability:** `--budget 0.15` is proposed as the hard cap. The formal
-  Gate 3 ceiling stays $0.50; the total stays ≤ $1.50; the key limit is $2.
+| Value | Proposed | Unchanged limit |
+| --- | --- | --- |
+| Capability budget (`authorize --budget`) | **$0.15**, the hard cap for Gate 3 | formal Gate 3 ceiling $0.50 |
+| Per-slot reservation | **$0.01**: the smallest round value ≥ 1.2 × the largest worst case (1.2 × $0.005947 = $0.0071) | — |
+| Slots | **4** initial, **2** optional | — |
+| Output cap | **16,000** tokens | endpoint maximum completion 65,536 |
+| Total across Gates 3 and 4 | — | $1.50 |
+| Dedicated key | — | $2 limit, never resets |
+
+Every Gate 3 command in the operator guide uses these values, and its checks
+fail if a capability or reservation differs. If 1.2 × the largest worst case on
+X exceeds $0.01, Phase 0 fails: a higher reservation needs a new approval.
 
 | Order | Slot | Fixture / reviewer | Condition |
 | --- | --- | --- | --- |
@@ -101,6 +119,24 @@ doubt.
 | Expected actual per call | about $0.0008–0.0025 **[E]** (L03 reviews: about 1.7k–2.9k input and 2.6k–2.75k output tokens) |
 | Expected actual, 6 slots | about $0.005–0.015 **[E]** |
 | Gate 4 projection | 20 × about $0.01 ≈ $0.20, under $1.00 **[E]**; recomputed on stack E |
+
+## Revalidate on the final stack X
+
+Values measured on another stack, or on an earlier day, do not carry over.
+Before Gate 3 authorization, Phase 0 on X must show:
+
+| # | Item | How (operator guide, Gate 3) | Expected |
+| --- | --- | --- | --- |
+| R1 | Exact routing slug | the model page's copy button | one slug, frozen for X |
+| R2 | Strict structured-output support | step 2 endpoint check | `structured_outputs` advertised, status 0, one endpoint for a full slug |
+| R3 | Live endpoint prices and limits | step 2 settings check | X's frozen prices equal the live ones; 16,000 ≤ maximum completion; bound + cap within context |
+| R4 | Key usage and remaining limit | Gate 2 checklist, `GET /api/v1/key` | usage 0 (or the recorded total), limit 2, `limit_remaining` covers $0.15 |
+| R5 | Four free previews | step 3 | all four `ok`, at the $0.01 reservation and the 16,000 cap |
+| R6 | Reservation | step 3 check | 1.2 × the largest worst case ≤ $0.01 |
+| R7 | Prompt fingerprints | step 3 previews | non-Skill fingerprint equal across conditions per experiment; `without` = empty-list Skill fingerprint, `with` a real one |
+| R8 | Fixture identity | `check` (§3) | PRs #501 and #502 only, fresh intents, frozen diff hashes; no PR #3 |
+| R9 | Isolation | `check` (§3) | disposable database, loopback non-development port, empty per-stack clone directory, dedicated key file |
+| R10 | No spending capability | `ls ~/.devdigest/hw2-experiments/$ID/` | no `capability.json` or `capability.token` before authorization |
 
 ## Per-slot checks
 
