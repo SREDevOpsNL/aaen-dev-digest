@@ -459,6 +459,14 @@ EOF
    ([Gate 3 plan](HW2-gate3-plan.md#per-slot-checks)). Stop at the first
    operational stop.
 
+   If a slot fails with a provider error:
+   - read the sanitized `errorDetail` of its attempt. The runner's failure
+     line prints its origin, provider, `error_type`, `provider_code`,
+     `retry-after` and request id;
+   - never send a request to diagnose it, and never retry the slot id;
+   - remember that an endpoint `status` of 0 does not mean the provider has
+     capacity.
+
 ```bash
 pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment 18 --condition with --count 1 --reservation "$X_RESERVATION"
 ```

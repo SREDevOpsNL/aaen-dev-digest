@@ -1,4 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -11,6 +13,7 @@ import type {
   StructuredRequest,
   StructuredResult,
 } from '@devdigest/shared';
+import { OpenRouterProvider } from '@devdigest/reviewer-core';
 import { buildApp } from '../src/app.js';
 import { MockGitClient, MockGitHubClient } from '../src/adapters/mocks.js';
 import { seed } from '../src/db/seed.js';
@@ -83,6 +86,7 @@ class FakeExperimentProvider implements LLMProvider {
       router: { selected: [{ provider: 'DeepInfra', model: MODEL }], attempt: 1, attemptsCount: 1, requested: MODEL, strategy: 'direct' },
       generation: null,
       routerMetadataRaw: null,
+      errorDetail: null,
     };
     req.onAttempt?.(attempt);
     if (this.mode === 'fail-after-dispatch') throw new Error('socket hang up');
@@ -603,5 +607,103 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     expect(notDisposable.statusCode).toBe(422);
     expect(notDisposable.json().error.message).toMatch(/holds other repositories/);
     await pg.handle.db.delete(t.repos).where(and(eq(t.repos.workspaceId, workspaceId), eq(t.repos.fullName, 'someone/real')));
+  });
+
+  it('a provider 429 through the real provider, SDK and extractor: one request, sanitized detail persisted, the key nowhere', async () => {
+    // A loopback stand-in for OpenRouter: endpoint metadata for the preflight, and a 429 for the one generation.
+    const KEY = 'sk-or-v1-itest0123456789abcdef0123456789';
+    const chats: Array<{ authorization: string | undefined }> = [];
+    const server: Server = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        if (req.method === 'GET' && req.url === `/v1/models/${MODEL}/endpoints`) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ data: { endpoints: [{ provider_name: 'DeepInfra', tag: 'deepinfra', quantization: 'fp8', context_length: 128_000, max_completion_tokens: 16_384, pricing: { prompt: '0.00000014', completion: '0.00000028', request: '0' } }] } }));
+          return;
+        }
+        if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+          chats.push({ authorization: req.headers.authorization });
+          res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '20', 'x-ratelimit-remaining': '0', 'x-request-id': 'req_itest_1', 'set-cookie': 'session=itestsecret' });
+          // No `message`: the SDK then builds its error message from the whole body, echoed credential included.
+          res.end(JSON.stringify({ error: { code: 429, metadata: { error_type: 'rate_limit_exceeded', provider_code: 'rate_limited', provider_name: 'DeepInfra', raw: `upstream saw ${req.headers.authorization}` } } }));
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const real = await buildApp({
+      config: loadConfig({
+        ...process.env,
+        NODE_ENV: 'test',
+        DEVDIGEST_CLONE_DIR: cloneDir,
+        ...EXPERIMENT_ENV,
+        DEVDIGEST_EXPERIMENT_CAPABILITY_PATH: join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1', 'capability.json'),
+      } as NodeJS.ProcessEnv),
+      db: pg.handle.db,
+      overrides: {
+        git: new MockGitClient({ diff: '' }),
+        github: new MockGitHubClient(),
+        // maxRetries 2 on the client: the experiment path must still send exactly one request.
+        llm: { openrouter: new OpenRouterProvider(KEY, { baseURL: `http://127.0.0.1:${port}/v1`, maxRetries: 2 }) },
+      },
+    });
+    try {
+      const slotId = nextSlot();
+      const response = await real.inject({
+        method: 'POST',
+        url: '/experiments/runs',
+        headers: { 'x-hw2-capability': token },
+        payload: {
+          pr_id: pr502, agent_id: apiAgent, slot_id: slotId, experiment: '18', condition: 'without', phase: 'exploration',
+          manifest_fingerprint: 'a'.repeat(64), reservation_usd: 0.01, expected_diff_sha256: await fixtureDiffSha(502), expected_non_skill_fingerprint: null,
+        },
+      });
+      expect(response.statusCode).toBe(202);
+      const runId = response.json().run_id as string;
+      const { run, trace } = await vi.waitFor(
+        async () => {
+          const [row] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, runId));
+          const tr = await real.inject({ url: `/runs/${runId}/trace` });
+          const body = tr.statusCode === 200 ? tr.json() : null;
+          if (!row || row.status === 'running' || !body?.experiment || body.experiment.dispatch_state === 'dispatching') throw new Error('not settled');
+          return { run: row, trace: body };
+        },
+        { timeout: 15_000, interval: 100 },
+      );
+      expect(chats).toHaveLength(1); // one generation request, no SDK retry
+      expect(chats[0]!.authorization).toBe(`Bearer ${KEY}`);
+      expect(run).toMatchObject({ status: 'failed', costUsd: null });
+      expect(run.error).toMatch(/^429 /);
+      expect(trace.experiment).toMatchObject({ dispatch_state: 'failed', usage_known: false });
+      expect(trace.experiment.attempts).toHaveLength(1);
+      expect(trace.experiment.attempts[0]).toMatchObject({
+        dispatch: 'dispatched',
+        outcome: 'http_error',
+        httpStatus: 429,
+        errorDetail: {
+          origin: 'upstream_provider',
+          code: 429,
+          errorType: 'rate_limit_exceeded',
+          providerCode: 'rate_limited',
+          providerName: 'DeepInfra',
+          upstreamRawPresent: true,
+          requestId: 'req_itest_1',
+          retryAfter: '20',
+          rateLimit: { 'x-ratelimit-remaining': '0' },
+        },
+      });
+      const slot = (await real.inject({ url: `/experiments/slots/${slotId}` })).json();
+      // Every persisted or served form of the failure: run row (error), trace (log, attempts, refusal reason), slot lookup.
+      for (const serialized of [JSON.stringify(run), JSON.stringify(trace), JSON.stringify(slot)]) {
+        for (const leaked of [KEY, 'itestsecret', 'upstream saw']) expect(serialized).not.toContain(leaked);
+      }
+      expect(trace.log.some((line: { msg: string }) => /Run failed: 429 /.test(line.msg))).toBe(true);
+    } finally {
+      await real.close();
+      await new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
+    }
   });
 });

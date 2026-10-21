@@ -21,7 +21,7 @@ import { evaluateSlot, fingerprintsAgree, type FrozenExpectations } from '../src
 import { identityProblems, type StackIdentity } from '../src/experiments/hw2/identity.js';
 import { Ledger } from '../src/experiments/hw2/ledger.js';
 import { detection, experimentOutcome, matchesRule } from '../src/experiments/hw2/rules.js';
-import { reconcile, runSchedule, runSlot, type RunnerDeps, type SlotRun } from '../src/experiments/hw2/runner.js';
+import { describeErrorDetail, reconcile, runSchedule, runSlot, type RunnerDeps, type SlotRun } from '../src/experiments/hw2/runner.js';
 import { buildSchedule } from '../src/experiments/hw2/schedule.js';
 import { canonicalJson, capabilityProblem, sha256 } from '../src/modules/_shared/experiment.js';
 import { readFileSync, statSync } from 'node:fs';
@@ -346,6 +346,27 @@ describe('runner orchestration (fake API, no network)', () => {
     expect(results.map((r) => r.state)).toEqual(['completed', 'refused']);
     expect(stopped).toMatch(/exploration budget/);
     expect(api.calls.filter((c) => c.path === '/experiments/runs')).toHaveLength(1);
+  });
+
+  it('a failed slot charges its reservation, is never retried, and the log line carries the sanitized diagnosis', async () => {
+    const errorDetail = {
+      origin: 'upstream_provider', code: 429, message: 'Provider returned error', errorType: 'rate_limit_exceeded',
+      providerCode: 'rate_limited', providerName: 'DeepInfra', limitSource: null, upstreamRawPresent: true,
+      requestId: 'req_1', retryAfter: '20', rateLimit: {}, redacted: false,
+    };
+    api.settle = (slotId, runId) => ({
+      runs: [{ run_id: runId, status: 'failed', cost_usd: null, experiment: { slot_id: slotId, dispatch_state: 'failed', usage_known: false, refusal_reason: '429 Provider returned error', attempts: [{ outcome: 'http_error', errorDetail }] } }],
+    });
+    logs.length = 0;
+    const { results, stopped } = await runSchedule(deps, [slotRun('x-18-without-1', 'exploration', 0.01)]);
+    expect(results).toMatchObject([{ state: 'failed', costUsd: null, infraFailure: true }]);
+    expect(stopped).toBeNull();
+    expect(spent(ledger.slots().values(), 'exploration')).toBeCloseTo(0.01); // unknown cost: the full reservation
+    expect(api.calls.filter((c) => c.path === '/experiments/runs')).toHaveLength(1);
+    expect(logs).toContain(
+      'x-18-without-1: failed — 429 Provider returned error (origin upstream_provider, provider DeepInfra, error_type rate_limit_exceeded, provider_code rate_limited, retry-after 20, request req_1)',
+    );
+    expect(describeErrorDetail(null)).toBeNull();
   });
 
   it('stops on a guard refusal in the confirmatory phase', async () => {

@@ -79,6 +79,44 @@ correction. Genuinely cross-package findings belong in
   https://openrouter.ai/docs/guides/routing/provider-selection;
   `reviewer-core/src/llm/openrouter.ts` (`experimentRequestBody`).
 
+- **2026-10-21** — An HTTP error's `message` from the OpenAI SDK (v4.104)
+  is not safe to persist. `APIError.makeMessage` uses `error.message` when it
+  is a string, but **otherwise the JSON of the whole `error` object**. On
+  OpenRouter that includes `metadata.raw`, the upstream's verbatim payload. A
+  non-JSON body becomes the message verbatim.
+  - `err.error` is the body's inner `error` object, not the body.
+  - The request id is `request_id`, read from `x-request-id`. The `requestID`
+    property exists only in SDK v5.
+  - Redacting the key was not enough: a DB-backed test showed the upstream's
+    raw text in `agent_runs.error` after the key had been redacted.
+
+  For persistence, rebuild the reason from allowlisted fields
+  (`<status> <error.message>`), and keep only typed metadata. Evidence:
+  `reviewer-core/node_modules/openai/error.js` (`APIError.makeMessage`),
+  `reviewer-core/src/llm/openrouter.ts` (`completeExperiment` catch),
+  `server/test/experiments.it.test.ts` ("a provider 429 through the real
+  provider").
+
+- **2026-10-21** — OpenRouter's observable state lags and flips, so an
+  experiment check that reads it once can be wrong. On `deepseek/deepseek-v4-flash`
+  via `deepinfra/fp8` (HW2 Gate 3, stack `hw2f-f53ed971`):
+  - **Generation lookup:** a lookup about 0.1 s after a completed request
+    returned `not_found`; the same id was found 38 s later.
+  - **Key usage:** `usage` from `GET /api/v1/key` reflected that request
+    about 100 s after completion.
+  - **Endpoint status:** `status` was 0 at 08:34 UTC, -2 from about 08:37 to
+    08:40 with 100% uptime, and 0 again by 08:59.
+  - **Status 0 is not capacity:** a request ten seconds after a status-0
+    check failed with HTTP 429 `Provider returned error`, with no generation
+    id, and key usage stayed unchanged for about 11 minutes.
+
+  Poll the lookup and the key with a bounded timeout and reconcile against the
+  previous total plus the ledger charge. Treat a 429 without a generation id
+  as unknown cost: never retry it, and read the attempt's `errorDetail`
+  instead. Evidence: `docs/plans/HW2-gate3-plan.md` (Execution log), and the
+  stack's evidence outside the repository
+  (`~/.devdigest/hw2-experiments/hw2f-f53ed971/gate3-slot1/`, `gate3-slot2/`).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
