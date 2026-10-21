@@ -229,6 +229,32 @@ correction. Repo-intel remains server-scoped;
   `l01-feature` worktree, and extracted 9 candidates once
   `DEVDIGEST_CLONE_DIR` pointed to that worktree's `server/clones`.
 
+- **2026-10-20** — On this WSL2 host, `git status` and `git add` can miss a
+  rewrite that keeps the file's size. Two facts combine:
+  - **The stat cache counts whole seconds.** The installed git 2.55 compares
+    mtime and ctime only to the second, and trusts an entry's cached stat
+    once the index is newer than the file.
+  - **The wall clock is not monotonic.** About every 5.5 s it jumps ahead
+    ~5.9 s, then back ~6.4 s some 12–16 ms later. dmesg shows thousands of
+    journald `Time jumped backwards` lines.
+
+  So an index written inside that window looks newer than a same-size
+  rewrite made in the same second after the jump back. The rewrite then looks
+  clean. This was the flake in `hw2-source.test.ts` ("a committed
+  implementation change…"): its helper's `git add -A` staged nothing, and
+  `git commit` threw `nothing to commit`. A replay of that sequence failed in
+  23–32 of 18,000 iterations. It also let the experiment guards accept
+  uncommitted same-size edits. Do not trust `git status` alone where a
+  guarantee is needed: re-hash the committed files against HEAD
+  (`ls-tree -z` + `hash-object --stdin-paths`). In a test, stage by content
+  with `git read-tree --empty` before `git add -A`. Do not use sleeps or
+  retries. Evidence: `server/src/experiments/hw2/source.ts:37`
+  (`uncommittedChanges`), `server/test/hw2-source.test.ts:20` (`commit`), and
+  `server/test/hw2-source.test.ts:75`, which fails on the status-only guard.
+  After the fix, the replay showed 0 commit failures and 0 guard misses in
+  18,000 iterations. A shim that dates every index write into the window
+  failed the old test file in 24 of 30 runs and the fixed one in 0 of 30.
+
 ## Session Notes
 
 ## Open Questions
