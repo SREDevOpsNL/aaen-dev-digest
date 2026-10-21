@@ -265,12 +265,15 @@ Changing any approved value needs a new approval before a paid slot.
 
 1. **Start X** (§2) with `DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS=16000` and
    the slug's live prices from the endpoint check below. Set
-   `DEVDIGEST_EXPERIMENT_PROVIDER` to the provider's routing slug as OpenRouter
-   writes it, `provider[/variant][/region][/tier]`. Copy it from the
-   provider's copy button on the model page.
-   - A full slug such as `deepinfra/fp8` names one endpoint.
-   - A base slug such as `deepinfra` matches **every** endpoint of that
-     provider, including ones added later.
+   `DEVDIGEST_EXPERIMENT_PROVIDER` to an **endpoint-specific** routing slug,
+   `provider/variant[/region][/tier]` such as `deepinfra/fp8`, that you have
+   confirmed from the provider's copy button on the model page.
+   - A provider-wide selector such as `deepinfra` matches **every** endpoint
+     of that provider, including ones added later. Gate 3 never uses one, and
+     the checks below refuse it.
+   - If the copy button gives no endpoint-specific slug, or a slug that does
+     not match exactly one live endpoint, stop: that is a blocker that needs a
+     decision, not a reason to fall back to a broader selector.
 
    In the runner terminal, set the §3 variables for X and run its checks. Then
    set the approved values:
@@ -279,29 +282,31 @@ Changing any approved value needs a new approval before a paid slot.
 X_RESERVATION=0.01; X_CAP=16000   # APPROVED Gate 3 plan values: USD reserved per slot, output cap in tokens
 ```
 
-2. **Phase 0, free: the provider's endpoint.** It must exist for the slug (one
-   endpoint for a full slug), advertise `structured_outputs` (the request
+2. **Phase 0, free: the provider's endpoint.** The slug must be
+   endpoint-specific and match exactly one live endpoint, which must advertise
+   `structured_outputs` (the request
    requires every parameter it sends, see
    [One request](#one-request)) and be up. This reads OpenRouter's public
    model metadata; no key is sent.
 
 ```bash
-SLUG=deepinfra/fp8   # EXAMPLE: the routing slug X was started with
+SLUG=   # required: the endpoint-specific slug you confirmed from the copy button and started X with, e.g. deepinfra/fp8
 ```
 
 ```bash
 python3 -I - "$SLUG" <<'EOF'
 import json, sys, urllib.request
 slug = sys.argv[1]
+if not slug:
+    sys.exit("FAILED: SLUG is not set; confirm the endpoint-specific slug from the model page's copy button")
+if "/" not in slug:
+    sys.exit(f"FAILED: {slug!r} is a provider-wide selector; Gate 3 needs a confirmed endpoint-specific slug. BLOCKER: request a decision")
 request = urllib.request.Request("https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-flash/endpoints", headers={"User-Agent": "devdigest-hw2-phase0"})
 endpoints = json.load(urllib.request.urlopen(request, timeout=30))["data"]["endpoints"]
-base = slug.split("/")[0]
-matching = [e for e in endpoints if e.get("tag") == slug or (slug == base and (e.get("tag") or "").split("/")[0] == base)]
+matching = [e for e in endpoints if e.get("tag") == slug]
 problems = []
-if not matching:
-    problems.append(f"no endpoint matches {slug}")
-if slug != base and len(matching) != 1:
-    problems.append(f"{len(matching)} endpoints match the full slug {slug}")
+if len(matching) != 1:
+    problems.append(f"{len(matching)} live endpoints match {slug}, not exactly 1. BLOCKER: request a decision")
 for e in matching:
     if "structured_outputs" not in (e.get("supported_parameters") or []):
         problems.append(f"{e.get('tag')} does not advertise structured_outputs")
@@ -331,6 +336,8 @@ try:
     identity = json.load(urllib.request.urlopen(f"{api}/experiments/identity", timeout=30))
 except (OSError, ValueError) as err:
     sys.exit(f"FAILED: cannot read {api}/experiments/identity: {err}")
+if "/" not in slug:
+    problems.append(f"SLUG={slug!r} is not an endpoint-specific slug")
 if identity.get("provider") != slug:
     problems.append(f"X routes to {identity.get('provider')!r}, not {slug!r}")
 if identity.get("model") != "deepseek/deepseek-v4-flash":
@@ -341,10 +348,9 @@ if not identity.get("openrouter_key_configured"):
     problems.append("X has no OpenRouter key (start it after the dedicated key file exists)")
 request = urllib.request.Request("https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-flash/endpoints", headers={"User-Agent": "devdigest-hw2-phase0"})
 endpoints = json.load(urllib.request.urlopen(request, timeout=30))["data"]["endpoints"]
-base = slug.split("/")[0]
-matching = [e for e in endpoints if e.get("tag") == slug or (slug == base and (e.get("tag") or "").split("/")[0] == base)]
-if not matching:
-    problems.append(f"no endpoint matches {slug}")
+matching = [e for e in endpoints if e.get("tag") == slug]
+if len(matching) != 1:
+    problems.append(f"{len(matching)} live endpoints match {slug}, not exactly 1")
 prices = identity.get("prices") or {}
 for e in matching:
     live = e.get("pricing") or {}
@@ -365,9 +371,17 @@ EOF
    returns nonzero on any mismatch:
    - links exactly what a slot of that condition links (the target skill, or
      none);
-   - checks the links and the Skill fingerprint;
+   - checks the links, and that the Skill fingerprint is the target skill's
+     own (recomputed from its current body) or that of no Skills;
    - prints the input bound and the worst case;
    - always restores the original links.
+
+   First prove that X holds no spending capability. The previews are free only
+   while neither file exists:
+
+```bash
+CAPDIR="$HOME/.devdigest/hw2-experiments/$ID"; if [ ! -d "$CAPDIR" ] || [ ! -x "$CAPDIR" ]; then echo "FAILED: $CAPDIR is not a readable stack directory (check ID)"; false; elif [ -e "$CAPDIR/capability.json" ] || [ -L "$CAPDIR/capability.json" ] || [ -e "$CAPDIR/capability.token" ] || [ -L "$CAPDIR/capability.token" ]; then echo "FAILED: a spending capability exists for $ID before Phase 0; stop and investigate"; ls -l "$CAPDIR"/capability.*; false; else echo "no spending capability for $ID"; fi
+```
 
    Each preview runs at the approved reservation and saves its result into a
    new directory, so an older preview can never be counted:
@@ -392,39 +406,19 @@ pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 17 -
 pnpm exec tsx src/experiments/hw2/cli.ts preview "${STACK[@]}" --experiment 17 --condition without --reservation "$X_RESERVATION" > "$PV/17-without.json"; status=$?; cat "$PV/17-without.json"; [ "$status" -eq 0 ] || { echo "FAILED: preview 17 / without"; false; }
 ```
 
-   The approved reservation must cover 1.2 × the largest worst case. If it
-   does not, stop: raising the reservation needs a new approval.
+   Then check the four previews together. `phase0-check` fails unless:
+   - each preview is `ok`, at the approved reservation and output cap, for its
+     own experiment and condition, with exactly its condition's links;
+   - each Skill fingerprint equals the one recomputed from the stack's current
+     target skill (`with`) or from no Skills (`without`);
+   - within each experiment, the non-Skill fingerprint is the same for `with`
+     and `without`;
+   - the reservation covers 1.2 × the largest worst case.
+
+   If it fails, stop: raising the reservation needs a new approval.
 
 ```bash
-python3 -I - "$PV" "$X_RESERVATION" "$X_CAP" <<'EOF'
-import json, sys
-pv, reservation, cap = sys.argv[1], float(sys.argv[2]), int(sys.argv[3])
-problems, worst = [], []
-if sys.argv[2] != "0.01" or cap != 16000:
-    problems.append(f"X_RESERVATION={sys.argv[2]!r} and X_CAP={cap} are not the approved 0.01 and 16000")
-for pair in ("18-with", "18-without", "17-with", "17-without"):
-    try:
-        p = json.load(open(f"{pv}/{pair}.json"))
-    except (OSError, ValueError) as err:
-        problems.append(f"{pair}: {err}")
-        continue
-    if p.get("ok") is not True:
-        problems.append(f"{pair}: not ok: {p.get('problems')}")
-    if p.get("reservation_usd") != reservation:
-        problems.append(f"{pair}: previewed at reservation {p.get('reservation_usd')}, not {reservation}")
-    if p.get("output_cap") != cap:
-        problems.append(f"{pair}: output cap {p.get('output_cap')}, not {cap}")
-    if not isinstance(p.get("worst_case_usd"), (int, float)):
-        problems.append(f"{pair}: no worst case")
-    else:
-        worst.append(p["worst_case_usd"])
-    print(f"{pair}: skills {p.get('linked_skills')}, input bound {p.get('input_upper_bound')}, worst case ${p.get('worst_case_usd')}")
-if worst and 1.2 * max(worst) > reservation:
-    problems.append(f"1.2 x the largest worst case (${1.2 * max(worst):.6f}) exceeds the approved reservation ${reservation}")
-if problems:
-    sys.exit("FAILED:\n" + "\n".join(problems))
-print(f"all four previews pass; 1.2 x the largest worst case is ${1.2 * max(worst):.6f}, within ${reservation}")
-EOF
+if [ "$X_RESERVATION" = 0.01 ] && [ "$X_CAP" = 16000 ]; then pnpm exec tsx src/experiments/hw2/cli.ts phase0-check "${STACK[@]}" --dir "$PV" --reservation "$X_RESERVATION" --cap "$X_CAP"; else echo "FAILED: X_RESERVATION=$X_RESERVATION and X_CAP=$X_CAP are not the approved 0.01 and 16000"; false; fi
 ```
 
 4. **Authorize.** Only after Gate 3 is explicitly authorized, create the

@@ -158,12 +158,21 @@ async function previewFingerprints(stack: Stack, reservationUsd: number): Promis
 /** The Skill fingerprint of a prompt with no Skills (`requestFingerprints` hashes the empty list). */
 export const EMPTY_SKILL_FINGERPRINT = sha256(canonicalJson([]));
 
+/**
+ * The Skill fingerprint a slot of `condition` must carry: the target skill's
+ * prompt block alone, or no Skills. The same value the report expects.
+ */
+export function expectedSkillFingerprint(condition: 'with' | 'without', target: { name: string; body: string }): string {
+  return sha256(canonicalJson(condition === 'with' ? [toSkillPromptBlock(target)] : []));
+}
+
 export interface ConditionPreview {
   ok: boolean;
   problems: string[];
   experiment: string;
   condition: 'with' | 'without';
   reviewer: string;
+  target_skill: string;
   linked_skills: string[];
   refusal_reason: string | null;
   input_upper_bound: number | null;
@@ -175,6 +184,7 @@ export interface ConditionPreview {
   reservation_usd: number;
   non_skill_fingerprint: string | null;
   skill_fingerprint: string | null;
+  expected_skill_fingerprint: string;
 }
 
 /**
@@ -235,8 +245,10 @@ export async function conditionPreview(
     if (linked.join(',') !== intended.join(',')) {
       problems.push(`linked skills are [${linked.map(nameOf).join(', ')}], expected [${intended.map(nameOf).join(', ')}]`);
     }
-    if (condition === 'without' && skillFingerprint !== EMPTY_SKILL_FINGERPRINT) problems.push('a without preview carried a Skill');
-    if (condition === 'with' && (!skillFingerprint || skillFingerprint === EMPTY_SKILL_FINGERPRINT)) problems.push('a with preview carried no Skill');
+    const expectedSkill = expectedSkillFingerprint(condition, target);
+    if (skillFingerprint !== expectedSkill) {
+      problems.push(condition === 'without' ? 'a without preview carried a Skill' : `the Skill fingerprint is not that of ${target.name} alone`);
+    }
     const flight = preview.block.preflight;
     return {
       ok: problems.length === 0,
@@ -244,6 +256,7 @@ export async function conditionPreview(
       experiment: args.experiment,
       condition,
       reviewer: fixture.reviewer,
+      target_skill: target.name,
       linked_skills: linked.map(nameOf),
       refusal_reason: preview.reason,
       input_upper_bound: flight?.input_upper_bound ?? null,
@@ -255,6 +268,7 @@ export async function conditionPreview(
       reservation_usd: args.reservationUsd,
       non_skill_fingerprint: preview.block.non_skill_fingerprint,
       skill_fingerprint: skillFingerprint,
+      expected_skill_fingerprint: expectedSkill,
     };
   } finally {
     await api.post(`/agents/${agent.id}/skills`, { skill_ids: original });
@@ -262,6 +276,72 @@ export async function conditionPreview(
     if (restored.join(',') !== original.join(',')) {
       throw new Error(`Could not restore ${fixture.reviewer}'s links: now [${restored.map(nameOf).join(', ')}]`);
     }
+  }
+}
+
+/** The four Phase 0 previews, by saved file name (`<experiment>-<condition>.json`). */
+export const PHASE0_PAIRS = ['18-with', '18-without', '17-with', '17-without'] as const;
+
+const FINGERPRINT = /^[0-9a-f]{64}$/;
+
+/**
+ * Phase 0 over the four saved condition previews. Each must be ok at the
+ * approved reservation and output cap, link exactly what its condition links,
+ * and carry the Skill fingerprint recomputed here from the current target
+ * skill (never taken from the preview). Within each experiment the non-Skill
+ * fingerprint must be equal across `with` and `without`. The reservation must
+ * cover 1.2 × the largest worst case. Returns the problems; empty means pass.
+ */
+export function phase0Problems(
+  previews: Partial<Record<string, ConditionPreview>>,
+  expected: { reservationUsd: number; outputCap: number; targets: Partial<Record<string, { name: string; body: string }>> },
+): string[] {
+  const problems: string[] = [];
+  const worst: number[] = [];
+  for (const pair of PHASE0_PAIRS) {
+    const [experiment, condition] = pair.split('-') as [string, 'with' | 'without'];
+    const fixture = fixtureFor(experiment);
+    const p = previews[pair];
+    if (!p) {
+      problems.push(`${pair}: no saved preview`);
+      continue;
+    }
+    if (p.experiment !== experiment || p.condition !== condition) problems.push(`${pair}: holds the preview of ${p.experiment} / ${p.condition}`);
+    if (p.ok !== true || (p.problems ?? []).length > 0) problems.push(`${pair}: not ok: ${(p.problems ?? []).join('; ') || p.refusal_reason}`);
+    if (p.reservation_usd !== expected.reservationUsd) problems.push(`${pair}: previewed at reservation ${p.reservation_usd}, not ${expected.reservationUsd}`);
+    if (p.output_cap !== expected.outputCap) problems.push(`${pair}: output cap ${p.output_cap}, not ${expected.outputCap}`);
+    if (p.reviewer !== fixture.reviewer || p.target_skill !== fixture.targetSkill) {
+      problems.push(`${pair}: reviewer ${p.reviewer} / target ${p.target_skill}, expected ${fixture.reviewer} / ${fixture.targetSkill}`);
+    }
+    const links = condition === 'with' ? [fixture.targetSkill] : [];
+    if (JSON.stringify(p.linked_skills) !== JSON.stringify(links)) problems.push(`${pair}: linked skills ${JSON.stringify(p.linked_skills)}, expected ${JSON.stringify(links)}`);
+    const target = expected.targets[experiment];
+    if (!target || target.name !== fixture.targetSkill) problems.push(`${pair}: target skill ${fixture.targetSkill} not found on the stack`);
+    else if (p.skill_fingerprint !== expectedSkillFingerprint(condition, target)) {
+      problems.push(`${pair}: Skill fingerprint ${p.skill_fingerprint} is not the expected ${condition === 'with' ? `${target.name} alone` : 'no Skills'}`);
+    }
+    if (!FINGERPRINT.test(p.non_skill_fingerprint ?? '')) problems.push(`${pair}: no non-Skill fingerprint`);
+    if (typeof p.worst_case_usd === 'number' && p.worst_case_usd > 0) worst.push(p.worst_case_usd);
+    else problems.push(`${pair}: no worst case`);
+  }
+  for (const experiment of new Set(PHASE0_PAIRS.map((pair) => pair.split('-')[0]!))) {
+    const withP = previews[`${experiment}-with`];
+    const withoutP = previews[`${experiment}-without`];
+    if (withP && withoutP && withP.non_skill_fingerprint !== withoutP.non_skill_fingerprint) {
+      problems.push(`experiment ${experiment}: non-Skill fingerprints differ between with (${withP.non_skill_fingerprint}) and without (${withoutP.non_skill_fingerprint})`);
+    }
+  }
+  if (worst.length > 0 && 1.2 * Math.max(...worst) > expected.reservationUsd + 1e-12) {
+    problems.push(`1.2 × the largest worst case ($${(1.2 * Math.max(...worst)).toFixed(6)}) exceeds the reservation $${expected.reservationUsd}`);
+  }
+  return problems;
+}
+
+function readPreview(file: string): ConditionPreview | undefined {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as ConditionPreview;
+  } catch {
+    return undefined;
   }
 }
 
@@ -334,6 +414,24 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       });
       log(JSON.stringify(result, null, 2));
       if (!result.ok) throw new Error(`Preview does not reflect its condition or was refused: ${result.problems.join('; ')}`);
+      return;
+    }
+    case 'phase0-check': {
+      const stack = await verifiedStack(flags);
+      const dir = need(flags, 'dir');
+      const { skills } = await lookupIds(stack.api);
+      const targets = Object.fromEntries(
+        Object.keys(EXPERIMENT_FIXTURE).map((experiment) => [experiment, skills.find((s) => s.name === fixtureFor(experiment).targetSkill)]),
+      );
+      const previews = Object.fromEntries(PHASE0_PAIRS.map((pair) => [pair, readPreview(join(dir, `${pair}.json`))]));
+      const reservationUsd = Number(need(flags, 'reservation'));
+      const problems = phase0Problems(previews, { reservationUsd, outputCap: Number(need(flags, 'cap')), targets });
+      for (const pair of PHASE0_PAIRS) {
+        const p = previews[pair];
+        log(`${pair}: skills [${p?.linked_skills?.join(', ') ?? '?'}], input bound ${p?.input_upper_bound ?? '?'}, worst case $${p?.worst_case_usd ?? '?'}, non-Skill ${p?.non_skill_fingerprint?.slice(0, 12) ?? '?'}…`);
+      }
+      if (problems.length > 0) throw new Error(`Phase 0 previews failed:\n- ${problems.join('\n- ')}`);
+      log(`Phase 0 previews pass on ${stack.stackId}: Skill fingerprints as expected, non-Skill fingerprints equal per experiment, reservation $${reservationUsd} covers 1.2 × the worst case`);
       return;
     }
     case 'check': {
@@ -503,7 +601,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       return;
     }
     default:
-      log('commands: endpoints | check | preview | plan | manifest | authorize | reconcile | run | report (see docs/plans/HW2-experiment-operator-guide.md)');
+      log('commands: endpoints | check | preview | phase0-check | plan | manifest | authorize | reconcile | run | report (see docs/plans/HW2-experiment-operator-guide.md)');
   }
 }
 

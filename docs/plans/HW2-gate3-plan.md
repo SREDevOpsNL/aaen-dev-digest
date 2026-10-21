@@ -15,9 +15,9 @@ Facts are marked **[F]** and estimates **[E]**.
 | # | Condition | State |
 | --- | --- | --- |
 | 1 | The preparation PR (#28) is merged, with green CI: experiment 17 reviewer seeding, condition-faithful `preview`, `require_parameters` | draft, synced with `main` `58dabc5`; awaiting your merge approval |
-| 2 | Phase 0 endpoint check passes for the chosen slug (`structured_outputs`, status 0, one endpoint for a full slug) | **[F]** passes for `deepinfra/fp8` (2026-10-20); metadata unchanged 2026-10-21; rerun on X |
+| 2 | Phase 0 endpoint check passes for the confirmed endpoint-specific slug (exactly one live endpoint, `structured_outputs`, status 0) | **[F]** passes for `deepinfra/fp8` (2026-10-20); metadata unchanged 2026-10-21; rerun on X |
 | 3 | Phase 0 previews pass for all four experiment/condition pairs | **[F]** pass on `hw2f-14e8ba66` (below); rerun on X |
-| 4 | Routing slug decided: copy it from the model page's provider copy button | pending your confirmation |
+| 4 | Endpoint-specific routing slug confirmed from the model page's copy button (no provider-wide fallback) | pending your confirmation; without it, blocker |
 | 5 | Key `limit_remaining` is 2, usage 0 | **[F]** 2 / 0 after the previews (2026-10-20); recheck on X |
 | 6 | Explicit Gate 3 authorization | not given |
 
@@ -49,11 +49,18 @@ tags, `structured_outputs` flags, status and prices) **[F]**:
   holds unless fresh metadata shows `structured_outputs` for it.
 - **Slug.** OpenRouter documents full slugs as
   `provider[/variant][/region][/tier]` (e.g. `deepinfra/turbo`, `baseten/fp4`).
-  - A base slug (`deepinfra`) matches every endpoint of that provider.
-  - The endpoints `tag` is not documented as a routing value.
-  - Use the slug copied from the model page. If it is `deepinfra/fp8`, freeze
-    that. Otherwise use `deepinfra`, which Phase 0 shows matches exactly one
-    endpoint today.
+  - Gate 3 requires an **endpoint-specific** slug that you confirm from the
+    model page's copy button, expected to be `deepinfra/fp8`. It must match
+    exactly one live endpoint.
+  - A provider-wide selector (`deepinfra`) matches every endpoint of that
+    provider, including ones added later, so it is never used and the checks
+    refuse it.
+  - The endpoints `tag` is not documented as a routing value. Phase 0
+    compares the confirmed slug with it, so a slug that matches no tag is a
+    blocker too.
+  - If the copy button shows no endpoint-specific slug, or the confirmed slug
+    does not match exactly one live endpoint, that is a **blocker**: stop and
+    decide (for example StreamLake's endpoint-specific slug) before Phase 0.
 
 ## Real free-preview figures [F]
 
@@ -127,16 +134,16 @@ Before Gate 3 authorization, Phase 0 on X must show:
 
 | # | Item | How (operator guide, Gate 3) | Expected |
 | --- | --- | --- | --- |
-| R1 | Exact routing slug | the model page's copy button | one slug, frozen for X |
-| R2 | Strict structured-output support | step 2 endpoint check | `structured_outputs` advertised, status 0, one endpoint for a full slug |
+| R1 | Exact routing slug | the model page's copy button | one endpoint-specific slug, confirmed by you and frozen for X; a provider-wide selector is refused |
+| R2 | Strict structured-output support | step 2 endpoint check | exactly one live endpoint for the slug, `structured_outputs` advertised, status 0 |
 | R3 | Live endpoint prices and limits | step 2 settings check | X's frozen prices equal the live ones; 16,000 ≤ maximum completion; bound + cap within context |
 | R4 | Key usage and remaining limit | Gate 2 checklist, `GET /api/v1/key` | usage 0 (or the recorded total), limit 2, `limit_remaining` covers $0.15 |
-| R5 | Four free previews | step 3 | all four `ok`, at the $0.01 reservation and the 16,000 cap |
+| R5 | Four free previews | step 3, `phase0-check` | all four `ok`, at the $0.01 reservation and the 16,000 cap, each with exactly its condition's links |
 | R6 | Reservation | step 3 check | 1.2 × the largest worst case ≤ $0.01 |
-| R7 | Prompt fingerprints | step 3 previews | non-Skill fingerprint equal across conditions per experiment; `without` = empty-list Skill fingerprint, `with` a real one |
+| R7 | Prompt fingerprints | step 3, `phase0-check` | non-Skill fingerprint equal across `with` and `without` per experiment; Skill fingerprint equal to the one recomputed from the current target skill (`with`) or from no Skills (`without`) |
 | R8 | Fixture identity | `check` (§3) | PRs #501 and #502 only, fresh intents, frozen diff hashes; no PR #3 |
 | R9 | Isolation | `check` (§3) | disposable database, loopback non-development port, empty per-stack clone directory, dedicated key file |
-| R10 | No spending capability | `ls ~/.devdigest/hw2-experiments/$ID/` | no `capability.json` or `capability.token` before authorization |
+| R10 | No spending capability | step 3, capability check (fails closed) | neither `capability.json` nor `capability.token` exists for X before the previews |
 
 ## Per-slot checks
 

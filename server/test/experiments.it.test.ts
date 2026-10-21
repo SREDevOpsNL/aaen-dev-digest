@@ -20,7 +20,7 @@ import { loadConfig } from '../src/platform/config.js';
 import { diffFromPrFiles } from '../src/modules/reviews/diff-loader.js';
 import type { ReviewRepository } from '../src/modules/reviews/repository.js';
 import { canonicalJson, sha256 } from '../src/modules/_shared/experiment.js';
-import { writeCapability } from '../src/experiments/hw2/cli.js';
+import { expectedSkillFingerprint, writeCapability } from '../src/experiments/hw2/cli.js';
 import { dockerAvailable, startPg, type PgFixture } from './helpers/pg.js';
 
 const hasDocker = await dockerAvailable();
@@ -435,6 +435,10 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
       const empty = sha256(canonicalJson([]));
       expect(labelledWithButUnlinked.skill_fingerprint).toBe(empty); // the label "with" added no Skill
       expect(labelledWithoutButLinked.skill_fingerprint).not.toBe(empty); // the label "without" removed none
+      // The runner's Phase 0 check recomputes this value from the target skill.
+      const [skill] = await pg.handle.db.select().from(t.skills).where(eq(t.skills.id, target));
+      expect(labelledWithoutButLinked.skill_fingerprint).toBe(expectedSkillFingerprint('with', skill!));
+      expect(labelledWithButUnlinked.skill_fingerprint).toBe(expectedSkillFingerprint('without', skill!));
       expect(labelledWithoutButLinked.preflight.input_upper_bound).toBeGreaterThan(labelledWithButUnlinked.preflight.input_upper_bound);
       expect(labelledWithButUnlinked.non_skill_fingerprint).toBe(labelledWithoutButLinked.non_skill_fingerprint);
     } finally {

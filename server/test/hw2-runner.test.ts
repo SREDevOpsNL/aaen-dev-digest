@@ -4,7 +4,18 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApiError, ExperimentApi } from '../src/experiments/hw2/api.js';
 import { CAPS, charge, fits, scheduleFits, spent } from '../src/experiments/hw2/budget.js';
-import { EMPTY_SKILL_FINGERPRINT, assertPaidAuthorization, conditionPreview, parseArgs, writeCapability } from '../src/experiments/hw2/cli.js';
+import {
+  EMPTY_SKILL_FINGERPRINT,
+  PHASE0_PAIRS,
+  assertPaidAuthorization,
+  conditionPreview,
+  expectedSkillFingerprint,
+  parseArgs,
+  phase0Problems,
+  writeCapability,
+  type ConditionPreview,
+} from '../src/experiments/hw2/cli.js';
+import { toSkillPromptBlock } from '../src/modules/reviews/helpers.js';
 import { buildReport, renderReport, type SlotRunData } from '../src/experiments/hw2/report.js';
 import { evaluateSlot, fingerprintsAgree, type FrozenExpectations } from '../src/experiments/hw2/eligibility.js';
 import { identityProblems, type StackIdentity } from '../src/experiments/hw2/identity.js';
@@ -561,7 +572,12 @@ class FakePreviewApi extends ExperimentApi {
     ['api', ['s-break']],
   ]);
   previews: Array<{ condition: string; links: string[] }> = [];
-  mode: 'faithful' | 'ignore-link-writes' | 'skill-always' | 'throw' = 'faithful';
+  mode: 'faithful' | 'ignore-link-writes' | 'skill-always' | 'wrong-skill' | 'throw' = 'faithful';
+  static readonly skills = [
+    { id: 's-behavior', name: 'Behavioral Coverage', body: 'b' },
+    { id: 's-edge', name: 'Edge Cases and Error Paths', body: 'e' },
+    { id: 's-break', name: 'breaking-change', body: 'k' },
+  ];
   constructor() {
     super('http://127.0.0.1:1');
   }
@@ -575,13 +591,7 @@ class FakePreviewApi extends ExperimentApi {
         { id: 'api', name: 'API Contract Reviewer', system_prompt: 'p', model: 'm', strategy: 'single-pass', repo_intel: false },
       ]);
     }
-    if (method === 'GET' && path === '/skills') {
-      return reply([
-        { id: 's-behavior', name: 'Behavioral Coverage', body: 'b' },
-        { id: 's-edge', name: 'Edge Cases and Error Paths', body: 'e' },
-        { id: 's-break', name: 'breaking-change', body: 'k' },
-      ]);
-    }
+    if (method === 'GET' && path === '/skills') return reply(FakePreviewApi.skills);
     const linksPath = /^\/agents\/([^/]+)\/skills$/.exec(path);
     if (linksPath && method === 'GET') return reply((this.links.get(linksPath[1]!) ?? []).map((id) => ({ skill_id: id })));
     if (linksPath && method === 'POST') {
@@ -595,12 +605,14 @@ class FakePreviewApi extends ExperimentApi {
       const current = this.links.get(agent_id) ?? [];
       this.previews.push({ condition, links: current });
       if (this.mode === 'throw') throw new ApiError(500, null, 'preview failed');
-      const skill = this.mode === 'skill-always' ? sha256('a forced skill') : current.length > 0 ? sha256(canonicalJson(current)) : EMPTY_SKILL_FINGERPRINT;
+      // The server hashes the linked skills' prompt blocks (requestFingerprints).
+      const blocks = (this.mode === 'wrong-skill' ? ['s-behavior'] : current).map((id) => toSkillPromptBlock(FakePreviewApi.skills.find((s) => s.id === id)!));
+      const skill = this.mode === 'skill-always' ? sha256('a forced skill') : sha256(canonicalJson(blocks));
       return reply({
         ok: true,
         reason: null,
         block: {
-          non_skill_fingerprint: 'n'.repeat(64),
+          non_skill_fingerprint: sha256(`non-Skill request of ${agent_id}`),
           skill_fingerprint: skill,
           preflight: { input_upper_bound: 9000 + 500 * current.length, output_cap: 16000, price_input_per_token: 9e-8, price_output_per_token: 1.8e-7, price_source: 'fake', worst_case_usd: 0.006 },
         },
@@ -616,7 +628,8 @@ describe('condition-faithful preview (runner `preview` command, fake API)', () =
     const result = await conditionPreview(api, { experiment: '17', condition: 'with', reservationUsd: 0.02 });
     expect(api.previews).toEqual([{ condition: 'with', links: ['s-edge'] }]);
     expect(result).toMatchObject({ ok: true, problems: [], reviewer: 'Test Quality Reviewer', linked_skills: ['Edge Cases and Error Paths'], worst_case_usd: 0.006 });
-    expect(result.skill_fingerprint).not.toBe(EMPTY_SKILL_FINGERPRINT);
+    expect(result.skill_fingerprint).toBe(expectedSkillFingerprint('with', { name: 'Edge Cases and Error Paths', body: 'e' }));
+    expect(result.skill_fingerprint).toBe(result.expected_skill_fingerprint);
     expect(api.links.get('tqr')).toEqual(['s-behavior', 's-edge']); // restored
   });
 
@@ -649,10 +662,77 @@ describe('condition-faithful preview (runner `preview` command, fake API)', () =
     expect(wrong.problems).toContain('a without preview carried a Skill');
   });
 
+  it('fails closed when a "with" preview carries a Skill, but not the target alone', async () => {
+    // Non-empty is not enough: the fingerprint must be the target skill's block.
+    const other = new FakePreviewApi();
+    other.mode = 'wrong-skill';
+    const wrong = await conditionPreview(other, { experiment: '17', condition: 'with', reservationUsd: 0.02 });
+    expect(wrong.skill_fingerprint).not.toBe(EMPTY_SKILL_FINGERPRINT);
+    expect(wrong.ok).toBe(false);
+    expect(wrong.problems).toContain('the Skill fingerprint is not that of Edge Cases and Error Paths alone');
+
+    const forced = new FakePreviewApi();
+    forced.mode = 'skill-always';
+    const arbitrary = await conditionPreview(forced, { experiment: '18', condition: 'with', reservationUsd: 0.02 });
+    expect(arbitrary.ok).toBe(false);
+    expect(arbitrary.problems).toContain('the Skill fingerprint is not that of breaking-change alone');
+  });
+
   it('rejects an unknown condition or experiment before touching any link', async () => {
     const api = new FakePreviewApi();
     await expect(conditionPreview(api, { experiment: '17', condition: 'maybe', reservationUsd: 0.02 })).rejects.toThrow(/--condition/);
     await expect(conditionPreview(api, { experiment: '99', condition: 'with', reservationUsd: 0.02 })).rejects.toThrow(/--experiment/);
     expect(api.previews).toEqual([]);
+  });
+});
+
+describe('Phase 0 check over the four saved previews (`phase0-check`)', () => {
+  const approved = { reservationUsd: 0.01, outputCap: 16000 };
+  const targets = {
+    '17': { name: 'Edge Cases and Error Paths', body: 'e' },
+    '18': { name: 'breaking-change', body: 'k' },
+  };
+  const fourPreviews = async (): Promise<Record<string, ConditionPreview>> => {
+    const out: Record<string, ConditionPreview> = {};
+    for (const pair of PHASE0_PAIRS) {
+      const [experiment, condition] = pair.split('-') as [string, string];
+      out[pair] = await conditionPreview(new FakePreviewApi(), { experiment, condition, reservationUsd: 0.01 });
+    }
+    return out;
+  };
+
+  it('passes four faithful previews at the approved reservation and cap', async () => {
+    const previews = await fourPreviews();
+    expect(phase0Problems(previews, { ...approved, targets })).toEqual([]);
+  });
+
+  type Mutation = (previews: Record<string, ConditionPreview>) => void;
+  const otherSkill = expectedSkillFingerprint('with', { name: 'Behavioral Coverage', body: 'b' });
+  it.each<[string, Mutation, RegExp]>([
+    ['non-Skill fingerprints differ within an experiment', (p) => (p['17-without']!.non_skill_fingerprint = 'f'.repeat(64)), /experiment 17: non-Skill fingerprints differ between with/],
+    ['a with preview carries another skill', (p) => (p['17-with']!.skill_fingerprint = otherSkill), /17-with: Skill fingerprint .* is not the expected Edge Cases and Error Paths alone/],
+    ['a with preview carries an arbitrary non-empty fingerprint', (p) => (p['18-with']!.skill_fingerprint = 'a'.repeat(64)), /18-with: Skill fingerprint .* is not the expected breaking-change alone/],
+    ['a without preview carries a Skill', (p) => (p['18-without']!.skill_fingerprint = p['18-with']!.skill_fingerprint), /18-without: Skill fingerprint .* is not the expected no Skills/],
+    ['a with preview carries no Skill', (p) => (p['17-with']!.skill_fingerprint = EMPTY_SKILL_FINGERPRINT), /17-with: Skill fingerprint .* is not the expected/],
+    ['a preview is missing', (p) => delete p['17-without'], /17-without: no saved preview/],
+    ['a file holds another pair', (p) => (p['18-with'] = { ...p['17-with']! }), /18-with: holds the preview of 17 \/ with/],
+    ['the links are not the condition\'s', (p) => (p['17-with']!.linked_skills = ['Behavioral Coverage', 'Edge Cases and Error Paths']), /17-with: linked skills/],
+    ['a preview at another reservation', (p) => (p['18-with']!.reservation_usd = 0.05), /18-with: previewed at reservation 0.05, not 0.01/],
+    ['a preview at another cap', (p) => (p['17-without']!.output_cap = 4000), /17-without: output cap 4000, not 16000/],
+    ['a refused preview', (p) => Object.assign(p['18-without']!, { ok: false, problems: ['the preview was refused: x'] }), /18-without: not ok/],
+    ['no non-Skill fingerprint, even when both are equal', (p) => { p['18-with']!.non_skill_fingerprint = null; p['18-without']!.non_skill_fingerprint = null; }, /18-with: no non-Skill fingerprint/],
+    ['the worst case outgrows the reservation', (p) => (p['17-with']!.worst_case_usd = 0.009), /1\.2 × the largest worst case \(\$0\.010800\) exceeds the reservation \$0\.01/],
+  ])('fails when %s', async (_label, mutate, problem) => {
+    const previews = await fourPreviews();
+    mutate(previews);
+    const problems = phase0Problems(previews, { ...approved, targets });
+    expect(problems.join('\n')).toMatch(problem);
+  });
+
+  it('fails when the target skill is missing on the stack or its body changed', async () => {
+    const previews = await fourPreviews();
+    expect(phase0Problems(previews, { ...approved, targets: { '18': targets['18'] } }).join('\n')).toMatch(/17-with: target skill Edge Cases and Error Paths not found/);
+    const edited = { ...targets, '17': { name: 'Edge Cases and Error Paths', body: 'e, edited' } };
+    expect(phase0Problems(previews, { ...approved, targets: edited }).join('\n')).toMatch(/17-with: Skill fingerprint .* is not the expected/);
   });
 });
