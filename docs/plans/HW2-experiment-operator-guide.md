@@ -543,9 +543,11 @@ $0.01 reservation beyond X2's charge at authorization.
   admit another attempt.
 
 One attempt per authorization therefore comes from the procedure, not the
-capability: one `run --count 1` per authorization (step 8), and step 8
-revokes the capability automatically when it ends. Steps 2–8 run in **one
-shell**: step 2 defines the check that steps 7 and 8 run again.
+capability. Step 6 is a single guarded block: it authorizes, checks, runs one
+`run --count 1`, and revokes the capability on every exit after authorizing,
+including a failed check. Steps 2–6 run in **one shell**: step 2 defines the
+cross-stack check, and step 6 runs it again before authorizing and before
+dispatch.
 
 **Slot identifiers are scoped to a stack.** The runner numbers a slot from its
 stack's own ledger, and the server refuses a used slot id only within its own
@@ -569,7 +571,7 @@ X2_PLAN_MAX=0.13; X_STACK=hw2f-f53ed971; X_CHARGE_RECORDED=0.01022896   # APPROV
 
 2. **Before every X2 authorization**, check the conservative spending across X
    and X2, and compute the next capability. The block defines
-   `x2_cross_stack_check`, which steps 7 and 8 run again, and runs it once.
+   `x2_cross_stack_check`, which step 6 runs again, and runs it once.
    The check prints every slot of both stacks by its `(stack_id, slot_id)`.
    It fails when:
    - `ID` is not an X2 stack id, or the `LEDGER`, `DB` or API identity is not
@@ -682,31 +684,122 @@ EOF
 CAPDIR="$HOME/.devdigest/hw2-experiments/$ID"; if [ ! -d "$CAPDIR" ] || [ ! -x "$CAPDIR" ]; then echo "FAILED: $CAPDIR is not a readable stack directory (check ID)"; false; elif [ -e "$CAPDIR/capability.json" ] || [ -L "$CAPDIR/capability.json" ]; then echo "FAILED: an active capability exists for $ID; stop and investigate"; false; elif [ -L "$CAPDIR/capability.token" ]; then echo "FAILED: $CAPDIR/capability.token is a symlink; stop and investigate"; false; elif [ -e "$CAPDIR/capability.token" ]; then KEPT="$CAPDIR/capability.token.revoked-$(date -u +%Y%m%dT%H%M%SZ)"; if [ ! -e "$KEPT" ] && mv -n -- "$CAPDIR/capability.token" "$KEPT" && chmod 600 "$KEPT" && [ ! -e "$CAPDIR/capability.token" ]; then echo "kept the revoked token as $KEPT"; else echo "FAILED: could not keep the old capability.token"; false; fi; else echo "no capability files for $ID"; fi
 ```
 
-5. **Authorize**, only after the slot's explicit authorization, with the amount
-   it names. The block refuses if a capability already exists:
-
-```bash
-if [ -e "$HOME/.devdigest/hw2-experiments/$ID/capability.json" ] || [ -L "$HOME/.devdigest/hw2-experiments/$ID/capability.json" ]; then echo "FAILED: a capability already exists for $ID, and authorize would overwrite it: stop and investigate"; false; else pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget "$AUTHORIZED_BUDGET" --hours 12 "${STACK[@]}"; fi
-```
-
-6. **Set the authorized slot**:
+5. **Set the authorized slot, and define the preflight checks** that step 6
+   runs with the capability in place. The two functions are the step 2
+   endpoint and settings checks of the procedure above, unchanged (they need
+   its `SLUG`):
 
 ```bash
 X2_EXPERIMENT=   # required: 17 or 18, as authorized
 X2_CONDITION=    # required: with or without, as authorized
 ```
 
-7. **Immediately before the slot**, run the cross-stack check again and check:
-   - that it still sizes the next capability at the authorized amount, within
-     $0.13. A stale `X2_NEXT_BUDGET` is never used;
-   - the capability against the authorized amount, stack, phase, gate and
-     expiry;
-   - the reservation, experiment and condition.
+```bash
+x2_endpoint_check() {
+python3 -I - "$SLUG" <<'EOF'
+import json, sys, urllib.request
+slug = sys.argv[1]
+if not slug:
+    sys.exit("FAILED: SLUG is not set; confirm the endpoint-specific slug from the model page's copy button")
+if "/" not in slug:
+    sys.exit(f"FAILED: {slug!r} is a provider-wide selector; Gate 3 needs a confirmed endpoint-specific slug. BLOCKER: request a decision")
+request = urllib.request.Request("https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-flash/endpoints", headers={"User-Agent": "devdigest-hw2-phase0"})
+endpoints = json.load(urllib.request.urlopen(request, timeout=30))["data"]["endpoints"]
+matching = [e for e in endpoints if e.get("tag") == slug]
+problems = []
+if len(matching) != 1:
+    problems.append(f"{len(matching)} live endpoints match {slug}, not exactly 1. BLOCKER: request a decision")
+for e in matching:
+    if "structured_outputs" not in (e.get("supported_parameters") or []):
+        problems.append(f"{e.get('tag')} does not advertise structured_outputs")
+    if e.get("status") != 0:
+        problems.append(f"{e.get('tag')} status is {e.get('status')}")
+    print(f"{e.get('tag')}: max completion {e.get('max_completion_tokens')}, context {e.get('context_length')}, uptime 30m {e.get('uptime_last_30m')}")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print(f"{slug}: endpoint ready")
+EOF
+}
+x2_settings_check() {
+python3 -I - "$API" "$SLUG" "$X_RESERVATION" "$X_CAP" <<'EOF'
+import json, sys, urllib.request
+api, slug, reservation, cap = sys.argv[1:5]
+problems = []
+if reservation != "0.01":
+    problems.append(f"X_RESERVATION={reservation!r}: the approved Gate 3 plan reserves 0.01 per slot")
+if cap != "16000":
+    problems.append(f"X_CAP={cap!r}: the approved Gate 3 plan caps output at 16000 tokens")
+try:
+    identity = json.load(urllib.request.urlopen(f"{api}/experiments/identity", timeout=30))
+except (OSError, ValueError) as err:
+    sys.exit(f"FAILED: cannot read {api}/experiments/identity: {err}")
+if "/" not in slug:
+    problems.append(f"SLUG={slug!r} is not an endpoint-specific slug")
+if identity.get("provider") != slug:
+    problems.append(f"X routes to {identity.get('provider')!r}, not {slug!r}")
+if identity.get("model") != "deepseek/deepseek-v4-flash":
+    problems.append(f"X uses the model {identity.get('model')!r}")
+if str(identity.get("max_output_tokens")) != cap:
+    problems.append(f"X caps output at {identity.get('max_output_tokens')}, not {cap}")
+if not identity.get("openrouter_key_configured"):
+    problems.append("X has no OpenRouter key (start it after the dedicated key file exists)")
+request = urllib.request.Request("https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-flash/endpoints", headers={"User-Agent": "devdigest-hw2-phase0"})
+endpoints = json.load(urllib.request.urlopen(request, timeout=30))["data"]["endpoints"]
+matching = [e for e in endpoints if e.get("tag") == slug]
+if len(matching) != 1:
+    problems.append(f"{len(matching)} live endpoints match {slug}, not exactly 1")
+prices = identity.get("prices") or {}
+for e in matching:
+    live = e.get("pricing") or {}
+    for field, key in (("input", "prompt"), ("output", "completion")):
+        if float(live.get(key) or "nan") != prices.get(field):
+            problems.append(f"{e.get('tag')}: live {field} price {live.get(key)} differs from X's {prices.get(field)}")
+    if int(cap) > (e.get("max_completion_tokens") or 0):
+        problems.append(f"{e.get('tag')}: cap {cap} exceeds the maximum completion {e.get('max_completion_tokens')}")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print(f"X {identity.get('stack_id', '')} matches the approved Gate 3 settings on {slug}: cap {cap}, prices {prices.get('input')} / {prices.get('output')} USD per token")
+EOF
+}
+echo "slot ${X2_EXPERIMENT:-?} / ${X2_CONDITION:-?}; preflight checks defined for ${SLUG:-<SLUG not set>}"
+```
 
-   Then rerun the step 2 endpoint and settings checks.
+6. **Authorize, check, run once and revoke: one guarded block.** Run it only
+   after the slot's explicit written authorization. It uses the amount in
+   `AUTHORIZED_BUDGET` (step 3) and the slot from step 5.
+   - **Before authorizing**, it refuses if:
+     - a capability exists: it is never replaced, and is left in place for
+       investigation;
+     - an old `capability.token` was not kept (step 4);
+     - the cross-stack check, run fresh, does not equal the authorized amount.
+   - **The revocation trap is installed before `authorize` runs.** Every exit
+     after authorizing revokes the capability: normal completion, any failed
+     check or command, Ctrl-C, `TERM` or a closed terminal (`HUP`). The
+     operator never has to continue to a later step to clean up.
+   - **With the capability in place**, it checks:
+     - the capability: amount, stack, phase, gate, expiry;
+     - the reservation and the slot;
+     - the cross-stack check, run fresh again, still equal to the authorized
+       amount;
+     - the endpoint and the settings, with the step 5 functions.
+   - **Only then** it runs exactly one `run --count 1`. Nothing is retried.
+     Judge the slot from the ledger and the trace, never from the block's
+     status.
 
 ```bash
-X2_NOW=$(x2_cross_stack_check) || { echo "FAILED: cross-stack check before dispatch (run step 2 in this shell)"; false; } && python3 -I - "$HOME/.devdigest/hw2-experiments/$ID/capability.json" "$ID" "$X_RESERVATION" "$AUTHORIZED_BUDGET" "${X2_EXPERIMENT:-}" "${X2_CONDITION:-}" "$X2_NOW" "$X2_PLAN_MAX" <<'EOF'
+(
+  CAP="$HOME/.devdigest/hw2-experiments/$ID/capability.json"; OWN=
+  revoke() { if [ -L "$CAP" ]; then echo "FAILED: $CAP is a symlink; revoke it by hand and investigate"; return 1; elif [ -f "$CAP" ]; then if rm -- "$CAP" && [ ! -e "$CAP" ]; then date -u +"capability revoked %FT%TZ"; else echo "FAILED: could not revoke $CAP"; return 1; fi; else echo "no capability to revoke"; fi; }
+  finish() { status=$?; trap - EXIT INT TERM HUP; if [ -n "$OWN" ]; then revoke || status=1; fi; echo "lifecycle finished with status $status: judge any slot from the ledger and the trace"; exit "$status"; }
+  trap finish EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  if [ -e "$CAP" ] || [ -L "$CAP" ]; then echo "FAILED: a capability already exists for $ID; it is not replaced: stop and investigate"; exit 1; fi
+  if [ -e "${CAP%.json}.token" ] || [ -L "${CAP%.json}.token" ]; then echo "FAILED: an old capability.token is still in place: run step 4 first"; exit 1; fi
+  NOW=$(x2_cross_stack_check) || { echo "FAILED: cross-stack check before authorizing; nothing was authorized"; exit 1; }
+  python3 -I -c 'import re, sys; from decimal import Decimal; a, n = sys.argv[1:3]; sys.exit(0 if re.fullmatch(r"\d+(\.\d{1,8})?", a) and Decimal(a) == Decimal(n) else 1)' "${AUTHORIZED_BUDGET:-}" "$NOW" || { echo "FAILED: the authorization says ${AUTHORIZED_BUDGET:-<not set>}, the next X2 capability is $NOW; nothing was authorized"; exit 1; }
+  OWN=1   # from here on, every exit revokes
+  pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget "$AUTHORIZED_BUDGET" --hours 12 "${STACK[@]}" || { echo "FAILED: authorize"; exit 1; }
+  NOW=$(x2_cross_stack_check) || { echo "FAILED: cross-stack check before dispatch; nothing was dispatched"; exit 1; }
+  python3 -I - "$CAP" "$ID" "$X_RESERVATION" "${AUTHORIZED_BUDGET:-}" "${X2_EXPERIMENT:-}" "${X2_CONDITION:-}" "$NOW" "$X2_PLAN_MAX" <<'EOF' || { echo "nothing was dispatched"; exit 1; }
 import datetime, json, re, sys
 from decimal import Decimal
 path, stack, reservation, authorized, experiment, condition, fresh, plan_max = sys.argv[1:9]
@@ -741,58 +834,23 @@ if problems:
     sys.exit("FAILED:\n" + "\n".join(problems))
 print(f"capability: exploration, Gate 3, budget ${authorized} as authorized and as sized now, expires {cap['expires_at']}; slot {experiment} / {condition}")
 EOF
-```
-
-8. **Run exactly one slot, with automatic revocation.** The block runs in a
-   subshell:
-   - it reruns the cross-stack check, and compares it and the capability with
-     the authorized amount. It also checks the capability's stack and expiry,
-     and the slot. On any mismatch it dispatches nothing;
-   - it runs one `run --count 1`;
-   - it revokes the capability when the subshell ends: normally, on a command
-     failure, or on Ctrl-C, `TERM` or a closed terminal (`HUP`).
-
-   Nothing is retried. Judge the slot from the ledger and the trace, as on
-   stack X, never from the block's status.
-
-```bash
-(
-  revoke() { CAP="$HOME/.devdigest/hw2-experiments/$ID/capability.json"; if [ -L "$CAP" ]; then echo "FAILED: $CAP is a symlink; revoke it by hand and investigate"; return 1; elif [ -f "$CAP" ]; then if rm -- "$CAP" && [ ! -e "$CAP" ]; then date -u +"capability revoked %FT%TZ"; else echo "FAILED: could not revoke $CAP"; return 1; fi; else echo "no capability to revoke"; fi; }
-  finish() { status=$?; trap - EXIT INT TERM HUP; revoke || status=1; echo "slot block finished with status $status: judge the slot from the ledger and the trace"; exit "$status"; }
-  trap finish EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-  NOW=$(x2_cross_stack_check) || { echo "FAILED: cross-stack check immediately before dispatch; nothing was dispatched"; exit 1; }
-  python3 -I - "$NOW" "${AUTHORIZED_BUDGET:-}" "$HOME/.devdigest/hw2-experiments/$ID/capability.json" "$ID" "${X2_EXPERIMENT:-}" "${X2_CONDITION:-}" <<'EOF' || exit 1
-import datetime, json, re, sys
-from decimal import Decimal
-now, authorized, path, stack, experiment, condition = sys.argv[1:7]
-try:
-    cap = json.load(open(path))
-except (OSError, ValueError) as err:
-    sys.exit(f"FAILED: no readable capability: {err}; nothing was dispatched")
-budget = cap.get("budget_usd")
-if not re.fullmatch(r"\d+(\.\d{1,8})?", authorized) or Decimal(now) != Decimal(authorized) or cap.get("stack_id") != stack or not isinstance(budget, (int, float)) or Decimal(str(budget)) != Decimal(authorized):
-    sys.exit(f"FAILED: next X2 capability ${now}, authorized {authorized!r}, capability {budget} for {cap.get('stack_id')!r}: they must agree; nothing was dispatched")
-try:
-    expired = datetime.datetime.fromisoformat(cap["expires_at"].replace("Z", "+00:00")) <= datetime.datetime.now(datetime.timezone.utc)
-except (KeyError, ValueError):
-    expired = True
-if expired or experiment not in ("17", "18") or condition not in ("with", "without"):
-    sys.exit(f"FAILED: capability expired or unreadable expiry, or slot {experiment!r} / {condition!r} is not 17|18 / with|without; nothing was dispatched")
-EOF
+  x2_endpoint_check || { echo "FAILED: endpoint check; nothing was dispatched"; exit 1; }
+  x2_settings_check || { echo "FAILED: settings check; nothing was dispatched"; exit 1; }
   pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment "$X2_EXPERIMENT" --condition "$X2_CONDITION" --count 1 --reservation "$X_RESERVATION"
 )
 ```
 
-9. **Recovery, only if that shell was killed before its cleanup ran.** That
-   means `SIGKILL`, a crash or a power loss: none of them can be caught. In a
-   new terminal, set the §3 variables for X2, then:
+7. **Recovery, only if that block was killed before its cleanup ran.** That
+   means `SIGKILL`, a crash or a power loss: none of them can be caught, and
+   they can leave an active capability. In a new terminal, set the §3
+   variables for X2, then:
    1. revoke by hand at once:
 
 ```bash
 CAP="$HOME/.devdigest/hw2-experiments/$ID/capability.json"; if [ -L "$CAP" ]; then echo "FAILED: $CAP is a symlink; revoke it by hand and investigate"; false; elif [ -f "$CAP" ]; then if rm -- "$CAP" && [ ! -e "$CAP" ]; then date -u +"capability revoked %FT%TZ"; else echo "FAILED: could not revoke $CAP"; false; fi; else echo "no capability to revoke"; fi
 ```
 
-   2. settle the slot without any new request:
+   2. settle any slot without a new request:
 
 ```bash
 pnpm exec tsx src/experiments/hw2/cli.ts reconcile "${STACK[@]}"
@@ -805,9 +863,9 @@ pnpm exec tsx src/experiments/hw2/cli.ts reconcile "${STACK[@]}"
      still runs (`pgrep -af 'cli.ts'` prints nothing). Only then is the lock
      stale: remove `runner.lock` from the stack directory by hand and rerun
      `reconcile`.
-   - Report the interruption, then go on with step 10.
+   - Report the interruption, then go on with step 8.
 
-10. **Reconcile** under the approved policy:
+8. **Reconcile** under the approved policy:
     - poll the generation lookup and the key's usage for up to about 10 minutes;
     - the key's usage must equal its previous cumulative usage plus the slot's
       ledger charge, within reporting precision;

@@ -245,9 +245,9 @@ Slot ids are scoped to a stack, so every slot is named by its
     check before the slot requires the capability to equal it.
   - The capability bounds spend, not attempts: a slot refused at zero cost
     adds nothing, so the same capability would admit another attempt. One
-    attempt per authorization comes from the procedure: a single
-    `run --count 1`, in a block that revokes the capability automatically when
-    it ends.
+    attempt per authorization comes from the procedure: one guarded block
+    authorizes, runs every check, runs a single `run --count 1`, and revokes
+    the capability on every exit after authorizing, a failed check included.
   - An X2 server knows nothing about X. Before every X2 authorization, and
     again immediately before dispatch, the operator checks X's ledger against
     its recorded charge, X2's charge against $0.13, and both together against
