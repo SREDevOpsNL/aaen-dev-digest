@@ -1,6 +1,6 @@
 # HW2 Gate 3 — exploration plan
 
-**Status (2026-10-21):** two slots ran on stack X, one at a time, each
+**Status (2026-10-22):** two slots ran on stack X, one at a time, each
 separately authorized (see [Execution log](#execution-log-stack-x-hw2f-f53ed971)).
 - No spending capability exists; both were revoked after their slot.
 - Stack X is frozen while the error-diagnostics change is reviewed. Further
@@ -99,7 +99,7 @@ previews carry a real one.
 
 | Value | Proposed | Unchanged limit |
 | --- | --- | --- |
-| Capability budget (`authorize --budget`) | **$0.15**, the hard cap for Gate 3 | formal Gate 3 ceiling $0.50 |
+| Capability budget (`authorize --budget`) | stack X: **$0.15** per slot (historical). X2: per slot, X2's charge plus one $0.01 reservation, within an X2 maximum of **$0.13** ([addendum](HW2-experiment-operator-guide.md#gate-3-on-stack-x2-addendum)) | formal Gate 3 ceiling $0.50 |
 | Per-slot reservation | **$0.01**: the smallest round value ≥ 1.2 × the largest worst case (1.2 × $0.005947 = $0.0071) | — |
 | Slots | **4** initial, **2** optional | — |
 | Output cap | **16,000** tokens | endpoint maximum completion 65,536 |
@@ -107,7 +107,8 @@ previews carry a real one.
 | Dedicated key | — | $2 limit, never resets |
 
 Every Gate 3 command in the operator guide uses these values, and its checks
-fail if a capability or reservation differs. If 1.2 × the largest worst case on
+fail if a capability or reservation differs. On X2, the capability checked
+before a slot must equal the amount in that slot's written authorization. If 1.2 × the largest worst case on
 X exceeds $0.01, Phase 0 fails: a higher reservation needs a new approval.
 
 | Order | Slot | Fixture / reviewer | Condition |
@@ -140,7 +141,7 @@ Before Gate 3 authorization, Phase 0 on X must show:
 | R1 | Exact routing slug | the model page's copy button | one endpoint-specific slug, confirmed by you and frozen for X; a provider-wide selector is refused |
 | R2 | Strict structured-output support | step 2 endpoint check | exactly one live endpoint for the slug, `structured_outputs` advertised, status 0 |
 | R3 | Live endpoint prices and limits | step 2 settings check | X's frozen prices equal the live ones; 16,000 ≤ maximum completion; bound + cap within context |
-| R4 | Key usage and remaining limit | Gate 2 checklist, `GET /api/v1/key` | usage 0 (or the recorded total), limit 2, `limit_remaining` covers $0.15 |
+| R4 | Key usage and remaining limit | Gate 2 checklist, `GET /api/v1/key` | usage 0 (or the recorded total), limit 2, `limit_remaining` covers the authorized capability |
 | R5 | Four free previews | step 3, `phase0-check` | all four `ok`, at the $0.01 reservation and the 16,000 cap, each with exactly its condition's links |
 | R6 | Reservation | step 3 check | 1.2 × the largest worst case ≤ $0.01 |
 | R7 | Prompt fingerprints | step 3, `phase0-check` | non-Skill fingerprint equal across `with` and `without` per experiment; Skill fingerprint equal to the one recomputed from the current target skill (`with`) or from no Skills (`without`) |
@@ -195,6 +196,9 @@ slot 2 met a 429 ten seconds after a status-0 check.
 
 ## Execution log (stack X `hw2f-f53ed971`)
 
+Slot ids are scoped to a stack, so every slot is named by its
+`(stack_id, slot_id)`; X's slots are `(hw2f-f53ed971, …)`.
+
 | Slot | When (UTC) | Outcome | Cost |
 | --- | --- | --- | --- |
 | `x-18-with-1` | 2026-10-21 09:46:10–09:46:47 | **completed**: one request to DeepInfra (`deepseek-v4-flash-20260423`), one provider response, `finish_reason: stop`, schema valid, 1,586 in / 479 out / 0 reasoning tokens (3% of the cap), 1 grounded CRITICAL finding | $0.00022896, equal in ledger, generation record and key usage |
@@ -227,19 +231,28 @@ slot 2 met a 429 ten seconds after a status-0 check.
 
 ## Next stack X2 (planning, not authorized)
 
-- The diagnostics change alters the implementation fingerprint, so stack X no
-  longer represents `main` once it merges. X is exported and stopped only on
-  separate approval.
+- The diagnostics change (PR #31, merged as `9f6f955`) altered the
+  implementation fingerprint, so stack X no longer represents `main`. X is
+  stopped only on separate approval; its evidence is exported.
 - X2 starts from the updated `main` and repeats Phase 0 (R1–R10) in full.
-- **Budget:** X2's accounting starts at zero.
-  - X's $0.01022896 stays charged separately against the original $0.15
-    exploration envelope, so X2's aggregate maximum is **$0.13**.
-  - Narrower per-slot capabilities are preferred. A budget equal to X2's
-    charged total plus one $0.01 reservation lets the server accept exactly one
-    more slot.
-- `x-18-without-1` is consumed and never replayed. A retry would be
-  `x-18-without-2`, an additional slot outside the original four, with its
-  own authorization.
+- **Budget** (approved policy, 2026-10-22; procedure in the
+  [operator guide's X2 addendum](HW2-experiment-operator-guide.md#gate-3-on-stack-x2-addendum)):
+  - X2's planning maximum is **$0.13** of its own conservative charge.
+  - X's **$0.01022896** stays counted separately against the original $0.15
+    exploration envelope.
+  - Each X2 slot gets a capability of X2's current charge plus exactly one
+    $0.01 reservation. The written authorization names that amount, and the
+    check before the slot requires the capability to equal it.
+  - An X2 server knows nothing about X. Before every X2 authorization, the
+    operator checks X's ledger against its recorded charge, X2's charge
+    against $0.13, and both together against $0.15.
+- **Slot identity** (approved, 2026-10-22): slot ids stay scoped to their
+  stack; the runner is unchanged. Every record names a slot by
+  `(stack_id, slot_id)`.
+  - `(hw2f-f53ed971, x-18-without-1)` is the first without-Skill attempt of
+    experiment 18. It is consumed, never replayed, and keeps its unknown cost
+    and full $0.01 charge.
+  - The second attempt, if authorized, will be `(<X2 id>, x-18-without-1)`.
 
 ## Evidence and the Gate 3 report
 

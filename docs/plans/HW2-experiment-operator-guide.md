@@ -208,8 +208,10 @@ explicitly authorized**:
 pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget 0.15 --hours 12 "${STACK[@]}"
 ```
 
-- `--budget 0.15` is the capability budget of the approved
-  [Gate 3 plan](HW2-gate3-plan.md#schedule-and-costs). USD 0.50 is the formal
+- `--budget 0.15` is the capability budget stack X used under the approved
+  [Gate 3 plan](HW2-gate3-plan.md#schedule-and-costs). On stack X2, each slot
+  gets a capability sized for that one slot instead
+  ([Gate 3 on stack X2](#gate-3-on-stack-x2-addendum)). USD 0.50 is the formal
   Gate 3 ceiling that `authorize` and the server enforce, not a budget to
   authorize. A different budget needs a new approval.
 - This writes `~/.devdigest/hw2-experiments/<stack-id>/capability.json`
@@ -250,7 +252,9 @@ Why one E:
 ### Gate 3: exploration on stack X (≤ USD 0.50)
 
 The schedule, the cost figures from real free previews, and the stop rules are
-in the [Gate 3 plan](HW2-gate3-plan.md). The approved plan uses only part of the
+in the [Gate 3 plan](HW2-gate3-plan.md). This is the procedure stack X
+(`hw2f-f53ed971`) ran. On stack X2, steps 1–3 apply unchanged, and the
+[X2 addendum](#gate-3-on-stack-x2-addendum) replaces steps 4–5. The approved plan uses only part of the
 USD 0.50 ceiling, and every command below uses these values:
 
 | Value | Approved | Formal limit (unchanged) |
@@ -514,6 +518,241 @@ Fixtures and settings may be refined only here.
 
    Stop X only after steps 1, 3, 4, 6 and 7 succeeded. Keep its ledger: its
    spend counts toward the USD 1.50 total.
+
+### Gate 3 on stack X2 (addendum)
+
+Stack X (`hw2f-f53ed971`) ran Gate 3 under the procedure above, with a $0.15
+capability per slot. That record stays as it was. From stack X2 on, this
+addendum replaces the authorization and slot steps (4 and 5) of that
+procedure. Phase 0 (steps 1–3) applies to X2 unchanged.
+
+| Rule | Value |
+| --- | --- |
+| X2 planning maximum | **USD 0.13**: X2's own conservative charge, over all its slots |
+| Stack X | its final conservative charge, **USD 0.01022896**, stays counted separately against the original USD 0.15 exploration envelope |
+| Per-slot capability | X2's current conservative charge **plus exactly one USD 0.01 reservation**, never above USD 0.13. The amount written in the slot's authorization must equal it, and so must the capability checked before the slot |
+| Reservation, output cap, routing | unchanged: USD 0.01, 16,000 tokens, `order = only = [slug]`, no fallbacks, `require_parameters` |
+| Who enforces what | an X2 server counts only X2's own runs, and knows nothing about X. The cross-stack check below is the operator's, before every X2 authorization |
+
+A capability sized this way admits exactly one more slot. After the slot, the
+charged total plus another reservation exceeds it, so the server refuses
+(409) before any request.
+
+**Slot identifiers are scoped to a stack.** The runner numbers a slot from its
+stack's own ledger, and the server refuses a used slot id only within its own
+database. In every Gate 3 record, a slot is therefore named by
+**`(stack_id, slot_id)`**:
+
+| Global attempt | `(stack_id, slot_id)` | Outcome | Conservative charge |
+| --- | --- | --- | --- |
+| 18 / with, 1st | `(hw2f-f53ed971, x-18-with-1)` | completed | USD 0.00022896 (known) |
+| 18 / without, 1st | `(hw2f-f53ed971, x-18-without-1)` | failed, HTTP 429, cost unknown | USD 0.01 (full reservation) |
+| 18 / without, 2nd | `(<X2 stack id>, x-18-without-1)` | not authorized | — |
+
+The second without-Skill attempt is `x-18-without-1` again locally, on X2.
+
+1. **After Phase 0 passed on X2**, with `ID` set to X2's stack id (§3), set the
+   approved values:
+
+```bash
+X2_PLAN_MAX=0.13; X_STACK=hw2f-f53ed971; X_CHARGE_RECORDED=0.01022896   # APPROVED: X2 planning maximum (USD), stack X and its final conservative charge (USD)
+```
+
+2. **Before every X2 authorization**, check the conservative spending across X
+   and X2, and compute the next capability. The check prints every slot of
+   both stacks by its `(stack_id, slot_id)`. It fails when:
+   - X's ledger no longer adds up to its recorded charge;
+   - an X2 slot is unresolved;
+   - the next slot would exceed the X2 maximum or the original envelope.
+
+```bash
+X2_NEXT_BUDGET=$(python3 -I - "$HOME/.devdigest/hw2-experiments/$X_STACK/ledger.jsonl" "$LEDGER" "$X_STACK" "$ID" "$X_CHARGE_RECORDED" "$X2_PLAN_MAX" "$X_RESERVATION" <<'EOF'
+import json, os, sys
+from decimal import ROUND_CEILING, Decimal
+x_ledger, x2_ledger, x_stack, x2_stack, x_recorded, plan_max, reservation = sys.argv[1:8]
+if (x_recorded, plan_max, reservation) != ("0.01022896", "0.13", "0.01"):
+    sys.exit(f"FAILED: X_CHARGE_RECORDED={x_recorded!r}, X2_PLAN_MAX={plan_max!r}, X_RESERVATION={reservation!r} are not the approved 0.01022896, 0.13 and 0.01")
+if x2_stack == x_stack or not x2_stack.startswith("hw2f-"):
+    sys.exit(f"FAILED: ID={x2_stack!r} must be X2's own stack id, not {x_stack}")
+TERMINAL = {"completed", "failed", "refused", "ambiguous"}
+def slots(path, required):
+    if not os.path.isfile(path):
+        if required:
+            sys.exit(f"FAILED: no ledger at {path}")
+        return {}
+    records = {}
+    for line in open(path):
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        current = records.get(event["slot_id"])
+        if current and current["state"] in TERMINAL:
+            continue  # a slot never leaves a terminal state
+        records[event["slot_id"]] = {"state": event["state"], "reservation": Decimal(str(event["reservation_usd"])), "cost": event.get("cost_usd")}
+    return records
+def charge(slot):
+    if slot["state"] == "refused":
+        return Decimal(0)
+    if slot["state"] in ("completed", "failed") and slot["cost"] is not None:
+        return Decimal(str(slot["cost"]))
+    return slot["reservation"]  # reserved, dispatched, ambiguous, or unknown cost
+try:
+    x, x2 = slots(x_ledger, True), slots(x2_ledger, False)
+except (OSError, ValueError, KeyError) as err:
+    sys.exit(f"FAILED: unreadable ledger: {err}")
+for stack, records in ((x_stack, x), (x2_stack, x2)):
+    for slot_id, slot in sorted(records.items()):
+        print(f"({stack}, {slot_id}) {slot['state']}, charge ${charge(slot)}", file=sys.stderr)
+x_charge, x2_charge, res = sum(map(charge, x.values()), Decimal(0)), sum(map(charge, x2.values()), Decimal(0)), Decimal(reservation)
+problems = []
+if x_charge != Decimal(x_recorded):
+    problems.append(f"stack X's ledger now charges ${x_charge}, not the recorded ${x_recorded}: investigate before any authorization")
+unresolved = [s for s, slot in x2.items() if slot["state"] not in TERMINAL]
+if unresolved:
+    problems.append(f"X2 slots {unresolved} are not terminal: reconcile first")
+nxt = (x2_charge + res).quantize(Decimal("0.00000001"), rounding=ROUND_CEILING)
+if nxt > Decimal(plan_max):
+    problems.append(f"X2 would be charged ${nxt}, above the ${plan_max} X2 maximum")
+if x_charge + nxt > Decimal("0.15"):
+    problems.append(f"X and X2 together would be charged ${x_charge + nxt}, above the original $0.15 envelope")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print(f"X ${x_charge} + X2 ${x2_charge} + one reservation ${res}: within the ${plan_max} X2 maximum and the $0.15 envelope", file=sys.stderr)
+print(format(nxt.normalize(), "f"))
+EOF
+) && echo "next X2 capability: \$$X2_NEXT_BUDGET" || { echo "FAILED: cross-stack budget check"; false; }
+```
+
+3. **Set the authorized amount**, exactly as the slot's written authorization
+   states it:
+
+```bash
+AUTHORIZED_BUDGET=   # required: the USD amount in the slot's written authorization, e.g. 0.01
+```
+
+```bash
+python3 -I - "$AUTHORIZED_BUDGET" "${X2_NEXT_BUDGET:-}" "$X2_PLAN_MAX" <<'EOF'
+import re, sys
+from decimal import Decimal
+authorized, computed, plan_max = sys.argv[1:4]
+if not re.fullmatch(r"\d+(\.\d{1,8})?", authorized):
+    sys.exit(f"FAILED: AUTHORIZED_BUDGET={authorized!r} is not a USD amount (set it from the written authorization)")
+if not re.fullmatch(r"\d+(\.\d{1,8})?", computed):
+    sys.exit("FAILED: no computed X2_NEXT_BUDGET: run the cross-stack check first")
+if Decimal(authorized) != Decimal(computed):
+    sys.exit(f"FAILED: the authorization says ${authorized}, but the next X2 capability is ${computed}: they must be equal")
+if not Decimal(0) < Decimal(authorized) <= Decimal(plan_max):
+    sys.exit(f"FAILED: ${authorized} is outside (0, ${plan_max}]")
+print(f"authorized budget ${authorized} equals the next X2 capability")
+EOF
+```
+
+4. **Check the capability files.** An active `capability.json` fails the
+   check. A revoked slot's `capability.token` is kept under a dated name, so
+   `authorize` does not overwrite it.
+
+```bash
+CAPDIR="$HOME/.devdigest/hw2-experiments/$ID"; if [ ! -d "$CAPDIR" ] || [ ! -x "$CAPDIR" ]; then echo "FAILED: $CAPDIR is not a readable stack directory (check ID)"; false; elif [ -e "$CAPDIR/capability.json" ] || [ -L "$CAPDIR/capability.json" ]; then echo "FAILED: an active capability exists for $ID; stop and investigate"; false; elif [ -L "$CAPDIR/capability.token" ]; then echo "FAILED: $CAPDIR/capability.token is a symlink; stop and investigate"; false; elif [ -e "$CAPDIR/capability.token" ]; then KEPT="$CAPDIR/capability.token.revoked-$(date -u +%Y%m%dT%H%M%SZ)"; if [ ! -e "$KEPT" ] && mv -n -- "$CAPDIR/capability.token" "$KEPT" && chmod 600 "$KEPT" && [ ! -e "$CAPDIR/capability.token" ]; then echo "kept the revoked token as $KEPT"; else echo "FAILED: could not keep the old capability.token"; false; fi; else echo "no capability files for $ID"; fi
+```
+
+5. **Authorize**, only after the slot's explicit authorization, with the amount
+   it names:
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget "$AUTHORIZED_BUDGET" --hours 12 "${STACK[@]}"
+```
+
+6. **Set the authorized slot**:
+
+```bash
+X2_EXPERIMENT=   # required: 17 or 18, as authorized
+X2_CONDITION=    # required: with or without, as authorized
+```
+
+7. **Immediately before the slot**, check:
+   - that the cross-stack check (step 2) passed in this shell for this amount;
+   - the capability against the authorized amount;
+   - the authorized amount against the one-slot sizing from X2's ledger now
+     (charge plus $0.01), within $0.13.
+
+   Then rerun the step 2 endpoint and settings checks.
+
+```bash
+python3 -I - "$HOME/.devdigest/hw2-experiments/$ID/capability.json" "$ID" "$X_RESERVATION" "$AUTHORIZED_BUDGET" "${X2_EXPERIMENT:-}" "${X2_CONDITION:-}" "$LEDGER" "$X2_PLAN_MAX" "${X2_NEXT_BUDGET:-}" <<'EOF'
+import datetime, json, os, re, sys
+from decimal import ROUND_CEILING, Decimal
+path, stack, reservation, authorized, experiment, condition, ledger, plan_max, computed = sys.argv[1:10]
+problems = []
+if not re.fullmatch(r"\d+(\.\d{1,8})?", computed) or not re.fullmatch(r"\d+(\.\d{1,8})?", authorized) or Decimal(computed) != Decimal(authorized):
+    problems.append(f"the cross-stack check (step 2) has not passed in this shell for the authorized amount (X2_NEXT_BUDGET={computed!r})")
+try:
+    cap = json.load(open(path))
+except (OSError, ValueError) as err:
+    sys.exit(f"FAILED: no readable capability: {err}")
+if cap.get("stack_id") != stack:
+    problems.append(f"capability is for {cap.get('stack_id')!r}, not {stack!r}")
+if cap.get("phase") != "exploration" or cap.get("gate") != 3:
+    problems.append(f"capability is for {cap.get('phase')} / Gate {cap.get('gate')}, not exploration / Gate 3")
+if not re.fullmatch(r"\d+(\.\d{1,8})?", authorized):
+    problems.append(f"AUTHORIZED_BUDGET={authorized!r} is not set")
+elif not isinstance(cap.get("budget_usd"), (int, float)) or Decimal(str(cap["budget_usd"])) != Decimal(authorized):
+    problems.append(f"capability budget is {cap.get('budget_usd')}, not the authorized {authorized}")
+try:
+    if datetime.datetime.fromisoformat(cap["expires_at"].replace("Z", "+00:00")) <= datetime.datetime.now(datetime.timezone.utc):
+        problems.append(f"capability expired at {cap['expires_at']}")
+except (KeyError, ValueError) as err:
+    problems.append(f"capability expiry is unreadable: {err}")
+if reservation != "0.01":
+    problems.append(f"X_RESERVATION={reservation!r}, not the approved 0.01")
+if experiment not in ("17", "18") or condition not in ("with", "without"):
+    problems.append(f"X2_EXPERIMENT={experiment!r} / X2_CONDITION={condition!r} is not 17|18 / with|without")
+TERMINAL, records = {"completed", "failed", "refused", "ambiguous"}, {}
+if os.path.isfile(ledger):
+    for line in open(ledger):
+        if line.strip():
+            event = json.loads(line)
+            if records.get(event["slot_id"], {}).get("state") not in TERMINAL:
+                records[event["slot_id"]] = event
+def charge(e):
+    if e["state"] == "refused":
+        return Decimal(0)
+    if e["state"] in ("completed", "failed") and e.get("cost_usd") is not None:
+        return Decimal(str(e["cost_usd"]))
+    return Decimal(str(e["reservation_usd"]))
+charged = sum(map(charge, records.values()), Decimal(0))
+sized = (charged + Decimal("0.01")).quantize(Decimal("0.00000001"), rounding=ROUND_CEILING)
+if re.fullmatch(r"\d+(\.\d{1,8})?", authorized) and Decimal(authorized) != sized:
+    problems.append(f"X2 is charged ${charged} now, so its one-slot capability is ${format(sized.normalize(), 'f')}, not the authorized ${authorized}")
+if plan_max != "0.13" or sized > Decimal("0.13"):
+    problems.append(f"the one-slot capability ${format(sized.normalize(), 'f')} must be within the approved $0.13 X2 maximum (X2_PLAN_MAX={plan_max!r})")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print(f"capability: exploration, Gate 3, budget ${authorized} as authorized, expires {cap['expires_at']}; slot {experiment} / {condition}")
+EOF
+```
+
+8. **Run exactly one slot**, and judge it from the ledger and the trace, as on
+   stack X:
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment "$X2_EXPERIMENT" --condition "$X2_CONDITION" --count 1 --reservation "$X_RESERVATION"
+```
+
+9. **Revoke the capability right after the slot**, whatever its outcome:
+
+```bash
+CAP="$HOME/.devdigest/hw2-experiments/$ID/capability.json"; if [ -L "$CAP" ]; then echo "FAILED: $CAP is a symlink; revoke it by hand and investigate"; false; elif [ -f "$CAP" ]; then if rm -- "$CAP" && [ ! -e "$CAP" ]; then date -u +"capability revoked %FT%TZ"; else echo "FAILED: could not revoke $CAP"; false; fi; else echo "no capability to revoke"; fi
+```
+
+10. **Reconcile** under the approved policy:
+    - poll the generation lookup and the key's usage for up to about 10 minutes;
+    - the key's usage must equal its previous cumulative usage plus the slot's
+      ledger charge, within reporting precision;
+    - if attribution stays uncertain, stop and report it; never retry a
+      generation.
+
+    Record the slot by its `(stack_id, slot_id)`, with its global attempt
+    number, in the Gate 3 plan's execution log.
 
 ### Gate 4: confirmatory on a new stack E (≤ USD 1.00)
 
