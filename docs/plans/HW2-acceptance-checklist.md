@@ -72,7 +72,9 @@ All stacks are disposable and none uses the development database.
 | W, `hw2f-d5b65f48` | Unpaid walkthrough, every row except 17–20 | **Completed 2026-10-19/20.** Results in the [walkthrough log](HW2-walkthrough-log.md). The stack ended with the agent session that ran it. |
 | R, `hw2f-a2c6f244` | Retest of row 32 after PR #25, from `main` at `3403eb0` | **Completed 2026-10-20.** [Log](HW2-walkthrough-log.md#retest-of-row-32-2026-10-20). Stopped after the retest. |
 | G2, `hw2f-f0b2f716` | Gate 2 key checks and the row 36 retest, keyed, with no spending capability | **Completed 2026-10-20.** [Gate 2 results](HW2-gate2-checklist.md#gate-2-results-2026-10-20). Stopped afterwards. |
-| X, E (future) | X: Gate 3 exploration. E: Gate 4 confirmatory runs, rows 17–20 | **Not started.** They need the separate Gate 2, 3 and 4 authorizations. |
+| X, `hw2f-f53ed971` | Gate 3 exploration, slots 1–2 | **Closed 2026-10-22.** [Execution log](HW2-gate3-plan.md#execution-log-stack-x-hw2f-f53ed971), [closure](HW2-gate3-plan.md#closure-of-stack-x). |
+| X2, `hw2f-39febf41` | Gate 3 exploration from `main` after PR #31 | **Closed 2026-10-22.** [Execution log](HW2-gate3-plan.md#execution-log-stack-x2-hw2f-39febf41), [closure](HW2-gate3-plan.md#closure-of-stack-x2). Gate 3 is not complete: [remaining work](HW2-gate3-plan.md#gate-3-status-and-remaining-work). |
+| E (future) | Gate 4 confirmatory runs, rows 17–20 | **Not started.** It needs the separate Gate 4 authorization. |
 
 ### Procedure used on stack W (completed; kept for a re-run)
 
