@@ -160,6 +160,52 @@ correction. Repo-intel remains server-scoped;
   disabling the check fails 5 tests), and `server/test/experiments.it.test.ts`
   ("a preview reflects the linked skills").
 
+- **2026-10-22** — Extension of the 2026-10-20 "Spend accounting is per stack"
+  entry above: when several stacks' ledgers are settled together, key each slot
+  by `(stack_id, slot_id)`, never by `slot_id` alone. Slot ids are local to a
+  stack: X and X2 both had an `x-18-without-1`. Under a fold keyed by slot id,
+  "first terminal state wins" makes one stack's slot hide the other's, so the
+  total silently depends on the order of the ledgers. The operator guide's
+  offline settlement example did this. On the real X and X2 ledgers it charged
+  $0.020229 or $0.010408, depending on the order, instead of $0.02040788. Both
+  results are too low, which overstates the remaining budget.
+  - Fix: take the stack id from the ledger's directory name.
+  - Check the corrected block against the runner's own fold as an oracle: one
+    `Ledger(dir).slots()` per stack, then `spent()`.
+
+  Evidence: `docs/plans/HW2-experiment-operator-guide.md` ("If stack E stops
+  unexpectedly", step 3), `server/src/experiments/hw2/ledger.ts`
+  (`Ledger.slots`), and a hermetic check of 23 assertions over every ledger
+  order. It ran on synthetic ledgers and on read-only copies of the real ones,
+  outside the repository, in
+  `~/.devdigest/hw2-experiments/settlement-audit-20261022T2215Z/`.
+
+- **2026-10-22** — With OpenRouter as it behaved in HW2 Gate 3, the experiment
+  eligibility rule cannot prove a single upstream attempt. `evaluateSlot`
+  accepts one of two proofs:
+  - router metadata with both `attempt` and `attemptsCount` equal to 1. But
+    `attemptsCount` is `raw.attempts.length`, and OpenRouter's
+    `openrouter_metadata` had `attempt: 1` and no `attempts` array in both
+    completed slots;
+  - a found generation record with one provider response. But the in-run
+    lookup is fixed at 5 tries 1 s apart, about a 4 s window, while the record
+    appeared 29–38 s after completion (see the 2026-10-21 lag entry in
+    `reviewer-core/LEARNINGS.md`).
+
+  So both completed Gate 3 slots evaluate as `unverified`, not counted, and a
+  Gate 4 run under these conditions would be `incomplete` whatever it
+  detects. The report reads the stored experiment block and does not look the
+  generation up again.
+
+  Before relying on a provenance rule, run it on a real completed slot. A
+  passing fixture only shows that the rule accepts the fields it expects, not
+  that the provider sends them.
+
+  Evidence: `server/src/experiments/hw2/eligibility.ts` (`singleAttemptProven`),
+  `reviewer-core/src/llm/openrouter-metadata.ts:39` (`attemptsCount`),
+  `server/src/platform/config.ts:140` (`generationLookup`), and the
+  `routerMetadataRaw` of the exported Gate 3 traces.
+
 ## Decisions
 
 ## Recurring Errors & Fixes

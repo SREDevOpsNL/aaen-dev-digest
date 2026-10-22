@@ -972,27 +972,36 @@ ledger and zero recorded spend.
    - a `completed` or `failed` slot keeps its recorded outcome;
    - none of these is ever run again.
 3. **Settle the spend offline.** This uses the same rule as the runner's
-   `charge()`. Pass every ledger of this experiment, X's and E's, because
-   exploration counts toward the USD 1.50 total. It reads the ledgers only.
+   `charge()`. Pass every ledger of this experiment: the exploration stacks X
+   and X2 (and any later exploration stack, in the same way), then E.
+   Exploration counts toward the USD 1.50 total. The script reads the ledgers
+   only.
+
+   Slot ids are scoped to a stack (X and X2 both have an `x-18-without-1`).
+   So every slot is settled by its `(stack_id, slot_id)`, where the stack id
+   is the name of the ledger's directory, and two stacks' slots are never
+   merged.
 
 ```bash
-X_ID=hw2f-11aa22bb   # EXAMPLE: replace with the exploration stack's id
+X_ID=hw2f-f53ed971; X2_ID=hw2f-39febf41   # the Gate 3 exploration stacks X and X2
 ```
 
 ```bash
-python3 -I - "$HOME/.devdigest/hw2-experiments/$X_ID/ledger.jsonl" "$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl" <<'EOF'
-import json, sys
+python3 -I - "$HOME/.devdigest/hw2-experiments/$X_ID/ledger.jsonl" "$HOME/.devdigest/hw2-experiments/$X2_ID/ledger.jsonl" "$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl" <<'EOF'
+import json, os, sys
 TERMINAL = {"completed", "failed", "refused", "ambiguous"}
 slots = {}
 for path in sys.argv[1:]:
+    stack = os.path.basename(os.path.dirname(os.path.abspath(path)))  # slot ids are stack-scoped
     for line in open(path):
         if not line.strip():
             continue
         event = json.loads(line)
-        current = slots.get(event["slot_id"])
+        key = f"({stack}, {event['slot_id']})"
+        current = slots.get(key)
         if current and current["state"] in TERMINAL:
             continue
-        slots[event["slot_id"]] = {"state": event["state"], "phase": event["phase"], "reservation": event["reservation_usd"], "cost": event.get("cost_usd")}
+        slots[key] = {"state": event["state"], "phase": event["phase"], "reservation": event["reservation_usd"], "cost": event.get("cost_usd")}
 def charge(slot):
     if slot["state"] == "refused":
         return 0.0

@@ -113,3 +113,20 @@ says which file a finding goes in.
   Evidence: `server/test/reviews.it.test.ts` (PR-list FINDINGS matrix),
   `server/src/modules/pulls/status.ts:81` (`compareReviewRuns`), and
   `e2e/specs/written/01-pr-findings-ui.md`.
+
+- **2026-10-22 — HW2 Gate 3 on stack X2.** Two separately authorized slots ran:
+  - experiment 18 without Skill completed;
+  - experiment 17 with Skill failed with a 429, attributed by PR #31's
+    diagnostics to DeepInfra's shared pool.
+
+  Two unpaid audits found problems that a paid run would only have revealed
+  later:
+  - **Offline settlement:** the guide's example merged duplicate slot ids
+    across stacks and undercharged by up to $0.01, depending on the order of
+    the ledgers.
+  - **Gate 4 eligibility:** the rule cannot verify any slot under OpenRouter's
+    observed metadata and the current 4 s generation-lookup window.
+
+  Details: [`server/LEARNINGS.md`](server/LEARNINGS.md#codebase-patterns--tool--library-notes)
+  (2026-10-22, both entries) and
+  [`HW2-gate3-plan.md`](docs/plans/HW2-gate3-plan.md#gate-3-status-and-remaining-work).
