@@ -3,7 +3,8 @@
 **Status (2026-10-22):** two slots ran on stack X, one at a time, each
 separately authorized (see [Execution log](#execution-log-stack-x-hw2f-f53ed971)).
 - No spending capability exists; both were revoked after their slot.
-- Stack X is frozen while the error-diagnostics change is reviewed. Further
+- Stack X was closed on 2026-10-22 at 19:25:56 UTC, after its evidence was
+  exported and verified ([Closure of stack X](#closure-of-stack-x)). Further
   slots run on a new stack X2 and need separate authorization
   ([Next stack X2](#next-stack-x2-planning-not-authorized)).
 
@@ -227,13 +228,61 @@ Slot ids are scoped to a stack, so every slot is named by its
   rule or fixture changes because of it.
 - **Evidence:** outside the repository, in
   `~/.devdigest/hw2-experiments/hw2f-f53ed971/` (`phase0/`, `gate3-slot1/`,
-  `gate3-slot2/`, each with `SHA256SUMS`).
+  `gate3-slot2/`, `evidence/`, `gate3-export/` and `closure/`, each with
+  `SHA256SUMS`).
+
+### Closure of stack X
+
+Stack X `hw2f-f53ed971` was closed on **2026-10-22 at 19:25:56 UTC**. It was
+stopped by its own `scripts/e2e.sh --serve` teardown (Ctrl-C in its terminal),
+under separate approval, after every pre-shutdown check had passed:
+- **Capability:** none active, and no symlinked capability file. The two
+  remaining token files are inert without `capability.json`.
+- **In flight:** no slot; both slots terminal on the server; no runner process
+  and no runner lock.
+- **Runs:** exactly two in the database, each matching its ledger slot.
+- **Traces:** the exported traces name the right stack, slot and run, and are
+  equal to the live ones.
+- **Database export:** 2 `agent_runs` and 2 `run_traces` records with the
+  ledger's run ids.
+- **Integrity:** every evidence checksum verified, and a secret scan of 59
+  files was clean (no API key, no capability token).
+
+Final ledger:
+
+| Slot `(stack_id, slot_id)` | Run | Outcome | Charge |
+| --- | --- | --- | --- |
+| `(hw2f-f53ed971, x-18-with-1)` | `b111a514-113f-407a-bca9-23d1ebdd2878` | completed | $0.00022896 (known cost) |
+| `(hw2f-f53ed971, x-18-without-1)` | `6fd06290-8e91-46b5-a57f-3fe695d6a867` | failed, HTTP 429, cost unknown | $0.01 (full reservation) |
+
+- **Confirmed OpenRouter spend:** $0.00022896.
+- **Conservative ledger charge:** $0.01022896. This is the value counted
+  against the original $0.15 exploration envelope.
+- **Teardown:** the container `devdigest-hw2f-f53ed971` was removed, and ports
+  3250, 3251 and 5450 were released. The development database container was
+  not touched.
+- **After teardown:** all 59 evidence files were byte-identical to a snapshot
+  taken before it, and every checksum still verified.
+- **Evidence location:** outside the repository, in
+  `~/.devdigest/hw2-experiments/hw2f-f53ed971/`. The closure records are in
+  `closure/`, with their own `SHA256SUMS`.
+
+**Neither Gate 3 outcome is evidence for or against the effectiveness of a
+Skill.**
+- Exploration validates infrastructure only, and its slots are excluded from
+  the experiment result ([Methodology](#methodology)).
+- `(hw2f-f53ed971, x-18-with-1)` completed and reported the fixture's breaking
+  change, labelled `category: "security"`.
+- `(hw2f-f53ed971, x-18-without-1)` produced no review at all.
+
+The with-Skill versus without-Skill comparison belongs only to the
+pre-registered Gate 4 confirmatory runs.
 
 ## Next stack X2 (planning, not authorized)
 
 - The diagnostics change (PR #31, merged as `9f6f955`) altered the
-  implementation fingerprint, so stack X no longer represents `main`. X is
-  stopped only on separate approval; its evidence is exported.
+  implementation fingerprint, so stack X no longer represented `main`. X was
+  closed on 2026-10-22 ([Closure of stack X](#closure-of-stack-x)).
 - X2 starts from the updated `main` and repeats Phase 0 (R1–R10) in full.
 - **Budget** (approved policy, 2026-10-22; procedure in the
   [operator guide's X2 addendum](HW2-experiment-operator-guide.md#gate-3-on-stack-x2-addendum)):
