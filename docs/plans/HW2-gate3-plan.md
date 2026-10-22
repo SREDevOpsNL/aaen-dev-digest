@@ -243,9 +243,15 @@ Slot ids are scoped to a stack, so every slot is named by its
   - Each X2 slot gets a capability of X2's current charge plus exactly one
     $0.01 reservation. The written authorization names that amount, and the
     check before the slot requires the capability to equal it.
-  - An X2 server knows nothing about X. Before every X2 authorization, the
-    operator checks X's ledger against its recorded charge, X2's charge
-    against $0.13, and both together against $0.15.
+  - The capability bounds spend, not attempts: a slot refused at zero cost
+    adds nothing, so the same capability would admit another attempt. One
+    attempt per authorization comes from the procedure: a single
+    `run --count 1`, in a block that revokes the capability automatically when
+    it ends.
+  - An X2 server knows nothing about X. Before every X2 authorization, and
+    again immediately before dispatch, the operator checks X's ledger against
+    its recorded charge, X2's charge against $0.13, and both together against
+    $0.15.
 - **Slot identity** (approved, 2026-10-22): slot ids stay scoped to their
   stack; the runner is unchanged. Every record names a slot by
   `(stack_id, slot_id)`.
