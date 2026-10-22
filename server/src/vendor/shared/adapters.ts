@@ -145,6 +145,47 @@ export interface StructuredAttemptTelemetry {
   generation: GenerationMetadataSummary | null;
   /** Raw `openrouter_metadata` object as received (secret-free). */
   routerMetadataRaw: unknown;
+  /** What a failed request said about itself; null on success, refusal and cancellation. */
+  errorDetail: AttemptErrorDetail | null;
+}
+
+/**
+ * The allowlisted, sanitized part of a failed experiment request: an HTTP
+ * error, or an HTTP 200 whose body holds only an `error`. Never a raw body,
+ * never a raw header: every field is length-bounded, and free text has secrets
+ * and the request's own key redacted.
+ */
+export interface AttemptErrorDetail {
+  /**
+   * Who the error body names as its source. `upstream_provider`: OpenRouter
+   * surfaced the provider's name or code. `openrouter`: an OpenRouter limit
+   * (`metadata.limit_source` starting with `openrouter_`). `unattributed`: a
+   * body without either (OpenRouter documents no rule that marks a 429 as its
+   * own). `no_body`: no error body at all (network error, empty response).
+   */
+  origin: 'upstream_provider' | 'openrouter' | 'unattributed' | 'no_body';
+  /** `error.code` of the body. */
+  code: number | string | null;
+  /** `error.message`, sanitized, at most 300 characters. */
+  message: string | null;
+  /** `error.metadata.error_type`, e.g. `rate_limit_exceeded`. */
+  errorType: string | null;
+  /** `error.metadata.provider_code`: the upstream's own error code, when surfaced. */
+  providerCode: string | null;
+  /** `error.metadata.provider_name`. */
+  providerName: string | null;
+  /** `error.metadata.limit_source`, e.g. `openrouter_key_limit`. */
+  limitSource: string | null;
+  /** Whether the body carried the upstream's verbatim payload (`metadata.raw`); its content is never kept. */
+  upstreamRawPresent: boolean;
+  /** The SDK's request id (`x-request-id`). */
+  requestId: string | null;
+  /** The `Retry-After` header. */
+  retryAfter: string | null;
+  /** Allowlisted `x-ratelimit-*` headers, lowercase names. */
+  rateLimit: Record<string, string>;
+  /** True when a value was redacted, truncated or dropped as unsafe. */
+  redacted: boolean;
 }
 
 export interface RouterMetadataSummary {

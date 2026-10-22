@@ -97,6 +97,30 @@ and Anthropic providers live in the server's adapters.
 
 - **What gets persisted:** the studio stores only `providerCostUsd`. See
   [`../specs/01-provider-cost.md`](../specs/01-provider-cost.md).
+- **Aborting (experiment mode):** an experiment request may carry an
+  `AbortSignal`. The provider checks it before dispatch, passes it to the SDK,
+  and maps an abort to a cancellation rather than a provider failure. Ordinary
+  calls do not take a signal on this branch.
+- **Experiment failures (HW2 only):** a failed experiment request reports an
+  `errorDetail` on its attempt ([`src/llm/error-detail.ts`](../src/llm/error-detail.ts)):
+  - **What it keeps:** OpenRouter's `error.code` and sanitized `error.message`;
+    `metadata.error_type`, `provider_code`, `provider_name` and
+    `limit_source`; the request id, `Retry-After`, and allowlisted
+    `x-ratelimit-*` headers.
+  - **What it never keeps:** the upstream's `metadata.raw` (only whether it
+    was there), any other header, any raw body.
+  - **The thrown error** is an `ExperimentRequestError` carrying only that
+    sanitized reason and the HTTP status. With a status, the reason is rebuilt
+    from the detail, because the SDK's own message can be the JSON of the
+    whole error body. Ordinary calls are unchanged.
+  - **An HTTP 200 with only an `error` body** keeps no raw
+    `openrouter_metadata` (a successful generation keeps it as received).
+    Its ids, model and router or generation names are kept only as bounded,
+    plain tokens (`failedResponseTelemetry`).
+  - **A cancellation** records the fixed reason `cancelled during the
+    request`. It rethrows the SDK's abort error, which carries no body or
+    headers; any other error that coincides with the abort is replaced by the
+    signal's own reason.
 
 ## CI payload (scaffolded)
 
@@ -116,5 +140,12 @@ and Anthropic providers live in the server's adapters.
 - `test/run.test.ts`: single-pass grounding, the deterministic score, the
   cancel checkpoint, `sessionId` forwarding, and map-reduce cost aggregation.
 - `test/openrouter-cost.test.ts`: the cost fields above.
-- `test/prompt.test.ts`: the injection guard and the PR-description section.
+- `test/openrouter-experiment.test.ts`: the experiment request body and
+  telemetry.
+- `test/openrouter-error-detail.test.ts`: the error extractor, and failed
+  experiment requests through the real SDK against a loopback server
+  (structured and malformed 429s, an HTTP 200 error body, a network failure,
+  secret redaction, the header allowlist).
+- `test/prompt.test.ts`: the injection guard, the PR-description section, and
+  the linked-skills trust boundary.
 - `test/to-review.test.ts`: the CI gate and inline anchoring.

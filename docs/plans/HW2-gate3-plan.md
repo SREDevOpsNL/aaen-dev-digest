@@ -1,8 +1,11 @@
 # HW2 Gate 3 — exploration plan
 
-**Status (2026-10-21):** prepared; **Gate 3 is not authorized.**
-- No spending capability exists.
-- No paid request has been made; the dedicated key's usage is 0.
+**Status (2026-10-21):** two slots ran on stack X, one at a time, each
+separately authorized (see [Execution log](#execution-log-stack-x-hw2f-f53ed971)).
+- No spending capability exists; both were revoked after their slot.
+- Stack X is frozen while the error-diagnostics change is reviewed. Further
+  slots run on a new stack X2 and need separate authorization
+  ([Next stack X2](#next-stack-x2-planning-not-authorized)).
 
 Phase 0 is the unpaid part of Gate 3: the free endpoint check and the four
 free previews, on the final stack X. Execution of paid slots needs your
@@ -14,12 +17,12 @@ Facts are marked **[F]** and estimates **[E]**.
 
 | # | Condition | State |
 | --- | --- | --- |
-| 1 | The preparation PR (#28) is merged, with green CI: experiment 17 reviewer seeding, condition-faithful `preview`, `require_parameters` | draft, synced with `main` `58dabc5`; awaiting your merge approval |
-| 2 | Phase 0 endpoint check passes for the confirmed endpoint-specific slug (exactly one live endpoint, `structured_outputs`, status 0) | **[F]** passes for `deepinfra/fp8` (2026-10-20); metadata unchanged 2026-10-21; rerun on X |
-| 3 | Phase 0 previews pass for all four experiment/condition pairs | **[F]** pass on `hw2f-14e8ba66` (below); rerun on X |
-| 4 | Endpoint-specific routing slug confirmed from the model page's copy button (no provider-wide fallback) | pending your confirmation; without it, blocker |
-| 5 | Key `limit_remaining` is 2, usage 0 | **[F]** 2 / 0 after the previews (2026-10-20); recheck on X |
-| 6 | Explicit Gate 3 authorization | not given |
+| 1 | The preparation PR (#28) is merged, with green CI: experiment 17 reviewer seeding, condition-faithful `preview`, `require_parameters` | **[F]** merged as `f786c94` (2026-10-21) |
+| 2 | Phase 0 endpoint check passes for the confirmed endpoint-specific slug (exactly one live endpoint, `structured_outputs`, status 0) | **[F]** passed on stack X `hw2f-f53ed971` (2026-10-21 08:59 and before each slot); rerun on X2 |
+| 3 | Phase 0 previews pass for all four experiment/condition pairs | **[F]** passed on X, identical to the figures below; rerun on X2 |
+| 4 | Endpoint-specific routing slug confirmed from the model page's copy button (no provider-wide fallback) | **[F]** `deepinfra/fp8`, confirmed by you (2026-10-21) |
+| 5 | Key `limit_remaining` covers the slot; usage equals the recorded spend | **[F]** usage $0.00022896, remaining $1.99977104 (2026-10-21 16:26); recheck on X2 |
+| 6 | Explicit Gate 3 authorization, per slot | **[F]** given for `x-18-with-1` and `x-18-without-1` only; none active |
 
 ## Provider and routing
 
@@ -156,7 +159,9 @@ and the trace:
 - a known reported cost that agrees with the change in the key's usage
   (`GET /api/v1/key`) to within $0.001;
 - `finish_reason: stop` and a valid schema;
-- completion tokens: the largest must be ≤ 50% of the cap.
+- completion tokens: the largest must be ≤ 50% of the cap;
+- for a failed slot, the attempt's sanitized `errorDetail`: origin, `error_type`,
+  `provider_code`, provider name, `Retry-After`, request id.
 
 ## Stops
 
@@ -183,6 +188,58 @@ slot:
 
 The operational stops are stricter than the built-in ones. They do not replace
 them.
+
+A provider error is diagnosed from the persisted `errorDetail` only, never by
+sending another request. An endpoint `status` of 0 does not guarantee capacity:
+slot 2 met a 429 ten seconds after a status-0 check.
+
+## Execution log (stack X `hw2f-f53ed971`)
+
+| Slot | When (UTC) | Outcome | Cost |
+| --- | --- | --- | --- |
+| `x-18-with-1` | 2026-10-21 09:46:10–09:46:47 | **completed**: one request to DeepInfra (`deepseek-v4-flash-20260423`), one provider response, `finish_reason: stop`, schema valid, 1,586 in / 479 out / 0 reasoning tokens (3% of the cap), 1 grounded CRITICAL finding | $0.00022896, equal in ledger, generation record and key usage |
+| `x-18-without-1` | 2026-10-21 16:14:26 | **failed**: HTTP 429 `Provider returned error` after 906 ms; no response id, generation id, router metadata or tokens | unknown; no change in key usage after about 11 minutes; charged at its $0.01 reservation |
+
+- **Accounting:** confirmed spend $0.00022896. The ledger and server charge
+  $0.01022896, because the unknown-cost slot counts at its full reservation.
+- **Diagnosis of the 429:** not possible from the record. The engine kept only
+  the status and the message, so it is unknown whether OpenRouter or DeepInfra
+  limited the request. That gap is what the error-diagnostics change closes.
+- **Timing:**
+  - the generation lookup right after slot 1 returned `not_found`, and
+    succeeded 38 s later;
+  - key usage reflected slot 1 about 100 s after completion;
+  - for later slots, poll both for up to about 10 minutes, and stop and report
+    when attribution stays uncertain.
+- **Endpoint status:** `deepinfra/fp8` showed status -2 from about 08:37 to
+  08:40 UTC, with 100% uptime, and status 0 at 08:34 and from 08:59.
+- **Recorded deviations:**
+  - the revoked slot-1 token was kept as `capability.token.slot1-revoked`,
+    because the runbook's no-capability check rejects any `capability.token`;
+  - slot 2 used the approved $0.15 aggregate budget, a form that was not
+    stated before it ran.
+- **Reviewer finding of slot 1:** the expected breaking change, but labelled
+  `category: "security"`. It is recorded for the final report; no Skill,
+  rule or fixture changes because of it.
+- **Evidence:** outside the repository, in
+  `~/.devdigest/hw2-experiments/hw2f-f53ed971/` (`phase0/`, `gate3-slot1/`,
+  `gate3-slot2/`, each with `SHA256SUMS`).
+
+## Next stack X2 (planning, not authorized)
+
+- The diagnostics change alters the implementation fingerprint, so stack X no
+  longer represents `main` once it merges. X is exported and stopped only on
+  separate approval.
+- X2 starts from the updated `main` and repeats Phase 0 (R1–R10) in full.
+- **Budget:** X2's accounting starts at zero.
+  - X's $0.01022896 stays charged separately against the original $0.15
+    exploration envelope, so X2's aggregate maximum is **$0.13**.
+  - Narrower per-slot capabilities are preferred. A budget equal to X2's
+    charged total plus one $0.01 reservation lets the server accept exactly one
+    more slot.
+- `x-18-without-1` is consumed and never replayed. A retry would be
+  `x-18-without-2`, an additional slot outside the original four, with its
+  own authorization.
 
 ## Evidence and the Gate 3 report
 

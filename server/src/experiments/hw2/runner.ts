@@ -1,3 +1,4 @@
+import type { AttemptErrorDetail } from '@devdigest/shared';
 import { ApiError, type ExperimentApi } from './api.js';
 import { fits } from './budget.js';
 import { isTerminal, type Ledger, type SlotRecord, type SlotState } from './ledger.js';
@@ -33,7 +34,7 @@ interface SlotLookup {
       refusal_reason?: string | null;
       usage_known?: boolean;
       non_skill_fingerprint?: string | null;
-      attempts?: Array<{ outcome?: string }>;
+      attempts?: Array<{ outcome?: string; errorDetail?: AttemptErrorDetail | null }>;
     } | null;
   }>;
 }
@@ -102,7 +103,28 @@ export type SlotResult = {
   infraFailure: boolean;
   /** The settled run's non-Skill fingerprint differs from the expected one: stop. */
   fingerprintMismatch?: boolean;
+  /** What a failed request said about itself (`describeErrorDetail`), for the operator. */
+  diagnosis?: string | null;
 };
+
+/**
+ * One line from a failed attempt's sanitized error detail: who the body names
+ * as the source, the typed and upstream codes, and when to retry. Null when
+ * there is nothing to say.
+ */
+export function describeErrorDetail(detail: AttemptErrorDetail | null | undefined): string | null {
+  if (!detail) return null;
+  const parts = [
+    `origin ${detail.origin}`,
+    detail.providerName ? `provider ${detail.providerName}` : null,
+    detail.errorType ? `error_type ${detail.errorType}` : null,
+    detail.providerCode ? `provider_code ${detail.providerCode}` : null,
+    detail.limitSource ? `limit_source ${detail.limitSource}` : null,
+    detail.retryAfter ? `retry-after ${detail.retryAfter}` : null,
+    detail.requestId ? `request ${detail.requestId}` : null,
+  ].filter((part): part is string => part !== null);
+  return parts.join(', ');
+}
 
 const INFRA_OUTCOMES = new Set(['http_error', 'network_error']);
 
@@ -163,6 +185,7 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
         runId,
         costUsd: settled.cost,
         reason: current?.experiment?.refusal_reason ?? null,
+        diagnosis: describeErrorDetail(current?.experiment?.attempts?.[0]?.errorDetail),
         infraFailure: settled.state === 'failed' && outcome !== undefined && INFRA_OUTCOMES.has(outcome),
       };
     }
@@ -198,7 +221,7 @@ export async function runSchedule(
     if (recorded && isTerminal(recorded.state)) continue;
     const result = await runSlot(deps, run);
     results.push({ ...result, slot_id: run.slot.slot_id });
-    deps.log(`${run.slot.slot_id}: ${result.state}${result.reason ? ` — ${result.reason}` : ''}`);
+    deps.log(`${run.slot.slot_id}: ${result.state}${result.reason ? ` — ${result.reason}` : ''}${result.diagnosis ? ` (${result.diagnosis})` : ''}`);
     if (result.state === 'refused' && result.runId === null && /budget/.test(result.reason ?? '')) return { results, stopped: result.reason };
     if (result.state === 'refused' && rules.stopOnRefusal) return { results, stopped: `guard refusal on ${run.slot.slot_id}: ${result.reason}` };
     if (result.fingerprintMismatch) return { results, stopped: `${run.slot.slot_id} did not reproduce the frozen non-Skill fingerprint` };
