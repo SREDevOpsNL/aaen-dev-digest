@@ -117,6 +117,20 @@ correction. Genuinely cross-package findings belong in
   stack's evidence outside the repository
   (`~/.devdigest/hw2-experiments/hw2f-f53ed971/gate3-slot1/`, `gate3-slot2/`).
 
+- **2026-10-22** — Extension of the 2026-10-21 SDK `APIError` entry above:
+  on a cancellation, rethrowing "the error we caught" is only safe for the
+  SDK's own `APIUserAbortError`, which it builds with no status, body or
+  headers (`super(undefined, undefined, message, undefined)`). An abort can
+  coincide with a status error that already carries the body and headers. Throw
+  `signal.reason` instead (`req.signal.throwIfAborted()`): the caller still
+  sees a cancellation, and no provider data travels. The same applies to
+  telemetry built before the outcome is known: the HTTP-200 error branch reused
+  the success path's `routerMetadataRaw`. Evidence:
+  `reviewer-core/node_modules/openai/error.js` (`APIUserAbortError`),
+  `reviewer-core/src/llm/openrouter.ts` (`completeExperiment` catch and
+  no-choices branch), `reviewer-core/test/openrouter-error-detail.test.ts`
+  ("a cancellation coinciding with a provider error").
+
 ## Decisions
 
 ## Recurring Errors & Fixes

@@ -20,7 +20,7 @@ import {
   summarizeGeneration,
   summarizeRouterMetadata,
 } from './openrouter-metadata.js';
-import { ExperimentRequestError, attemptErrorDetail, sanitizeText } from './error-detail.js';
+import { ExperimentRequestError, attemptErrorDetail, failedResponseTelemetry, sanitizeText } from './error-detail.js';
 
 /** Bound on a persisted failure reason. */
 const FAILURE_REASON_MAX = 500;
@@ -271,9 +271,11 @@ export class OpenRouterProvider implements LLMProvider {
       // With an HTTP status the SDK's message can be the JSON of the whole error
       // body (the upstream's raw payload included) or a non-JSON body verbatim,
       // so the reason is rebuilt from the sanitized detail. Without a status the
-      // message is the SDK's or runtime's own text.
-      const failureReason =
-        status !== null && errorDetail
+      // message is the SDK's or runtime's own text. A cancellation records a
+      // fixed reason: the error it coincided with may be a provider response.
+      const failureReason = cancelled
+        ? 'cancelled during the request'
+        : status !== null && errorDetail
           ? `${status} ${errorDetail.message ?? 'error without a message'}`
           : (sanitizeText(err instanceof Error ? err.message : null, FAILURE_REASON_MAX, secrets) ?? 'request failed');
       report({
@@ -283,8 +285,15 @@ export class OpenRouterProvider implements LLMProvider {
         failureReason,
         errorDetail,
       });
-      // A cancellation keeps its abort error; anything else leaves only the sanitized form.
-      if (cancelled) throw err;
+      if (cancelled) {
+        // The SDK's abort error carries no status, body or headers. Any other
+        // error that coincides with the caller's abort (an HTTP error answered
+        // before the abort took effect) may, so it is replaced by the signal's
+        // own reason, exactly as a cancellation before dispatch is.
+        if (err instanceof OpenAI.APIUserAbortError) throw err;
+        req.signal?.throwIfAborted();
+        throw new OpenAI.APIUserAbortError();
+      }
       throw new ExperimentRequestError(failureReason, status);
     }
 
@@ -318,7 +327,9 @@ export class OpenRouterProvider implements LLMProvider {
       // An HTTP 200 whose body holds only an `error` (an upstream failure after OpenRouter committed the status).
       const errorDetail = attemptErrorDetail({ errorBody: (data as unknown as { error?: unknown }).error, headers, secrets: [this.apiKey] });
       const reason = `OpenRouter returned no choices for ${req.schemaName}${errorDetail.message ? `: ${errorDetail.message}` : ''}`;
-      report({ ...dispatched, outcome: 'http_error', failureReason: reason, errorDetail });
+      // A failed generation: no raw `openrouter_metadata`, only bounded identifiers.
+      const failed = failedResponseTelemetry(dispatched as StructuredAttemptTelemetry, [this.apiKey]);
+      report({ ...dispatched, ...failed, outcome: 'http_error', failureReason: reason, errorDetail });
       throw new ExperimentRequestError(reason, null);
     }
     const raw = choice.message?.content ?? '';

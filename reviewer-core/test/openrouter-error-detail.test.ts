@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import type { StructuredAttemptTelemetry, StructuredExperimentOptions, StructuredRequest } from '@devdigest/shared';
 import { OpenRouterProvider } from '../src/llm/openrouter.js';
-import { ExperimentRequestError, attemptErrorDetail, sanitizeText } from '../src/llm/error-detail.js';
+import { ExperimentRequestError, attemptErrorDetail, failedResponseTelemetry, sanitizeText } from '../src/llm/error-detail.js';
 
 const Result = z.object({ ok: z.boolean() });
 /** A key-shaped value and one that matches no secret pattern: both must never be persisted. */
@@ -164,6 +164,42 @@ function realProvider(baseURL: string) {
 /** Everything a failed slot would persist: the attempt, its failure reason, and the thrown error's message. */
 const persisted = (attempts: StructuredAttemptTelemetry[], error: unknown) => JSON.stringify({ attempts, message: (error as Error).message });
 
+describe('failedResponseTelemetry (pure)', () => {
+  it('keeps no raw metadata and only bounded, plain identifiers and finite numbers; never throws', () => {
+    const hostile = new Proxy({}, { get: () => { throw new Error('boom'); } });
+    const failed = failedResponseTelemetry({
+      responseId: `gen-x Bearer ${KEY}`,
+      generationIdHeader: 'gen-ok_1',
+      servedModel: '<model>',
+      tokensIn: -1,
+      tokensOut: 1.5,
+      costUsd: Number.NaN,
+      router: { selected: [{ provider: 'DeepInfra', model: KEY }, hostile as never], attempt: 1, attemptsCount: 2, requested: 'deepseek/deepseek-v4-flash', strategy: 'x'.repeat(65) },
+      generation: {
+        status: 'found', providerName: 'DeepInfra', model: `m ${KEY}`, finishReason: 'error', tokensPrompt: 10, tokensCompletion: null, totalCost: 0.0002,
+        providerResponses: [{ providerName: 'DeepInfra', endpointId: 'ep-1', modelPermaslug: '<slug>', status: 429 }],
+      },
+    });
+    expect(failed).toEqual({
+      routerMetadataRaw: null,
+      responseId: null,
+      generationIdHeader: 'gen-ok_1',
+      servedModel: null,
+      finishReason: null,
+      tokensIn: null,
+      tokensOut: null,
+      costUsd: null,
+      router: { selected: [{ provider: 'DeepInfra', model: '[redacted]' }, { provider: '[redacted]', model: '[redacted]' }], attempt: 1, attemptsCount: 2, requested: 'deepseek/deepseek-v4-flash', strategy: null },
+      generation: {
+        status: 'found', providerName: 'DeepInfra', model: null, finishReason: 'error', tokensPrompt: 10, tokensCompletion: null, totalCost: 0.0002,
+        providerResponses: [{ providerName: 'DeepInfra', endpointId: 'ep-1', modelPermaslug: null, status: 429 }],
+      },
+    });
+    expect(JSON.stringify(failed)).not.toContain(KEY);
+    expect(() => failedResponseTelemetry(hostile as never)).not.toThrow();
+  });
+});
+
 describe('experiment request errors through the real SDK (loopback, no network)', () => {
   let srv: Awaited<ReturnType<typeof scriptedServer>>;
   afterEach(async () => srv?.close());
@@ -271,6 +307,103 @@ describe('experiment request errors through the real SDK (loopback, no network)'
     expect(srv.requests).toHaveLength(1);
     expect(error).toBeInstanceOf(ExperimentRequestError);
     expect(attempts[0]).toMatchObject({ outcome: 'network_error', httpStatus: null, errorDetail: { origin: 'no_body' } });
+  });
+
+  it('an HTTP 200 error body never keeps its openrouter_metadata, and bounds every identifier', async () => {
+    srv = await scriptedServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json', 'x-generation-id': `gen-${KEY}` });
+      res.end(JSON.stringify({
+        id: `gen-err ${req.headers.authorization}`,
+        model: '<model>',
+        error: { code: 502, message: 'Provider returned error', metadata: { provider_name: 'DeepInfra' } },
+        openrouter_metadata: {
+          requested: 'deepseek/deepseek-v4-flash',
+          strategy: 'direct',
+          attempt: 1,
+          attempts: [{}],
+          endpoints: { available: [{ provider: 'DeepInfra', model: `echo ${req.headers.authorization}`, selected: true }] },
+          debug: { echoed_authorization: req.headers.authorization, internal: 'routing-secret-marker' },
+        },
+      }));
+    });
+    const { provider, attempts, request } = realProvider(srv.baseURL);
+    const error = await provider.completeStructured(request).catch((e: unknown) => e);
+    expect(srv.requests).toHaveLength(1);
+    expect(error).toBeInstanceOf(ExperimentRequestError);
+    expect(attempts[0]).toMatchObject({
+      outcome: 'http_error',
+      httpStatus: 200,
+      routerMetadataRaw: null,
+      responseId: null,
+      generationIdHeader: null,
+      servedModel: null,
+      finishReason: null,
+      router: { selected: [{ provider: 'DeepInfra', model: '[redacted]' }], attempt: 1, attemptsCount: 1, requested: 'deepseek/deepseek-v4-flash', strategy: 'direct' },
+      errorDetail: { origin: 'upstream_provider', code: 502, providerName: 'DeepInfra' },
+    });
+    for (const leaked of [KEY, 'routing-secret-marker', 'echoed_authorization', 'echo Bearer']) expect(persisted(attempts, error)).not.toContain(leaked);
+  });
+
+  it('a successful generation keeps its openrouter_metadata exactly as received', async () => {
+    const metadata = {
+      requested: 'deepseek/deepseek-v4-flash',
+      strategy: 'direct',
+      attempt: 1,
+      attempts: [{}],
+      endpoints: { total: 2, available: [{ provider: 'DeepInfra', model: 'deepseek/deepseek-v4-flash', selected: true }] },
+      region: 'AMS',
+    };
+    srv = await scriptedServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        id: 'gen-ok1',
+        model: 'deepseek/deepseek-v4-flash',
+        choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.0001 },
+        openrouter_metadata: metadata,
+      }));
+    });
+    const { provider, attempts, request } = realProvider(srv.baseURL);
+    const result = await provider.completeStructured(request);
+    expect(result.data).toEqual({ ok: true });
+    expect(attempts[0]).toMatchObject({ outcome: 'valid', responseId: 'gen-ok1', finishReason: 'stop', costUsd: 0.0001, errorDetail: null });
+    expect(attempts[0]!.routerMetadataRaw).toEqual(metadata);
+  });
+
+  it('a cancellation coinciding with a provider error propagates neither its body nor its headers', async () => {
+    const controller = new AbortController();
+    // A real SDK status error, as the SDK builds it from a response: sensitive body and headers attached.
+    const sensitive = OpenAI.APIError.generate(
+      429,
+      { error: { code: 429, metadata: { provider_name: 'DeepInfra', raw: `echo Bearer ${KEY}` } } },
+      undefined,
+      { 'x-request-id': 'req_c1', 'set-cookie': 'session=s3cret' } as never,
+    );
+    expect(sensitive.message).toContain(KEY); // the SDK's own message is the JSON of the body
+    const { provider, attempts, request } = realProvider('http://127.0.0.1:1/v1');
+    (provider as unknown as { client: unknown }).client = {
+      chat: { completions: { create: () => ({ withResponse: () => { controller.abort(); return Promise.reject(sensitive); } }) } },
+    };
+    const error = await provider.completeStructured({ ...request, signal: controller.signal }).catch((e: unknown) => e);
+    expect(error).not.toBe(sensitive);
+    expect(error).not.toBeInstanceOf(OpenAI.APIError);
+    expect((error as Error).name).toBe('AbortError'); // the signal's own reason: still a cancellation
+    expect(attempts).toEqual([expect.objectContaining({ dispatch: 'dispatched', outcome: 'cancelled', failureReason: 'cancelled during the request', errorDetail: null })]);
+    const everything = JSON.stringify({ attempts, message: (error as Error).message, own: Object.getOwnPropertyNames(error).map((k) => String((error as Record<string, unknown>)[k])) });
+    for (const leaked of [KEY, 's3cret', 'echo Bearer', 'req_c1']) expect(everything).not.toContain(leaked);
+  });
+
+  it('a cancellation through the real SDK keeps the SDK abort error and the cancelled outcome', async () => {
+    srv = await scriptedServer(() => undefined); // never answers
+    const { provider, attempts, request } = realProvider(srv.baseURL);
+    const controller = new AbortController();
+    const pending = provider.completeStructured({ ...request, signal: controller.signal }).catch((e: unknown) => e);
+    await new Promise<void>((resolve) => { const tick = () => (srv.requests.length > 0 ? resolve() : setTimeout(tick, 5)); tick(); });
+    controller.abort();
+    const error = await pending;
+    expect(error).toBeInstanceOf(OpenAI.APIUserAbortError);
+    expect(srv.requests).toHaveLength(1);
+    expect(attempts).toEqual([expect.objectContaining({ outcome: 'cancelled', failureReason: 'cancelled during the request', errorDetail: null })]);
   });
 
   it('leaves ordinary calls unchanged: they still throw the SDK error', async () => {

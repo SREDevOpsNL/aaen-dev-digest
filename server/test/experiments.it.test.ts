@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -609,9 +609,14 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     await pg.handle.db.delete(t.repos).where(and(eq(t.repos.workspaceId, workspaceId), eq(t.repos.fullName, 'someone/real')));
   });
 
-  it('a provider 429 through the real provider, SDK and extractor: one request, sanitized detail persisted, the key nowhere', async () => {
-    // A loopback stand-in for OpenRouter: endpoint metadata for the preflight, and a 429 for the one generation.
-    const KEY = 'sk-or-v1-itest0123456789abcdef0123456789';
+  /** The real provider's key in the loopback slots below: it must never be persisted. */
+  const LOOPBACK_KEY = 'sk-or-v1-itest0123456789abcdef0123456789';
+  /**
+   * One experiment slot through the real OpenRouterProvider, SDK and extractor
+   * against a loopback stand-in for OpenRouter: endpoint metadata for the
+   * preflight, and `chat` for the one generation. Returns what was persisted.
+   */
+  async function loopbackSlot(chat: (req: IncomingMessage, res: ServerResponse) => void) {
     const chats: Array<{ authorization: string | undefined }> = [];
     const server: Server = createServer((req, res) => {
       req.resume();
@@ -623,9 +628,7 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
         }
         if (req.method === 'POST' && req.url === '/v1/chat/completions') {
           chats.push({ authorization: req.headers.authorization });
-          res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '20', 'x-ratelimit-remaining': '0', 'x-request-id': 'req_itest_1', 'set-cookie': 'session=itestsecret' });
-          // No `message`: the SDK then builds its error message from the whole body, echoed credential included.
-          res.end(JSON.stringify({ error: { code: 429, metadata: { error_type: 'rate_limit_exceeded', provider_code: 'rate_limited', provider_name: 'DeepInfra', raw: `upstream saw ${req.headers.authorization}` } } }));
+          chat(req, res);
           return;
         }
         res.writeHead(404);
@@ -647,7 +650,7 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
         git: new MockGitClient({ diff: '' }),
         github: new MockGitHubClient(),
         // maxRetries 2 on the client: the experiment path must still send exactly one request.
-        llm: { openrouter: new OpenRouterProvider(KEY, { baseURL: `http://127.0.0.1:${port}/v1`, maxRetries: 2 }) },
+        llm: { openrouter: new OpenRouterProvider(LOOPBACK_KEY, { baseURL: `http://127.0.0.1:${port}/v1`, maxRetries: 2 }) },
       },
     });
     try {
@@ -673,37 +676,77 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
         },
         { timeout: 15_000, interval: 100 },
       );
-      expect(chats).toHaveLength(1); // one generation request, no SDK retry
-      expect(chats[0]!.authorization).toBe(`Bearer ${KEY}`);
-      expect(run).toMatchObject({ status: 'failed', costUsd: null });
-      expect(run.error).toMatch(/^429 /);
-      expect(trace.experiment).toMatchObject({ dispatch_state: 'failed', usage_known: false });
-      expect(trace.experiment.attempts).toHaveLength(1);
-      expect(trace.experiment.attempts[0]).toMatchObject({
-        dispatch: 'dispatched',
-        outcome: 'http_error',
-        httpStatus: 429,
-        errorDetail: {
-          origin: 'upstream_provider',
-          code: 429,
-          errorType: 'rate_limit_exceeded',
-          providerCode: 'rate_limited',
-          providerName: 'DeepInfra',
-          upstreamRawPresent: true,
-          requestId: 'req_itest_1',
-          retryAfter: '20',
-          rateLimit: { 'x-ratelimit-remaining': '0' },
-        },
-      });
       const slot = (await real.inject({ url: `/experiments/slots/${slotId}` })).json();
       // Every persisted or served form of the failure: run row (error), trace (log, attempts, refusal reason), slot lookup.
-      for (const serialized of [JSON.stringify(run), JSON.stringify(trace), JSON.stringify(slot)]) {
-        for (const leaked of [KEY, 'itestsecret', 'upstream saw']) expect(serialized).not.toContain(leaked);
-      }
-      expect(trace.log.some((line: { msg: string }) => /Run failed: 429 /.test(line.msg))).toBe(true);
+      return { chats, run, trace, serialized: [JSON.stringify(run), JSON.stringify(trace), JSON.stringify(slot)] };
     } finally {
       await real.close();
       await new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
     }
+  }
+
+  it('a provider 429 through the real provider, SDK and extractor: one request, sanitized detail persisted, the key nowhere', async () => {
+    const { chats, run, trace, serialized } = await loopbackSlot((req, res) => {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '20', 'x-ratelimit-remaining': '0', 'x-request-id': 'req_itest_1', 'set-cookie': 'session=itestsecret' });
+      // No `message`: the SDK then builds its error message from the whole body, echoed credential included.
+      res.end(JSON.stringify({ error: { code: 429, metadata: { error_type: 'rate_limit_exceeded', provider_code: 'rate_limited', provider_name: 'DeepInfra', raw: `upstream saw ${req.headers.authorization}` } } }));
+    });
+    expect(chats).toHaveLength(1); // one generation request, no SDK retry
+    expect(chats[0]!.authorization).toBe(`Bearer ${LOOPBACK_KEY}`);
+    expect(run).toMatchObject({ status: 'failed', costUsd: null });
+    expect(run.error).toMatch(/^429 /);
+    expect(trace.experiment).toMatchObject({ dispatch_state: 'failed', usage_known: false });
+    expect(trace.experiment.attempts).toHaveLength(1);
+    expect(trace.experiment.attempts[0]).toMatchObject({
+      dispatch: 'dispatched',
+      outcome: 'http_error',
+      httpStatus: 429,
+      errorDetail: {
+        origin: 'upstream_provider',
+        code: 429,
+        errorType: 'rate_limit_exceeded',
+        providerCode: 'rate_limited',
+        providerName: 'DeepInfra',
+        upstreamRawPresent: true,
+        requestId: 'req_itest_1',
+        retryAfter: '20',
+        rateLimit: { 'x-ratelimit-remaining': '0' },
+      },
+    });
+    for (const text of serialized) for (const leaked of [LOOPBACK_KEY, 'itestsecret', 'upstream saw']) expect(text).not.toContain(leaked);
+    expect(trace.log.some((line: { msg: string }) => /Run failed: 429 /.test(line.msg))).toBe(true);
+  });
+
+  it('an HTTP 200 error body persists no openrouter_metadata and no unsafe identifier', async () => {
+    const { chats, run, trace, serialized } = await loopbackSlot((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json', 'x-generation-id': `gen-${LOOPBACK_KEY}` });
+      res.end(JSON.stringify({
+        id: `gen-err ${req.headers.authorization}`,
+        model: '<model>',
+        error: { code: 502, message: 'Provider returned error', metadata: { provider_name: 'DeepInfra' } },
+        openrouter_metadata: {
+          requested: MODEL,
+          strategy: 'direct',
+          attempt: 1,
+          attempts: [{}],
+          endpoints: { available: [{ provider: 'DeepInfra', model: `echo ${req.headers.authorization}`, selected: true }] },
+          debug: { echoed_authorization: req.headers.authorization, internal: 'routing-itest-marker' },
+        },
+      }));
+    });
+    expect(chats).toHaveLength(1);
+    expect(run).toMatchObject({ status: 'failed', costUsd: null });
+    expect(trace.experiment).toMatchObject({ dispatch_state: 'failed', usage_known: false });
+    expect(trace.experiment.attempts[0]).toMatchObject({
+      outcome: 'http_error',
+      httpStatus: 200,
+      routerMetadataRaw: null,
+      responseId: null,
+      generationIdHeader: null,
+      servedModel: null,
+      router: { selected: [{ provider: 'DeepInfra', model: '[redacted]' }], attempt: 1, requested: MODEL, strategy: 'direct' },
+      errorDetail: { origin: 'upstream_provider', code: 502, providerName: 'DeepInfra' },
+    });
+    for (const text of serialized) for (const leaked of [LOOPBACK_KEY, 'routing-itest-marker', 'echoed_authorization', 'echo Bearer']) expect(text).not.toContain(leaked);
   });
 });

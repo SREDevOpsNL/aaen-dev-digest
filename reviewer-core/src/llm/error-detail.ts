@@ -1,4 +1,4 @@
-import type { AttemptErrorDetail } from '@devdigest/shared';
+import type { AttemptErrorDetail, StructuredAttemptTelemetry } from '@devdigest/shared';
 
 /**
  * Minimized, sanitized diagnostics for a failed HW2 experiment request.
@@ -172,6 +172,70 @@ export function attemptErrorDetail(input: {
     };
   } catch {
     return emptyErrorDetail();
+  }
+}
+
+/**
+ * The telemetry of an HTTP 200 that carried no generation, only an `error`
+ * body. The response and its `openrouter_metadata` describe a failure, so
+ * nothing arbitrary from them is kept:
+ * - no raw `openrouter_metadata`;
+ * - ids, model names, provider names and strategies only as bounded, plain
+ *   tokens (an unsafe one becomes null, or `[redacted]` where a string is
+ *   required);
+ * - counts and costs only as finite, non-negative numbers.
+ * Never throws. A successful generation keeps its telemetry unchanged.
+ */
+export function failedResponseTelemetry(
+  t: Pick<StructuredAttemptTelemetry, 'responseId' | 'generationIdHeader' | 'servedModel' | 'tokensIn' | 'tokensOut' | 'costUsd' | 'router' | 'generation'>,
+  secrets: readonly string[] = [],
+): Pick<StructuredAttemptTelemetry, 'responseId' | 'generationIdHeader' | 'servedModel' | 'finishReason' | 'tokensIn' | 'tokensOut' | 'costUsd' | 'router' | 'generation' | 'routerMetadataRaw'> {
+  const bag: Bag = { redacted: false };
+  const tok = (value: unknown, max = TOKEN_MAX) => token(value, max, secrets, bag);
+  const required = (value: unknown) => tok(value) ?? REDACTED;
+  const count = (value: unknown) => (typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null);
+  const usd = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null);
+  try {
+    const router = t.router;
+    const generation = t.generation;
+    return {
+      routerMetadataRaw: null,
+      responseId: tok(t.responseId, REQUEST_ID_MAX),
+      generationIdHeader: tok(t.generationIdHeader, REQUEST_ID_MAX),
+      servedModel: tok(t.servedModel),
+      finishReason: null,
+      tokensIn: count(t.tokensIn),
+      tokensOut: count(t.tokensOut),
+      costUsd: usd(t.costUsd),
+      router: router
+        ? {
+            selected: (Array.isArray(router.selected) ? router.selected : []).map((s) => ({ provider: required(get(s, 'provider')), model: required(get(s, 'model')) })),
+            attempt: count(router.attempt),
+            attemptsCount: count(router.attemptsCount),
+            requested: tok(router.requested),
+            strategy: tok(router.strategy),
+          }
+        : null,
+      generation: generation
+        ? {
+            status: generation.status === 'found' || generation.status === 'not_found' ? generation.status : 'unavailable',
+            providerName: tok(generation.providerName),
+            model: tok(generation.model),
+            finishReason: tok(generation.finishReason),
+            tokensPrompt: count(generation.tokensPrompt),
+            tokensCompletion: count(generation.tokensCompletion),
+            totalCost: usd(generation.totalCost),
+            providerResponses: (Array.isArray(generation.providerResponses) ? generation.providerResponses : []).map((r) => ({
+              providerName: tok(get(r, 'providerName')),
+              endpointId: tok(get(r, 'endpointId'), REQUEST_ID_MAX),
+              modelPermaslug: tok(get(r, 'modelPermaslug')),
+              status: count(get(r, 'status')),
+            })),
+          }
+        : null,
+    };
+  } catch {
+    return { routerMetadataRaw: null, responseId: null, generationIdHeader: null, servedModel: null, finishReason: null, tokensIn: null, tokensOut: null, costUsd: null, router: null, generation: null };
   }
 }
 
