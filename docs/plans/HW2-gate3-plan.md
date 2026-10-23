@@ -476,6 +476,17 @@ Final ledger:
       `attempt: 1` alone stays insufficient. The fix changes the
       implementation fingerprint, so the next exploration stack repeats
       Phase 0.
+  - **Risk: the request timeout versus throughput** (measured 2026-10-23
+    from the Gate 3 generation records).
+    - DeepInfra produced 479 tokens in 33.2 s and 432 tokens in 49.3 s, that
+      is 14.4 and 8.8 tokens/s.
+    - At those rates the SDK's 90 s request timeout ends any completion
+      longer than about 790–1,280 tokens, far below the 16,000 output cap.
+      Experiment 17's output length is still unknown.
+    - A timed-out request fails with unknown cost: it is charged its full
+      reservation and never replaced. A longer timeout also needs a longer
+      runner deadline; `test/hw2-generation-lookup.test.ts` checks that the
+      two fit together.
   - **Risk: 429s versus a complete result.**
     - 2 of 4 dispatched Gate 3 attempts failed with 429.
     - A cell counts only with 5 counted slots, and failed slots are never
