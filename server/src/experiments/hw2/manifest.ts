@@ -19,7 +19,7 @@ export interface ManifestInput {
   implementationFingerprint: string;
   /** Per experiment, the non-Skill fingerprint from the free preview; every counted slot must reproduce it. */
   nonSkillFingerprints: Record<string, string>;
-  stack: { database: string; provider: string; providerName: string | null; model: string; maxOutputTokens: number; prices: unknown; generationLookup: unknown };
+  stack: { database: string; provider: string; providerName: string | null; model: string; servedModel: string | null; maxOutputTokens: number; prices: unknown; generationLookup: unknown };
   skills: Array<{ name: string; body: string }>;
   agents: Array<{ name: string; system_prompt: string; model: string; strategy: string; repo_intel: boolean }>;
   schedule: { seed: number; slots: Slot[] };

@@ -128,6 +128,13 @@ export function describeErrorDetail(detail: AttemptErrorDetail | null | undefine
 
 const INFRA_OUTCOMES = new Set(['http_error', 'network_error']);
 
+/**
+ * How long a slot's run may stay unsettled before it is recorded `ambiguous`.
+ * It must cover the request timeout plus the generation lookup's deadline
+ * (`test/hw2-generation-lookup.test.ts` checks the margin).
+ */
+export const DEFAULT_POLL_TIMEOUT_MS = 180_000;
+
 /** Run one scheduled slot. Never retries it: every outcome is final. */
 export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResult> {
   const existing = deps.ledger.slots().get(run.slot.slot_id);
@@ -168,7 +175,7 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
   }
   deps.ledger.append({ ...base, state: 'dispatched', run_id: runId });
 
-  const deadline = Date.now() + (deps.pollTimeoutMs ?? 180_000);
+  const deadline = Date.now() + (deps.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS);
   while (Date.now() < deadline) {
     await wait(deps, deps.pollIntervalMs ?? 1_000);
     const lookup = await deps.api.get<SlotLookup>(`/experiments/slots/${run.slot.slot_id}`).catch(() => null);

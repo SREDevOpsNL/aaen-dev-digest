@@ -37,6 +37,7 @@ export interface ExperimentIdentity {
   provider: string;
   provider_name: string | null;
   model: string;
+  served_model: string | null;
   max_output_tokens: number;
   prices: ExperimentConfig['prices'];
   generation_lookup: ExperimentConfig['generationLookup'];
@@ -84,6 +85,7 @@ export class ExperimentsService {
       provider: config.provider,
       provider_name: config.providerName,
       model: config.model,
+      served_model: config.servedModel,
       max_output_tokens: config.maxOutputTokens,
       prices: config.prices,
       generation_lookup: config.generationLookup,

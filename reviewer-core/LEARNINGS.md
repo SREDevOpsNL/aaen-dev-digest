@@ -119,6 +119,27 @@ correction. Genuinely cross-package findings belong in
   no-choices branch), `reviewer-core/test/openrouter-error-detail.test.ts`
   ("a cancellation coinciding with a provider error").
 
+- **2026-10-23** — What OpenRouter documents about provenance, and what it
+  does not (checked 2026-10-22):
+  - **`openrouter_metadata.attempt`** is only "the attempt number that
+    succeeded". The docs' own guardrail example shows `attempt: 1` for a
+    request that never reached a provider.
+  - **`attempts`** is optional, described for router fallbacks, and was absent
+    from both completed HW2 Gate 3 responses. So `attempt: 1` never proves one
+    upstream request.
+  - **`provider_responses`** in a `GET /generation` record is documented as one
+    entry per upstream attempt, fallbacks included. A found record with exactly
+    one response is the documented evidence of a single attempt.
+  - **The generation endpoint documents no availability delay.** In Gate 3 the
+    record appeared 29–38 s after the response.
+
+  Poll for it within a hard deadline, re-reading 404, 429, 5xx, timed-out
+  reads, and records whose `provider_responses` are still empty. Evidence:
+  https://openrouter.ai/docs/guides/features/router-metadata.md,
+  https://openrouter.ai/docs/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation.md,
+  `reviewer-core/src/llm/openrouter.ts` (`lookupGeneration`),
+  `reviewer-core/test/openrouter-generation-lookup.test.ts`.
+
 ## Decisions
 
 ## Recurring Errors & Fixes

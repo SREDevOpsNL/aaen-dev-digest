@@ -361,6 +361,7 @@ async function currentManifest(flags: Flags, stack: Stack, root: string): Promis
       provider: identity.provider,
       providerName: identity.provider_name,
       model: identity.model,
+      servedModel: identity.served_model ?? null,
       maxOutputTokens: identity.max_output_tokens,
       prices: identity.prices,
       generationLookup: identity.generation_lookup,
@@ -529,6 +530,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       const root = repoRoot();
       const frozen = preregisteredManifest<Manifest>(need(flags, 'prereg'), root);
       if (!frozen.stack.providerName) throw new Error('The pre-registration has no frozen serving-provider name');
+      if (!frozen.stack.servedModel) throw new Error('The pre-registration has no frozen served model');
       const ledger = new Ledger(experimentDir(stack.stackId));
       const { prId } = await lookupIds(stack.api);
       const runs = new Map<string, SlotRunData | null>();
@@ -586,6 +588,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
           return {
             providerName: frozen.stack.providerName!,
             model: frozen.stack.model,
+            servedModel: frozen.stack.servedModel!,
             expectedDiffSha256: frozen.fixtures.find((f) => f.number === fixture.number)!.diff_sha256,
           };
         },

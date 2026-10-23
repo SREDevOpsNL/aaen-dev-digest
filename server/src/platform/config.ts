@@ -81,7 +81,14 @@ export interface ExperimentConfig {
   provider: string;
   /** Expected serving-provider display name; null until exploration freezes it. */
   providerName: string | null;
+  /** The requested model slug; the chat response's `model` echoes it. */
   model: string;
+  /**
+   * The served model version OpenRouter's own records name (router
+   * `selected.model`, generation `model`, each response's `model_permaslug`),
+   * e.g. `deepseek/deepseek-v4-flash-20260423`; null until exploration freezes it.
+   */
+  servedModel: string | null;
   maxOutputTokens: number;
   /** Frozen prices: USD per input token, per output token, per request. */
   prices: { input: number; output: number; request: number };
@@ -111,6 +118,7 @@ const ExperimentEnv = z.object({
   DEVDIGEST_EXPERIMENT_PROVIDER: z.string().regex(/^[a-z0-9][a-z0-9._/-]*$/),
   DEVDIGEST_EXPERIMENT_PROVIDER_NAME: z.string().min(1).optional(),
   DEVDIGEST_EXPERIMENT_MODEL: z.string().min(1),
+  DEVDIGEST_EXPERIMENT_SERVED_MODEL: z.string().min(1).optional(),
   DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(200_000),
   DEVDIGEST_EXPERIMENT_PRICE_INPUT: z.coerce.number().positive(),
   DEVDIGEST_EXPERIMENT_PRICE_OUTPUT: z.coerce.number().positive(),
@@ -118,6 +126,13 @@ const ExperimentEnv = z.object({
   DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP: z.enum(['0', '1']).default('1'),
   DEVDIGEST_EXPERIMENT_CAPABILITY_PATH: z.string().min(1).optional(),
 });
+
+/**
+ * Generation-metadata polling: OpenRouter's record appeared 29–38 s after the
+ * response in HW2 Gate 3, so up to 13 reads 5 s apart (60 s, plus one read's
+ * timeout; `generationLookupDeadlineMs` in reviewer-core).
+ */
+export const EXPERIMENT_GENERATION_LOOKUP = { attempts: 13, delayMs: 5_000 } as const;
 
 /**
  * Experiment mode is all-or-nothing: no variable set → null; some set but a
@@ -140,13 +155,14 @@ export function loadExperimentConfig(env: NodeJS.ProcessEnv): ExperimentConfig |
     provider: e.DEVDIGEST_EXPERIMENT_PROVIDER,
     providerName: e.DEVDIGEST_EXPERIMENT_PROVIDER_NAME ?? null,
     model: e.DEVDIGEST_EXPERIMENT_MODEL,
+    servedModel: e.DEVDIGEST_EXPERIMENT_SERVED_MODEL ?? null,
     maxOutputTokens: e.DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS,
     prices: {
       input: e.DEVDIGEST_EXPERIMENT_PRICE_INPUT,
       output: e.DEVDIGEST_EXPERIMENT_PRICE_OUTPUT,
       request: e.DEVDIGEST_EXPERIMENT_PRICE_REQUEST,
     },
-    generationLookup: e.DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP === '1' ? { attempts: 5, delayMs: 1_000 } : null,
+    generationLookup: e.DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP === '1' ? { ...EXPERIMENT_GENERATION_LOOKUP } : null,
     capabilityPath:
       e.DEVDIGEST_EXPERIMENT_CAPABILITY_PATH ??
       join(homedir(), '.devdigest', 'hw2-experiments', e.DEVDIGEST_EXPERIMENT_STACK_ID, 'capability.json'),
