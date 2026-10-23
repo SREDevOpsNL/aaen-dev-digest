@@ -95,13 +95,6 @@ export interface ExperimentConfig {
   capabilityPath: string;
 }
 
-/**
- * Generation-metadata polling: OpenRouter's record appeared 29–38 s after the
- * response in HW2 Gate 3, so up to 13 reads 5 s apart (60 s, plus one read's
- * timeout; `generationLookupDeadlineMs` in reviewer-core).
- */
-export const EXPERIMENT_GENERATION_LOOKUP = { attempts: 13, delayMs: 5_000 } as const;
-
 const EXPERIMENT_REQUIRED = [
   'DEVDIGEST_EXPERIMENT_STACK_ID',
   'DEVDIGEST_EXPERIMENT_PROVIDER',
@@ -124,6 +117,13 @@ const ExperimentEnv = z.object({
   DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP: z.enum(['0', '1']).default('1'),
   DEVDIGEST_EXPERIMENT_CAPABILITY_PATH: z.string().min(1).optional(),
 });
+
+/**
+ * Generation-metadata polling: OpenRouter's record appeared 29–38 s after the
+ * response in HW2 Gate 3, so up to 13 reads 5 s apart (60 s, plus one read's
+ * timeout; `generationLookupDeadlineMs` in reviewer-core).
+ */
+export const EXPERIMENT_GENERATION_LOOKUP = { attempts: 13, delayMs: 5_000 } as const;
 
 /**
  * Experiment mode is all-or-nothing: no variable set → null; some set but a
