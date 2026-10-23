@@ -107,6 +107,17 @@ scripts/e2e.sh --serve
 It seeds the fixture PRs #501 and #502 (with fresh cached intents) and the
 labelled synthetic convention candidates. Ctrl-C tears everything down.
 
+The stack listens on loopback only:
+- Postgres is published on `127.0.0.1`.
+- The experiment-mode API binds `127.0.0.1` (not configurable).
+- The UI starts with `next dev -H 127.0.0.1`.
+
+Before printing that it is up, `--serve` reads the kernel's listening sockets
+with `ss`, not the URLs. It tears the stack down if any listener on the API or
+web port is not `127.0.0.1`. Whether a browser on the Windows host still
+reaches it through WSL's localhost forwarding is not yet verified: check it on
+the next stack before the row 19/20 screenshots.
+
 ### 3. Unpaid runner commands
 
 Run the runner from `server/` in a second terminal. First set the stack
@@ -134,7 +145,8 @@ pnpm exec tsx src/experiments/hw2/cli.ts check "${STACK[@]}"
 - a single repository, the fixtures present, and no PR #3;
 - no clone of the fixture repo;
 - the container labels;
-- a loopback, non-development API port;
+- a loopback, non-development API port (the bind itself is checked by
+  `--serve`, above);
 - that the stack reads the dedicated key file. It checks the file's path only.
   Whether a key is present is the `openrouter_key_configured` flag of
   `GET /experiments/identity`, and `run` refuses without one.

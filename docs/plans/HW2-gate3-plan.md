@@ -411,6 +411,10 @@ Final ledger:
   (`server/src/server.ts`, `host: '0.0.0.0'`). R9's loopback condition holds
   for the URL the tools use, not for the bind address. Paid generation still
   needs the capability.
+  - Fix (draft PR `hw2/experiment-loopback`, not merged): the experiment-mode
+    API binds `127.0.0.1`, `--serve` binds the UI with `-H 127.0.0.1`, and it
+    refuses to serve unless every listener on both ports is loopback. Normal
+    development keeps `0.0.0.0`.
 
 **Neither X2 outcome is evidence for or against the effectiveness of a Skill**
 ([Methodology](#methodology)).

@@ -41,6 +41,12 @@ const EnvSchema = z.object({
 export type AppConfig = {
   databaseUrl: string;
   apiPort: number;
+  /**
+   * Interface the API listens on: `0.0.0.0` normally, and loopback only
+   * (`EXPERIMENT_API_HOST`) in experiment mode, whose runner and UI reach it at
+   * 127.0.0.1. Not configurable, so an experiment stack cannot be exposed.
+   */
+  apiHost: string;
   webPort: number;
   /** Absolute path where repos are cloned (~/.devdigest/workspace by default). */
   cloneDir: string;
@@ -94,6 +100,9 @@ export interface ExperimentConfig {
    */
   capabilityPath: string;
 }
+
+/** The only interface an experiment-mode API listens on. */
+export const EXPERIMENT_API_HOST = '127.0.0.1';
 
 const EXPERIMENT_REQUIRED = [
   'DEVDIGEST_EXPERIMENT_STACK_ID',
@@ -169,6 +178,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     databaseUrl: parsed.DATABASE_URL,
     apiPort: parsed.API_PORT,
+    apiHost: experiment ? EXPERIMENT_API_HOST : '0.0.0.0',
     webPort: parsed.WEB_PORT,
     cloneDir,
     // An experiment stack reads only its dedicated key file (no env fallback, see

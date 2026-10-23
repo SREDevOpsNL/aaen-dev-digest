@@ -81,6 +81,20 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   (fetch stub), `e2e/specs/07a-findings-preview-scroll.flow.json:28` (scrollbar
   drag).
 
+- **2026-10-23** — `next dev -p <port>` without `-H` listens on every
+  interface (`*:<port>` in `ss`, dual-stack). An HW2 `--serve` stack therefore
+  exposed its UI even where the API was meant to be local, and the UI's
+  server side calls the API. With `-H 127.0.0.1`, the whole `next dev` process
+  tree held exactly one listener, `127.0.0.1:<port>`. A request to the host's
+  non-loopback address was refused, and `localhost` still answered: here
+  `/etc/hosts` maps `localhost` to 127.0.0.1 only.
+
+  Check a bind by reading the kernel's sockets (`ss -Hltn`, `/proc/net/tcp*`),
+  not by the URL a client uses. Evidence: `scripts/e2e.sh`
+  (`WEB_HOST_ARGS`, `assert_loopback_listeners`),
+  `server/test/experiment-loopback.test.ts`; a probe of `next dev -H 127.0.0.1`
+  on port 3298 (2026-10-22).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
