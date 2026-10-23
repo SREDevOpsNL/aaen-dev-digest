@@ -9,7 +9,14 @@ import { canonicalJson, sha256 } from '../../modules/_shared/experiment.js';
 
 export interface FrozenExpectations {
   providerName: string;
+  /** The requested model slug, which the chat response's `model` echoes. */
   model: string;
+  /**
+   * The served model version, as OpenRouter's records name it: the router's
+   * selected model, the generation's model and each provider response's
+   * `model_permaslug` must all equal it.
+   */
+  servedModel: string;
   /** The seeded cached intent every counted slot must have used (analysis_sha = sha256 of its canonical JSON). */
   intent: { derivation_id: string | null; head_sha: string; prompt_version: number; analysis_sha: string };
   expectedDiffSha256: string;
@@ -24,7 +31,7 @@ interface Attempt {
     status?: string;
     providerName?: string | null;
     model?: string | null;
-    providerResponses?: Array<{ providerName: string | null }>;
+    providerResponses?: Array<{ providerName: string | null; modelPermaslug?: string | null; status?: number | null }>;
   } | null;
 }
 
@@ -89,6 +96,7 @@ export function evaluateSlot(trace: { experiment?: unknown; intent?: unknown } |
     const before = provenanceIssues.length;
     if (selected.length !== 1) provenanceIssues.push(`router metadata selected ${selected.length} endpoints`);
     else if (selected[0]!.provider !== frozen.providerName) provenanceIssues.push(`router selected ${selected[0]!.provider}, not ${frozen.providerName}`);
+    else if (selected[0]!.model !== frozen.servedModel) provenanceIssues.push(`router selected model ${selected[0]!.model}, not ${frozen.servedModel}`);
     if (provenanceIssues.length === before) sources.push('router_metadata');
     const attemptNo = router.attempt;
     const attemptsCount = router.attemptsCount;
@@ -99,15 +107,23 @@ export function evaluateSlot(trace: { experiment?: unknown; intent?: unknown } |
     }
   }
 
-  // Generation metadata: corroborates the provider; exactly one provider
-  // response proves a single generation, while none (empty or missing) proves nothing.
+  // Generation metadata: corroborates the provider and the served model;
+  // exactly one provider response, from the frozen provider and model with
+  // HTTP 200, proves a single generation. None (empty or missing) proves nothing.
   const generation = attempt.generation ?? null;
   if (generation?.status === 'found') {
     const before = provenanceIssues.length;
     const responses = generation.providerResponses ?? [];
     if (generation.providerName !== frozen.providerName) provenanceIssues.push(`generation provider ${generation.providerName ?? 'unknown'} is not ${frozen.providerName}`);
-    if (generation.model && generation.model !== frozen.model) provenanceIssues.push(`generation model ${generation.model} is not ${frozen.model}`);
+    if (generation.model !== frozen.servedModel) provenanceIssues.push(`generation model ${generation.model ?? 'unknown'} is not ${frozen.servedModel}`);
     if (responses.length > 1) provenanceIssues.push(`generation shows ${responses.length} provider responses (fallback attempts)`);
+    for (const response of responses) {
+      if (response.providerName !== frozen.providerName || response.modelPermaslug !== frozen.servedModel || response.status !== 200) {
+        provenanceIssues.push(
+          `generation provider response ${response.providerName ?? 'unknown'} / ${response.modelPermaslug ?? 'unknown'} / status ${response.status ?? 'unknown'} is not ${frozen.providerName} / ${frozen.servedModel} / 200`,
+        );
+      }
+    }
     if (provenanceIssues.length === before) {
       sources.push('generation');
       if (responses.length === 1) singleAttemptProven = true;

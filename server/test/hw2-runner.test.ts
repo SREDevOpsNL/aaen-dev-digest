@@ -110,9 +110,11 @@ describe('budget', () => {
 });
 
 const analysis = { claimed_purpose: 'x' };
+const SERVED = 'deepseek/deepseek-v4-flash-20260423';
 const frozen: FrozenExpectations = {
   providerName: 'DeepInfra',
   model: 'deepseek/deepseek-v4-flash',
+  servedModel: SERVED,
   intent: { derivation_id: null, head_sha: 'b502', prompt_version: 3, analysis_sha: sha256(canonicalJson(analysis)) },
   expectedDiffSha256: 'd'.repeat(64),
 };
@@ -120,8 +122,8 @@ const okAttempt = {
   dispatch: 'dispatched',
   outcome: 'valid',
   servedModel: 'deepseek/deepseek-v4-flash',
-  router: { selected: [{ provider: 'DeepInfra', model: 'deepseek/deepseek-v4-flash' }], attempt: 1, attemptsCount: 1 },
-  generation: { status: 'found', providerName: 'DeepInfra', model: 'deepseek/deepseek-v4-flash', providerResponses: [{ providerName: 'DeepInfra' }] },
+  router: { selected: [{ provider: 'DeepInfra', model: SERVED }], attempt: 1, attemptsCount: 1 },
+  generation: { status: 'found', providerName: 'DeepInfra', model: SERVED, providerResponses: [{ providerName: 'DeepInfra', modelPermaslug: SERVED, status: 200 }] },
 };
 const traceWith = (attempt: Record<string, unknown>, patch: Record<string, unknown> = {}, intentPatch: Record<string, unknown> = {}) => ({
   experiment: { dispatch_state: 'completed', diff_sha256: 'd'.repeat(64), attempts: [attempt], ...patch },
@@ -420,7 +422,7 @@ describe('strict single-attempt proof (negative cases)', () => {
     ['router attempts count missing', routerOnly({ selected: okAttempt.router.selected, attempt: 1, attemptsCount: null })],
     ['router attempt number missing', routerOnly({ selected: okAttempt.router.selected, attempt: null, attemptsCount: 1 })],
     ['empty generation provider responses and no router metadata', { ...okAttempt, router: null, generation: { ...okAttempt.generation, providerResponses: [] } }],
-    ['missing generation provider responses and no router metadata', { ...okAttempt, router: null, generation: { status: 'found', providerName: 'DeepInfra', model: 'deepseek/deepseek-v4-flash' } }],
+    ['missing generation provider responses and no router metadata', { ...okAttempt, router: null, generation: { status: 'found', providerName: 'DeepInfra', model: SERVED } }],
   ])('is ineligible when %s', (_label, attempt) => {
     const verdict = evaluateSlot(traceWith(attempt), frozen);
     expect(verdict.eligible).toBe(false);
