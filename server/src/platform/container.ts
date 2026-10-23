@@ -7,7 +7,7 @@ import type {
   Embedder,
   LLMProvider,
 } from '@devdigest/shared';
-import type { AppConfig } from './config.js';
+import { EXPERIMENT_REQUEST_TIMEOUT_MS, type AppConfig } from './config.js';
 import type { Db } from '../db/client.js';
 import { JobRunner } from './jobs.js';
 import { runBus, type RunBus } from './sse.js';
@@ -200,6 +200,8 @@ export class Container {
       return new OpenRouterProvider(key, {
         estimateCost: (model, tokensIn, tokensOut) =>
           this.priceBook.estimate(model, tokensIn, tokensOut),
+        // Experiment answers can take minutes at the frozen endpoint's throughput.
+        ...(this.config.experiment ? { timeoutMs: EXPERIMENT_REQUEST_TIMEOUT_MS } : {}),
       });
     }
     const key = await this.secrets.get('ANTHROPIC_API_KEY');

@@ -487,6 +487,13 @@ Final ledger:
       reservation and never replaced. A longer timeout also needs a longer
       runner deadline; `test/hw2-generation-lookup.test.ts` checks that the
       two fit together.
+    - Candidate fix (draft PR `hw2/experiment-request-timeout`, not merged;
+      values not approved):
+      - experiment requests get 360 s, which covers about 3,100 tokens at
+        8.8 tokens/s; complete reviews from this model have reached about
+        2,750 tokens;
+      - the runner waits 480 s;
+      - the 16,000 cap is unchanged until experiment 17's length is known.
   - **Risk: 429s versus a complete result.**
     - 2 of 4 dispatched Gate 3 attempts failed with 429.
     - A cell counts only with 5 counted slots, and failed slots are never
