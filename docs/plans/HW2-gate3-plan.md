@@ -231,15 +231,210 @@ slot 2 met a 429 ten seconds after a status-0 check.
   longer represents `main` once it merges. X is exported and stopped only on
   separate approval.
 - X2 starts from the updated `main` and repeats Phase 0 (R1–R10) in full.
-- **Budget:** X2's accounting starts at zero.
-  - X's $0.01022896 stays charged separately against the original $0.15
-    exploration envelope, so X2's aggregate maximum is **$0.13**.
-  - Narrower per-slot capabilities are preferred. A budget equal to X2's
-    charged total plus one $0.01 reservation lets the server accept exactly one
-    more slot.
-- `x-18-without-1` is consumed and never replayed. A retry would be
-  `x-18-without-2`, an additional slot outside the original four, with its
-  own authorization.
+- **Budget** (approved policy, 2026-10-22; procedure in the
+  [operator guide's X2 addendum](HW2-experiment-operator-guide.md#gate-3-on-stack-x2-addendum)):
+  - X2's planning maximum is **$0.13** of its own conservative charge.
+  - X's **$0.01022896** stays counted separately against the original $0.15
+    exploration envelope.
+  - Each X2 slot gets a capability of X2's current charge plus exactly one
+    $0.01 reservation. The written authorization names that amount, and the
+    check before the slot requires the capability to equal it.
+  - The capability bounds spend, not attempts: a slot refused at zero cost
+    adds nothing, so the same capability would admit another attempt. One
+    attempt per authorization comes from the procedure: one guarded block
+    authorizes, runs every check, runs a single `run --count 1`, and revokes
+    the capability on every exit after authorizing, a failed check included.
+  - An X2 server knows nothing about X. Before every X2 authorization, and
+    again immediately before dispatch, the operator checks X's ledger against
+    its recorded charge, X2's charge against $0.13, and both together against
+    $0.15.
+- **Slot identity** (approved, 2026-10-22): slot ids stay scoped to their
+  stack; the runner is unchanged. Every record names a slot by
+  `(stack_id, slot_id)`.
+  - `(hw2f-f53ed971, x-18-without-1)` is the first without-Skill attempt of
+    experiment 18. It is consumed, never replayed, and keeps its unknown cost
+    and full $0.01 charge.
+  - The second attempt, if authorized, will be `(<X2 id>, x-18-without-1)`.
+
+## Execution log (stack X2 `hw2f-39febf41`)
+
+X2 ran `scripts/e2e.sh --serve` from `main` at `82950bd`, in a persistent tmux
+session, from 2026-10-22 21:23 UTC. Phase 0 (R1–R10) passed at 21:24 UTC.
+- The non-Skill and Skill fingerprints, Skill links, input bounds and worst
+  cases are identical to X's.
+- Only the implementation fingerprint differs (PR #31).
+
+Each slot ran in the addendum's guarded lifecycle: authorize, fresh checks,
+one `run --count 1`, and automatic revocation.
+
+| Slot `(stack_id, slot_id)` | When (UTC) | Capability | Outcome | Cost |
+| --- | --- | --- | --- | --- |
+| `(hw2f-39febf41, x-18-without-1)` | 2026-10-22 21:30:14–21:31:08 | $0.01 | **completed**: one request to DeepInfra (`deepseek-v4-flash-20260423`), router attempt 1, `finish_reason: stop`, schema valid, 1,124 in / 432 out / 0 reasoning tokens (3% of the cap), grounding 1/1 | $0.00017892, equal in ledger, server, generation record and key usage |
+| `(hw2f-39febf41, x-17-with-1)` | 2026-10-22 21:53:36–21:53:37 | $0.01017892 | **failed**: HTTP 429 `Provider returned error` after 426 ms; no response id, generation id, router metadata or tokens | unknown; key usage unchanged for 11 minutes; charged at its $0.01 reservation |
+
+- **Diagnosis of the 429,** from PR #31's `errorDetail`:
+  - origin `upstream_provider`, provider `DeepInfra`;
+  - `limit_source: upstream_provider_shared_pool`;
+  - the upstream's raw payload was present, and was not kept;
+  - no `Retry-After`, no rate-limit headers, no request id.
+
+  OpenRouter attributes the limit to DeepInfra's shared capacity. The
+  endpoint check had passed (status 0) immediately before dispatch.
+- **Stop:** unknown cost is an operational stop. There was no retry and no
+  further slot.
+- **Accounting:**
+
+  | Measure | USD |
+  | --- | --- |
+  | Confirmed X2 spend | 0.00017892 |
+  | Conservative X2 charge | 0.01017892 (within the X2 maximum of 0.13) |
+  | Conservative charge across X and X2 | 0.02040788 (0.01022896 + 0.01017892), of the 0.15 envelope |
+  | Key usage | 0.00040788, equal to the two known costs |
+
+- **Generation lookup:** the in-run lookup returned `not_found` for the
+  completed slot. The record was found 29 s after completion, with one
+  provider response. Key usage reflected it by the same time.
+- **Endpoint status:** `deepinfra/fp8` showed status -2 at 21:22:36 UTC and 0
+  again at 21:22:53, before Phase 0.
+- **Trace of the failed with-Skill run:** it has no prompt-assembly Skills
+  block, so a row-19 screenshot needs a completed run. The Skill fingerprint
+  on the run record (`18efa866…`) is the expected one.
+- **Evidence:** outside the repository, in
+  `~/.devdigest/hw2-experiments/hw2f-39febf41/`, each directory with
+  `SHA256SUMS`:
+  - `phase0/`;
+  - `gate3-x-18-without-1/` and `gate3-x-17-with-1/`;
+  - the first export: `evidence/` and `gate3-export/`;
+  - the second export: `evidence-v2/` and `gate3-export-v2/`;
+  - `closure/`.
+
+  The second export ran the guide's export steps with one recorded
+  substitution, `EV=…/evidence-v2`, so the sealed first export was not
+  overwritten.
+
+### Closure of stack X2
+
+Stack X2 `hw2f-39febf41` was closed on **2026-10-22 at 22:21:28 UTC**. It was
+stopped by its own `scripts/e2e.sh --serve` teardown (Ctrl-C to its tmux
+session), as authorized, after every pre-teardown check had passed:
+- **Capability:** none active, and no symlinked capability file. The two token
+  files are inert without `capability.json`.
+- **In flight:** no slot; both slots terminal on the server; no runner process
+  and no runner lock.
+- **Runs:** exactly two `agent_runs` (`done`, `failed`) and two `run_traces`,
+  with the ledger's run ids.
+- **Traces:** both exported traces are equal to the live ones.
+- **Database export:** `evidence-v2/db-data.sql` holds both runs. Its single
+  `agent_skills` row is the runner's with-condition link (Test Quality
+  Reviewer → Edge Cases and Error Paths).
+- **Integrity:** every seal verified. A secret scan of 96 files was clean,
+  checking for the API key, all four capability tokens, and key-shaped
+  patterns.
+
+Final ledger:
+
+| Slot `(stack_id, slot_id)` | Run | Outcome | Charge |
+| --- | --- | --- | --- |
+| `(hw2f-39febf41, x-18-without-1)` | `11476cbf-527c-4c79-89e2-769774a5f8e6` | completed | $0.00017892 (known cost) |
+| `(hw2f-39febf41, x-17-with-1)` | `79394d6b-8d45-4293-abe2-d4655f478eb6` | failed, HTTP 429, cost unknown | $0.01 (full reservation) |
+
+- **Teardown:**
+  - the container `devdigest-hw2f-39febf41` was removed;
+  - ports 3250, 3251 and 5450 were released;
+  - the `--serve` process exited, and the idle tmux session was closed;
+  - the development database container was not touched (same id and start
+    time).
+- **After teardown:** all 98 X2 files were byte-identical to a snapshot taken
+  before it, and the earlier seals of X and X2 still verified.
+- **Observation for a follow-up:** the API listens on all interfaces
+  (`server/src/server.ts`, `host: '0.0.0.0'`). R9's loopback condition holds
+  for the URL the tools use, not for the bind address. Paid generation still
+  needs the capability.
+  - Fix (draft PR `hw2/experiment-loopback`, not merged): the experiment-mode
+    API binds `127.0.0.1`, `--serve` binds the UI with `-H 127.0.0.1`, and it
+    refuses to serve unless every listener on both ports is loopback. Normal
+    development keeps `0.0.0.0`.
+
+**Neither X2 outcome is evidence for or against the effectiveness of a Skill**
+([Methodology](#methodology)).
+
+## Gate 3 status and remaining work
+
+| Planned slot | Attempts | State |
+| --- | --- | --- |
+| 1. 18 / with | `(hw2f-f53ed971, x-18-with-1)` completed | done |
+| 2. 18 / without | `(hw2f-f53ed971, x-18-without-1)` failed (429); `(hw2f-39febf41, x-18-without-1)` completed | done |
+| 3. 17 / with | `(hw2f-39febf41, x-17-with-1)` failed (429, upstream shared pool) | **not established** |
+| 4. 17 / without | none | **not run** |
+| 5–6 (optional) | none | not run |
+
+- **Experiment 17 has had no completed request.** That leaves unverified on a
+  real request:
+  - the reviewer's request and output;
+  - its completion length, and so the output cap;
+  - its provenance.
+- **Spend:**
+  - confirmed $0.00040788;
+  - conservative $0.02040788, which leaves $0.12959212 of the $0.15 envelope.
+- **Any next slot** needs:
+  - a new stack, because X2 is closed;
+  - a full Phase 0 on it;
+  - a budget policy for that stack (the X2 addendum covers X2 only);
+  - its own written authorization naming the capability.
+
+  On a new stack, slot ids start at trial 1 again. On the same stack, the
+  runner takes the lowest unused trial (`cli.ts`, exploration `run`).
+- **Gate 4 readiness findings.** These are open, and each needs your decision
+  before pre-registration:
+  - **Blocking: a single upstream attempt cannot be proven.**
+    - Eligibility (`server/src/experiments/hw2/eligibility.ts`) needs one of
+      two proofs:
+      - router metadata with `attempt` = `attempts` = 1, where `attempts` comes
+        from the raw `attempts` array;
+      - a found generation record with exactly one provider response.
+    - OpenRouter sent `attempt: 1` and no `attempts` array in both completed
+      slots.
+    - The in-run lookup window is fixed at 5 tries 1 s apart
+      (`server/src/platform/config.ts`). Both completed slots got
+      `not_found`; the records appeared 29–38 s later.
+    - Applied to both completed Gate 3 slots, the rule yields `unverified`,
+      not counted. Under these conditions both Gate 4 experiments would end
+      `incomplete`.
+    - Every remedy is a change to code or method, so none is made here:
+      - a longer lookup window, which changes the implementation fingerprint
+        and needs a new stack;
+      - another proof of a single attempt;
+      - a second lookup at report time.
+    - **A second cause**, found by applying the rule to the generation records
+      that Gate 3 read 29–38 s after each response (2026-10-22). Even a found
+      record would have been rejected, because eligibility compared its dated
+      model (`deepseek/deepseek-v4-flash-20260423`) with the requested slug.
+    - **Proposed fix** (draft PR `hw2/provenance-generation-lookup`, not merged):
+      - a bounded lookup of up to 13 reads 5 s apart, with a per-read timeout
+        and a hard deadline of about 65 s;
+      - a frozen served model (`DEVDIGEST_EXPERIMENT_SERVED_MODEL`), which the
+        router's selection, the record and its one provider response must all
+        match.
+
+      `attempt: 1` alone stays insufficient. The fix changes the
+      implementation fingerprint, so the next exploration stack repeats
+      Phase 0.
+  - **Risk: the request timeout versus throughput** (measured 2026-10-23
+    from the Gate 3 generation records).
+    - DeepInfra produced 479 tokens in 33.2 s and 432 tokens in 49.3 s, that
+      is 14.4 and 8.8 tokens/s.
+    - At those rates the SDK's 90 s request timeout ends any completion
+      longer than about 790–1,280 tokens, far below the 16,000 output cap.
+      Experiment 17's output length is still unknown.
+    - A timed-out request fails with unknown cost: it is charged its full
+      reservation and never replaced. A longer timeout also needs a longer
+      runner deadline; `test/hw2-generation-lookup.test.ts` checks that the
+      two fit together.
+  - **Risk: 429s versus a complete result.**
+    - 2 of 4 dispatched Gate 3 attempts failed with 429.
+    - A cell counts only with 5 counted slots, and failed slots are never
+      replaced, so all 20 must count.
+    - The runner also stops after 2 consecutive unknown-cost slots.
 
 ## Evidence and the Gate 3 report
 

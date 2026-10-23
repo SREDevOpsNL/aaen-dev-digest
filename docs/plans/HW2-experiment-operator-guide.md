@@ -51,6 +51,17 @@ API URL, clone directory (empty, per stack) and ledger directory
 #502 (with fresh cached intents) and the labelled synthetic convention
 candidates. Ctrl-C tears everything down.
 
+The stack listens on loopback only:
+- Postgres is published on `127.0.0.1`.
+- The experiment-mode API binds `127.0.0.1` (not configurable).
+- The UI starts with `next dev -H 127.0.0.1`.
+
+Before printing that it is up, `--serve` reads the kernel's listening sockets
+with `ss`, not the URLs. It tears the stack down if any listener on the API or
+web port is not `127.0.0.1`. Whether a browser on the Windows host still
+reaches it through WSL's localhost forwarding is not yet verified: check it on
+the next stack before the row 19/20 screenshots.
+
 ### 3. Unpaid runner commands
 
 Run from `server/`; `$ID` is the printed stack id.
@@ -66,9 +77,72 @@ port, and the dedicated key file. It also confirms both fixture intents are
 fresh and prints the frozen diff hashes.
 
 ```bash
-pnpm exec tsx src/experiments/hw2/cli.ts endpoints --api http://127.0.0.1:3251
-pnpm exec tsx src/experiments/hw2/cli.ts plan --seed <seed>
-pnpm exec tsx src/experiments/hw2/cli.ts manifest --api … --stack … --database … --container … --seed <seed> --rules <rules.json> --reservation <USD per slot> --out manifest.json
+if [[ "$ID" =~ ^hw2f-[a-z0-9]{4,32}$ ]] && docker inspect "$CONTAINER" >/dev/null 2>&1; then echo "stack $ID: container $CONTAINER is running"; else echo "FAILED: $ID is not a running hw2f stack (check ID)"; false; fi
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts check "${STACK[@]}"
+```
+
+`check` verifies the stack identity and fails closed on any mismatch:
+- the stack id and the disposable database name;
+- a single repository, the fixtures present, and no PR #3;
+- no clone of the fixture repo;
+- the container labels;
+- a loopback, non-development API port (the bind itself is checked by
+  `--serve`, above);
+- that the stack reads the dedicated key file. It checks the file's path only.
+  Whether a key is present is the `openrouter_key_configured` flag of
+  `GET /experiments/identity`, and `run` refuses without one.
+
+It also confirms both fixture intents are fresh and prints the frozen diff
+hashes.
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts endpoints --api "$API"
+```
+
+Set the schedule seed, the expected-finding rules file and the per-slot
+reservation, then validate them:
+
+```bash
+SEED=20261020                                          # EXAMPLE: the seed recorded in the preregistration
+RULES="$HOME/.devdigest/hw2-experiments/rules.json"    # EXAMPLE path: the rules file written into the preregistration
+RESERVATION=0.04                                       # EXAMPLE: USD per confirmatory slot; 20 × RESERVATION must be ≤ 1.00
+MANIFEST="$HOME/.devdigest/hw2-experiments/$ID/manifest.json"
+```
+
+```bash
+python3 -I - "$SEED" "$RULES" "$RESERVATION" <<'EOF'
+import json, re, sys
+seed, rules, reservation = sys.argv[1:4]
+problems = []
+if not re.fullmatch(r"\d+", seed):
+    problems.append(f"SEED={seed!r} is not a non-negative integer")
+try:
+    usd = float(reservation)
+    if not (usd > 0 and 20 * usd <= 1.00 + 1e-9):
+        problems.append(f"RESERVATION={reservation} must be > 0 and 20 x RESERVATION <= USD 1.00")
+except ValueError:
+    problems.append(f"RESERVATION={reservation!r} is not a number")
+try:
+    data = json.load(open(rules))
+    if not (isinstance(data, dict) and data and all(isinstance(r, dict) and r.get("anchors") and r.get("keywords") for r in data.values())):
+        problems.append(f"{rules} is not an object of {{anchors, keywords}} rules per experiment")
+except (OSError, ValueError) as err:
+    problems.append(f"RULES: {err}")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print("seed, rules and reservation are valid")
+EOF
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts plan --seed "$SEED"
+```
+
+```bash
+pnpm exec tsx src/experiments/hw2/cli.ts manifest "${STACK[@]}" --seed "$SEED" --rules "$RULES" --reservation "$RESERVATION" --out "$MANIFEST"
 ```
 
 - `endpoints` lists the model's live provider endpoints: prices, limits, tags.
