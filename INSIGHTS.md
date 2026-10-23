@@ -138,6 +138,6 @@ says which file a finding goes in.
   requested slug, so even a found record failed. The draft fix bounds the
   lookup at about 65 s and freezes the served model. Details:
   [`server/LEARNINGS.md`](server/LEARNINGS.md#codebase-patterns--tool--library-notes)
-  (2026-10-22, the extension of the eligibility entry) and
+  (2026-10-23, the extension of the eligibility entry) and
   [`reviewer-core/LEARNINGS.md`](reviewer-core/LEARNINGS.md#codebase-patterns--tool--library-notes)
   (what OpenRouter documents).
