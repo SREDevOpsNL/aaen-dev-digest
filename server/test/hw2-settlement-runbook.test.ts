@@ -1,5 +1,5 @@
-import { execFile, execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -32,11 +32,13 @@ const block = (marker: string) => {
 const X3_VALUES = block('XS_MAX=0.10');
 const X3_CHECK = block('xs_cross_stack_check() {');
 const X3_AMOUNT = block('equals the next X3 capability');
-const X3_LIFECYCLE = block('LOCK="$DIR/lifecycle.lock"');
+const X3_LIFECYCLE = block('LOCK="$HOME/.devdigest/hw2-experiments/authorization.lock"');
+const KEEP_TOKEN = BLOCKS.find((b) => b.includes('kept the revoked token as'))!; // X2's step 4, which X3 uses
 
 const X = 'hw2f-f53ed971';
 const X2 = 'hw2f-39febf41';
 const X3 = 'hw2f-x3aaaa01';
+const X4 = 'hw2f-x4bbbb02';
 const X_LEDGER = [
   '{"at":"2026-10-21T09:46:09.853Z","slot_id":"x-18-with-1","phase":"exploration","reservation_usd":0.01,"state":"reserved","detail":{"condition":"with","experiment":"18"}}',
   '{"at":"2026-10-21T09:46:09.924Z","slot_id":"x-18-with-1","phase":"exploration","reservation_usd":0.01,"state":"dispatched","run_id":"b111a514-113f-407a-bca9-23d1ebdd2878"}',
@@ -112,12 +114,12 @@ const charged = (out: string) => {
 };
 
 /** A stand-in for X3's API: its identity, and the runs it holds per slot id. */
-async function stackApi(runs: Record<string, string[]> = {}, identity: Record<string, unknown> = {}) {
+async function stackApi(runs: Record<string, string[]> = {}, identity: Record<string, unknown> = {}, stack = X3) {
   const server = createServer((req, res) => {
     const slot = /^\/experiments\/slots\/([^/?]+)$/.exec(req.url ?? '')?.[1];
     const body =
       req.url === '/experiments/identity'
-        ? { stack_id: X3, database: `devdigest_hw2f_${X3.slice('hw2f-'.length)}`, in_flight_slot: null, ...identity }
+        ? { stack_id: stack, database: `devdigest_hw2f_${stack.slice('hw2f-'.length)}`, in_flight_slot: null, ...identity }
         : slot !== undefined
           ? { runs: (runs[slot] ?? []).map((run_id) => ({ run_id })) }
           : null;
@@ -128,20 +130,25 @@ async function stackApi(runs: Record<string, string[]> = {}, identity: Record<st
   servers.push(server);
   return `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 }
-/** The §3 variables for X3, the proposed X3 values (verbatim block), then `script`, in bash. */
-async function x3(api: string, script: string, env: Record<string, string> = {}) {
-  const prelude = [
-    `ID=${X3}`,
+/** The §3 variables for `stack` (X3 by default), the X3 values (verbatim block), the key usage, then `script`, in bash. */
+function prelude(api: string, stack: string) {
+  return [
+    `ID=${stack}`,
     `API=${api}; DB="devdigest_hw2f_\${ID#hw2f-}"; LEDGER="$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl"; STACK=(--api "$API" --stack "$ID")`,
     X3_VALUES,
-    // Stubs: `pnpm` records what it is asked to do; authorize writes a capability as cli.ts does.
-    `pnpm() { echo "pnpm $*" >> "$HOME/pnpm.log"; if [[ " $* " == *" authorize "* ]]; then sleep "\${STUB_AUTHORIZE_DELAY:-0}"; printf '{"stack_id":"%s","phase":"exploration","gate":3,"budget_usd":%s,"expires_at":"2099-01-01T00:00:00Z"}' "$ID" "$AUTHORIZED_BUDGET" > "$HOME/.devdigest/hw2-experiments/$ID/capability.json"; fi; }`,
+    // Step 1's key usage; the sealed X and X2 usage unless a test says otherwise (empty: not set).
+    'XS_KEY_USAGE=${TEST_KEY_USAGE-0.00040788}',
+    // Stubs: `pnpm` records what it is asked to do. authorize writes a capability and its token as cli.ts
+    // does (STUB_AUTHORIZE_FAILS: then exits 1); run marks that it started and sleeps STUB_RUN_SLEEP.
+    `pnpm() { echo "$ID pnpm $*" >> "$HOME/pnpm.log"; if [[ " $* " == *" authorize "* ]]; then sleep "\${STUB_AUTHORIZE_DELAY:-0}"; printf '{"stack_id":"%s","phase":"exploration","gate":3,"budget_usd":%s,"expires_at":"2099-01-01T00:00:00Z"}' "$ID" "$AUTHORIZED_BUDGET" > "$HOME/.devdigest/hw2-experiments/$ID/capability.json"; printf token > "$HOME/.devdigest/hw2-experiments/$ID/capability.token"; [ -z "\${STUB_AUTHORIZE_FAILS:-}" ]; else touch "$HOME/run-started"; sleep "\${STUB_RUN_SLEEP:-0}"; fi; }`,
     `x2_endpoint_check() { [ -z "\${STUB_ENDPOINT_FAILS:-}" ]; }`,
     `x2_settings_check() { true; }`,
     'X2_EXPERIMENT=17; X2_CONDITION=with',
   ].join('\n');
+}
+async function x3(api: string, script: string, env: Record<string, string> = {}, stack = X3) {
   try {
-    const { stdout, stderr } = await run('bash', ['-c', `${prelude}\n${script}`], { cwd: join(REPO, 'server'), env: { PATH: process.env.PATH ?? '', HOME: home, ...env } });
+    const { stdout, stderr } = await run('bash', ['-c', `${prelude(api, stack)}\n${script}`], { cwd: join(REPO, 'server'), env: { PATH: process.env.PATH ?? '', HOME: home, ...env } });
     return { code: 0, out: `${stdout}${stderr}` };
   } catch (err) {
     const e = err as { code: number; stdout: string; stderr: string };
@@ -149,6 +156,29 @@ async function x3(api: string, script: string, env: Record<string, string> = {})
   }
 }
 const pnpmLog = () => (existsSync(join(home, 'pnpm.log')) ? readFileSync(join(home, 'pnpm.log'), 'utf8') : '');
+const authorizationLock = () => join(home, '.devdigest', 'hw2-experiments', 'authorization.lock');
+/**
+ * The lifecycle as its own process group: once the stub run has started,
+ * send `signal` to the group, as a terminal's Ctrl-C (INT) or hang-up (HUP)
+ * does; KILL leaves no trap to run. Resolves when all output is in.
+ */
+async function signalled(api: string, signal: NodeJS.Signals) {
+  const child = spawn('bash', ['-c', `${prelude(api, X3)}\nAUTHORIZED_BUDGET=0.01\n${X3_CHECK}\n${X3_LIFECYCLE}`], {
+    cwd: join(REPO, 'server'),
+    env: { PATH: process.env.PATH ?? '', HOME: home, STUB_RUN_SLEEP: '30' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+  });
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (out += d));
+  const closed = new Promise<void>((done) => child.on('close', () => done()));
+  for (let i = 0; i < 200 && !existsSync(join(home, 'run-started')); i++) await new Promise((d) => setTimeout(d, 50));
+  if (!existsSync(join(home, 'run-started'))) throw new Error(`the stub run never started:\n${out}`);
+  process.kill(-child.pid!, signal);
+  await closed;
+  return out;
+}
 
 describe('settlement script (docs/plans/hw2-settle.py)', () => {
   it('the guide calls the shared script from both procedures', () => {
@@ -191,11 +221,11 @@ describe('settlement script (docs/plans/hw2-settle.py)', () => {
   });
 
   it('keeps the first terminal state of a slot, as the runner does, and reports later events', () => {
-    const root = stacks({ [X]: [...X_LEDGER, ev('x-18-without-1', 'completed', { cost_usd: 0.0001 })], [X2]: X2_LEDGER });
+    const root = stacks({ [X]: [...X_LEDGER, ev('x-18-without-1', 'completed', { cost_usd: 0.0001 }), ev('x-18-without-1', 'failed', { cost_usd: 0.5 })], [X2]: X2_LEDGER });
     const { code, out } = settle(root);
     expect(code).toBe(0);
     expect(out).toContain(`stack ${X}: 2 slot(s), charged $0.01022896`);
-    expect(out).toContain('events after a slot\'s terminal state (ignored, as by the runner): 1');
+    expect(out).toContain('events after a slot\'s terminal state (ignored, as by the runner): 2');
   });
 
   it.each([
@@ -267,7 +297,7 @@ describe('X3 first use and authorization (guide blocks, verbatim)', () => {
       { slot_id: 'x-17-with-1', phase: 'exploration', reservation_usd: 0.01, state: 'dispatched', run_id: 'r-1' },
       { slot_id: 'x-17-with-1', phase: 'exploration', reservation_usd: 0.01, state: 'completed', run_id: 'r-1', cost_usd: 0.0004 },
     ]);
-    const { code, out } = await x3(await stackApi({ 'x-17-with-1': ['r-1'] }), check);
+    const { code, out } = await x3(await stackApi({ 'x-17-with-1': ['r-1'] }), check, { TEST_KEY_USAGE: '0.00080788' });
     expect(out).toContain(`${X3}: ledger present`);
     expect(out).toContain('next X3 capability: $0.0104');
     expect(code).toBe(0);
@@ -309,7 +339,7 @@ describe('X3 first use and authorization (guide blocks, verbatim)', () => {
   it('8. duplicate local slot ids across stacks stay apart', async () => {
     const root = stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, [X3]: null });
     runnerAppend(root, X3, [{ slot_id: 'x-18-without-1', phase: 'exploration', reservation_usd: 0.01, state: 'completed', run_id: 'r-9', cost_usd: 0.0002 }]);
-    const { code, out } = await x3(await stackApi({ 'x-18-without-1': ['r-9'] }), check);
+    const { code, out } = await x3(await stackApi({ 'x-18-without-1': ['r-9'] }), check, { TEST_KEY_USAGE: '0.00060788' });
     expect(code).toBe(0);
     for (const stack of [X, X2, X3]) expect(out).toContain(`(${stack}, x-18-without-1)`);
     expect(out).toContain('next X3 capability: $0.0102');
@@ -333,7 +363,7 @@ describe('X3 first use and authorization (guide blocks, verbatim)', () => {
 
   it('11. key usage the ledgers do not explain stops authorization', async () => {
     stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, [X3]: null });
-    const { code, out } = await x3(await stackApi(), check, { SETTLE_KEY_USAGE: '0.5' });
+    const { code, out } = await x3(await stackApi(), check, { TEST_KEY_USAGE: '0.5' });
     expect(code).toBe(1);
     expect(out).toContain('key usage $0.5 is outside');
   });
@@ -365,7 +395,7 @@ describe('X3 first use and authorization (guide blocks, verbatim)', () => {
     expect(calls[1]).toContain('--count 1 --reservation 0.01');
     expect(out).toMatch(/capability revoked/);
     expect(existsSync(join(root, X3, 'capability.json'))).toBe(false);
-    expect(existsSync(join(root, X3, 'lifecycle.lock'))).toBe(false);
+    expect(existsSync(authorizationLock())).toBe(false);
   });
 
   it('a failed check after authorizing revokes, dispatches nothing, and releases the lock', async () => {
@@ -375,7 +405,7 @@ describe('X3 first use and authorization (guide blocks, verbatim)', () => {
     expect(out).toContain('FAILED: endpoint check; nothing was dispatched');
     expect(pnpmLog()).not.toContain(' run ');
     expect(existsSync(join(root, X3, 'capability.json'))).toBe(false);
-    expect(existsSync(join(root, X3, 'lifecycle.lock'))).toBe(false);
+    expect(existsSync(authorizationLock())).toBe(false);
   });
 
   it('a wrong authorization amount authorizes nothing', async () => {
@@ -395,6 +425,98 @@ describe('X3 first use and authorization (guide blocks, verbatim)', () => {
     expect(results.map((r) => r.code)).toEqual([0, 1]);
     expect(results[1]!.out).toContain('another lifecycle holds');
     expect(pnpmLog().match(/ authorize /g)).toHaveLength(1);
-    expect(existsSync(join(root, X3, 'lifecycle.lock'))).toBe(false);
+    expect(existsSync(authorizationLock())).toBe(false);
   }, 30_000);
+
+  it('12. two concurrent lifecycles on different stacks: one authorization lock, exactly one authorizes', async () => {
+    // Each alone would fit the envelope; both together would not: 0.13540788 + 0.01 + 0.01 > 0.15.
+    const earlier = [...Array.from({ length: 10 }, (_, i) => ev(`x-17-with-${i + 1}`, 'failed', { cost_usd: null })), ev('x-17-with-11', 'completed', { cost_usd: 0.015 })];
+    stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, 'hw2f-old00001': earlier, [X3]: null, [X4]: null });
+    const script = `${check}\nAUTHORIZED_BUDGET=0.01\n${X3_LIFECYCLE}`;
+    const env = { STUB_AUTHORIZE_DELAY: '1', SETTLE_EXPECT: 'hw2f-old00001', TEST_KEY_USAGE: '0.01540788' };
+    const [a, b] = await Promise.all([x3(await stackApi(), script, env), x3(await stackApi({}, {}, X4), script, env, X4)]);
+    const results = [a, b].sort((p, q) => p.code - q.code);
+    expect(results.map((r) => r.code)).toEqual([0, 1]);
+    expect(results[1]!.out).toContain('another lifecycle holds');
+    expect(pnpmLog().match(/ authorize /g)).toHaveLength(1);
+    expect(existsSync(authorizationLock())).toBe(false);
+  }, 30_000);
+
+  it("13. another stack's live capability stops the check: its spend is in no ledger yet", async () => {
+    const root = stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, [X3]: null, [X4]: null });
+    writeFileSync(join(root, X4, 'capability.json'), '{}');
+    const { code, out } = await x3(await stackApi(), `${check}\nAUTHORIZED_BUDGET=0.01\n${X3_LIFECYCLE}`);
+    expect(code).toBe(1);
+    expect(out).toContain(`another stack holds a live capability (${X4})`);
+    expect(pnpmLog()).toBe('');
+  });
+
+  it('13. the exploration envelope, not only the stack maximum, stops authorization', async () => {
+    stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, 'hw2f-old00001': Array.from({ length: 13 }, (_, i) => ev(`x-17-with-${i + 1}`, 'failed', { cost_usd: null })), [X3]: null });
+    const { code, out } = await x3(await stackApi(), check, { SETTLE_EXPECT: 'hw2f-old00001' });
+    expect(code).toBe(1);
+    expect(out).toContain('the next hw2f-x3aaaa01 slot does not fit: $0.01 of $0.10, or $0.16040788 of the $0.15 envelope');
+  });
+
+  it('14. the check needs a fresh key usage: unset or malformed authorizes nothing', async () => {
+    stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, [X3]: null });
+    for (const usage of ['', '0,0004', 'unknown']) {
+      const { code, out } = await x3(await stackApi(), `${check}\nAUTHORIZED_BUDGET=0.01\n${X3_LIFECYCLE}`, { TEST_KEY_USAGE: usage });
+      expect(code).toBe(1);
+      expect(out).toContain("is not the key's usage in USD");
+    }
+    expect(pnpmLog()).toBe('');
+  });
+
+  it.each([
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+    ['SIGHUP', 129],
+  ] as const)('15. %s during the run revokes the capability and releases the lock', async (signal, status) => {
+    const root = stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, [X3]: null });
+    const out = await signalled(await stackApi(), signal);
+    expect(out).toMatch(/capability revoked/);
+    expect(out).toContain(`lifecycle finished with status ${status}`);
+    expect(existsSync(join(root, X3, 'capability.json'))).toBe(false);
+    expect(existsSync(authorizationLock())).toBe(false);
+  }, 30_000);
+
+  it('15. an authorize that writes a capability and then fails is revoked; nothing runs', async () => {
+    const root = stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, [X3]: null });
+    const { code, out } = await x3(await stackApi(), `${check}\nAUTHORIZED_BUDGET=0.01\n${X3_LIFECYCLE}`, { STUB_AUTHORIZE_FAILS: '1' });
+    expect(code).toBe(1);
+    expect(out).toContain('FAILED: authorize');
+    expect(out).toMatch(/capability revoked/);
+    expect(pnpmLog()).not.toContain(' run ');
+    expect(existsSync(join(root, X3, 'capability.json'))).toBe(false);
+  });
+
+  it('a lifecycle killed after authorize, before any ledger, fails closed, and the stack stays refused after recovery', async () => {
+    const root = stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, [X3]: null });
+    const api = await stackApi();
+    expect(await signalled(api, 'SIGKILL')).not.toMatch(/capability revoked/);
+    expect(readdirSync(join(root, X3)).sort()).toEqual(['capability.json', 'capability.token', 'clones']);
+    expect(existsSync(authorizationLock())).toBe(true);
+    const script = `${check}\nAUTHORIZED_BUDGET=0.01\n${X3_LIFECYCLE}`;
+    expect((await x3(api, script)).out).toContain('another lifecycle holds');
+    // Recovery: revoke by hand, remove the stale lock, keep the token (X2's step 4).
+    rmSync(join(root, X3, 'capability.json'));
+    rmSync(authorizationLock(), { recursive: true });
+    expect((await x3(api, KEEP_TOKEN)).out).toContain('kept the revoked token as');
+    const after = await x3(api, script);
+    expect(after.code).toBe(1);
+    expect(after.out).toMatch(/listed as new, but it has no ledger and capability\.token\.revoked-/);
+    expect(pnpmLog().match(/ authorize /g)).toHaveLength(1);
+  }, 30_000);
+
+  it('refused, ambiguous and completed X3 slots: charge, replay list and next capability', async () => {
+    stacks({ [X]: X_LEDGER, [X2]: X2_LEDGER, [X3]: [ev('x-17-with-1', 'refused', { cost_usd: 0 }), ev('x-17-with-2', 'ambiguous', { cost_usd: null }), ev('x-17-without-1', 'completed', { cost_usd: 0.0004 })] });
+    const runs = { 'x-17-with-2': ['r-2'], 'x-17-without-1': ['r-3'] };
+    const { code, out } = await x3(await stackApi(runs), check, { TEST_KEY_USAGE: '0.00080788' });
+    expect(code).toBe(0);
+    expect(out).toContain(`stack ${X3}: 3 slot(s), charged $0.0104`);
+    expect(out).toMatch(new RegExp(`never replay: .*\\(${X3}, x-17-with-2\\).*\\(${X3}, x-17-without-1\\)`));
+    expect(out).not.toMatch(new RegExp(`never replay: .*\\(${X3}, x-17-with-1\\)`));
+    expect(out).toContain('next X3 capability: $0.0204');
+  });
 });

@@ -14,7 +14,9 @@ Environment (all optional):
   SETTLE_NEXT_STACK, SETTLE_STACK_MAX, SETTLE_ENVELOPE, SETTLE_RESERVATION
                       size the next capability of that stack and refuse one
                       that does not fit; the stack must be in SETTLE_EXPECT or
-                      SETTLE_NEW, and must have no unresolved slot
+                      SETTLE_NEW, must have no unresolved slot, and no other
+                      stack may hold a live capability (its spend is not in
+                      any ledger yet)
 """
 import glob, json, os, sys
 from decimal import Decimal
@@ -110,6 +112,11 @@ if os.environ.get("SETTLE_NEXT_STACK"):
     unresolved = sorted(name(k) for k, s in slots.items() if k[0] == stack and s["state"] not in TERMINAL)
     if unresolved:
         problems.append(f"{stack} has unresolved slots {', '.join(unresolved)}: reconcile first")
+    # A capability another stack holds can be spent before its ledger shows it:
+    # another lifecycle in progress, or one killed before it revoked.
+    others = sorted(os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(ROOT, "hw2f-*", "capability.json")) if os.path.basename(os.path.dirname(p)) != stack)
+    if others:
+        problems.append(f"another stack holds a live capability ({', '.join(others)}): its spend is in no ledger yet; let its lifecycle finish or revoke it")
     capability = by_stack.get(stack, Decimal(0)) + reservation
     print(f"next capability for {stack}: ${capability} (stack maximum ${stack_max}; exploration ${spent['exploration'] + reservation} of ${envelope})")
     if capability > stack_max or spent["exploration"] + reservation > envelope:
