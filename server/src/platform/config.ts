@@ -135,6 +135,16 @@ const ExperimentEnv = z.object({
 export const EXPERIMENT_GENERATION_LOOKUP = { attempts: 13, delayMs: 5_000 } as const;
 
 /**
+ * Timeout of one experiment request (the SDK's whole-request timeout; a
+ * non-streamed answer arrives only when it is complete).
+ * - In HW2 Gate 3, DeepInfra produced 8.8–14.4 tokens/s.
+ * - Complete reviews from this model have run to about 2,750 output tokens.
+ * - The 90 s default would end any answer longer than about 790 tokens at the
+ *   slowest rate; 360 s covers about 3,100.
+ */
+export const EXPERIMENT_REQUEST_TIMEOUT_MS = 360_000;
+
+/**
  * Experiment mode is all-or-nothing: no variable set → null; some set but a
  * required one missing or invalid → a startup error, never a half-enabled mode.
  */

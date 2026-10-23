@@ -62,6 +62,11 @@ Optional:
   after the response. The record appeared 29–38 s after the response in
   Gate 3, and a slot counts at Gate 4 only when its record was found.
 
+An experiment request may take up to 360 s, against 90 s outside experiment
+mode, so that a complete review arrives at the frozen endpoint's
+throughput. The runner waits up to 480 s for a slot's run before recording it
+`ambiguous`. That is enough for the request, the lookup and a margin.
+
 A partial set fails the server's startup. Validate the settings with the same
 rules the server applies:
 
