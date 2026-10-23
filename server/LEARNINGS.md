@@ -367,6 +367,29 @@ correction. Repo-intel remains server-scoped;
   Evidence: `server/src/db/disposable.ts` (`assertTestDatabaseIsolated`),
   `server/src/app.ts`, `server/test/test-database-isolation.test.ts`.
 
+- **2026-10-23** — Extension of the entry above: a disposable *name* is not
+  provenance. The first guard accepted any URL whose database was called
+  `devdigest_test`, so a test naming that database on the developer's server
+  would still have reached it. It accepted an injected `db` unchecked, too.
+  Now:
+  - without an injected `db`, only the exact closed test URL;
+  - with one, a read-only check that `current_database()` is disposable and
+    has a marker table, which only the testcontainers helper creates, before
+    anything writes;
+  - an unmarked `devdigest_e2e` on the same throwaway server is refused, and
+    its `running` row is left alone.
+
+  The same tests also loaded the real HW2 experiment key into memory.
+  `/experiments/identity` reads the dedicated key file, and other paths read
+  `~/.devdigest/secrets.json` plus shell variables. In a test run, secrets now
+  come from an empty test-owned file and key variables are removed. Six
+  mutations each fail a test.
+
+  Evidence: `server/src/db/disposable.ts` (`assertInjectedTestDatabase`,
+  `DISPOSABLE_MARKER_TABLE`), `server/test/test-database-provenance.it.test.ts`,
+  and a whole-suite run with a `.env` naming a decoy `devdigest_test` server
+  plus fake keys (0 connections).
+
 ## Session Notes
 
 ## Open Questions

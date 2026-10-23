@@ -304,8 +304,8 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
       max_output_tokens: 4000,
       in_flight_slot: null,
     });
-    // The dedicated key file only (no env fallback); the key itself is never returned.
-    expect(identity.secrets_path).toMatch(/\/\.devdigest\/hw2-experiments\/secrets\.json$/);
+    // In a test run, the test-owned key file (test/setup/isolate-database.ts), never the real one; the key itself is never returned.
+    expect(identity.secrets_path).toBe(process.env.DEVDIGEST_TEST_SECRETS_PATH);
     expect(typeof identity.openrouter_key_configured).toBe('boolean');
     expect(JSON.stringify(identity)).not.toMatch(/sk-or-/);
   });
