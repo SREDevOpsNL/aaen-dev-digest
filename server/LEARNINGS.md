@@ -210,7 +210,7 @@ correction. Repo-intel remains server-scoped;
 
 ## Recurring Errors & Fixes
 
-- **2026-10-22** — The "hermetic" unit subset is not hermetic towards the dev
+- **2026-10-23** — The "hermetic" unit subset is not hermetic towards the dev
   database. `buildApp` without an injected `db` connects to
   `config.databaseUrl` and, on boot, runs the stale-run reaper:
   `UPDATE agent_runs SET status = 'failed' WHERE status = 'running'`.

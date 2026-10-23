@@ -81,7 +81,7 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   (fetch stub), `e2e/specs/07a-findings-preview-scroll.flow.json:28` (scrollbar
   drag).
 
-- **2026-10-22** — `next dev -p <port>` without `-H` listens on every
+- **2026-10-23** — `next dev -p <port>` without `-H` listens on every
   interface (`*:<port>` in `ss`, dual-stack). An HW2 `--serve` stack therefore
   exposed its UI even where the API was meant to be local, and the UI's
   server side calls the API. With `-H 127.0.0.1`, the whole `next dev` process
