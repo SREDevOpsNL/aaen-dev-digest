@@ -341,6 +341,31 @@ correction. Repo-intel remains server-scoped;
   18,000 iterations. A shim that dates every index write into the window
   failed the old test file in 24 of 30 runs and the fixed one in 0 of 30.
 
+- **2026-10-21** — Extension of the 2026-10-20 WSL2 clock entry: the backward
+  steps also broke the Intent Layer's supersession guard. The guard keeps the
+  derivation that *started* last, and stamped the start with `new Date()`.
+  Measured on 2026-10-21: about every 5.4 s, the wall clock jumps +7.0 s for
+  about 88 ms, then −7.5 s. A derivation that starts inside that window, or up
+  to ~0.5 s before it while the next one starts just after the jump back, gets
+  a later stamp than the one started after it. Its result then overwrites the newer cache row, and a review batch
+  injects intent derived from the outdated linked issue (or the older head).
+  Every failure of "a review batch never injects intent derived from an
+  outdated linked issue" coincided with such an inversion:
+  - **Before the fix:** 1 in 150 runs alone, 3 in 150 under the full
+    DB-backed suite.
+  - **After the fix:** 0 in 300 under load, although 3 iterations straddled a
+    step.
+
+  The test is not timing-flaky: its gates order every step. Anything persisted
+  as "newest wins" must not be ordered by raw wall-clock time. Use a stamp that
+  never runs backwards (`derivationStartedAt`: `max(Date.now(), last + 1)`,
+  per process), or a database sequence when several processes write. To test
+  it, fake only `Date` (`vi.useFakeTimers({ toFake: ['Date'] })`) and step it
+  back between the two starts. Evidence: `server/src/modules/intent/helpers.ts:83`
+  (`derivationStartedAt`), `server/src/modules/intent/repository.ts`
+  (`saveSuccess` `setWhere`), `server/test/intent.it.test.ts:511` (fails with
+  `source: 'derived'`, `claimed_purpose: 'from issue v1'` without the fix).
+
 ## Session Notes
 
 ## Open Questions

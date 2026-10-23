@@ -11,6 +11,7 @@ import { resolveFeatureModel } from '../settings/feature-models.js';
 import { IntentRepository } from './repository.js';
 import {
   contextHash,
+  derivationStartedAt,
   identifyLinkedIssue,
   issueHash,
   staleReasons,
@@ -61,7 +62,8 @@ export interface IntentLog {
  * In-flight derivations per PR, shared by every IntentService instance of one
  * container: first-open, Recompute and review batches all join the same call,
  * so concurrent requests never pay for the classifier twice. (The API runs one
- * process per database; the started_at guard in the repository covers the rest.)
+ * process per database; the started_at guard in the repository covers the rest,
+ * ordered by `derivationStartedAt`, which never runs backwards in-process.)
  */
 const inflight = new WeakMap<Container, Map<string, Promise<DerivationResult>>>();
 // Deployment note: the API supports one process per database (see the product
@@ -234,7 +236,7 @@ export class IntentService {
    * (pass `issue` when the caller already read it; `undefined` = read it here).
    */
   private async derive(ctx: PrContext, diff?: UnifiedDiff, issue?: LinkedIssue | null): Promise<DerivationResult> {
-    const startedAt = new Date();
+    const startedAt = derivationStartedAt();
     const linkedIssue =
       issue !== undefined
         ? issue

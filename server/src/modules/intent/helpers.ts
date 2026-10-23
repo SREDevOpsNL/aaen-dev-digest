@@ -70,6 +70,21 @@ export function contextHash(input: {
   );
 }
 
+let lastStartMs = 0;
+
+/**
+ * Start time of a derivation attempt, strictly increasing within this process.
+ * The cache keeps the derivation that started last (the repository's
+ * `started_at` guard), so this must not follow the wall clock backwards: an
+ * NTP step, a VM resume or WSL2's periodic clock jumps would otherwise let an
+ * older derivation overwrite a newer one, and a review batch inject it. Two
+ * attempts never share a stamp either.
+ */
+export function derivationStartedAt(): Date {
+  lastStartMs = Math.max(Date.now(), lastStartMs + 1);
+  return new Date(lastStartMs);
+}
+
 /** Fingerprint of the linked-issue content the classifier saw ('' when none). */
 export function issueHash(
   issue: { number: number; title: string; body?: string | null } | null,
