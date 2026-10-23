@@ -208,7 +208,9 @@ log "API healthy"
 
 # --- web on :$WEB_PORT (next dev → reads NEXT_PUBLIC_API_BASE from env) -------
 log "starting web on :$WEB_PORT"
-(cd client && pnpm exec next dev -p "$WEB_PORT" "${WEB_HOST_ARGS[@]}") &
+# `${a[@]+"${a[@]}"}`, not `"${a[@]}"`: under `set -u`, bash before 4.4 (macOS's
+# /bin/bash 3.2) aborts on an empty array, which the hermetic run passes.
+(cd client && pnpm exec next dev -p "$WEB_PORT" ${WEB_HOST_ARGS[@]+"${WEB_HOST_ARGS[@]}"}) &
 WEB_PID=$!
 log "waiting for web :$WEB_PORT"
 web_up=0

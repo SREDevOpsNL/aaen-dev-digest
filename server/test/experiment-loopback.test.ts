@@ -16,7 +16,8 @@ import { EXPERIMENT_API_HOST, loadConfig } from '../src/platform/config.js';
  */
 const SERVER_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const REPO_ROOT = join(SERVER_ROOT, '..');
-const CLOSED_DB = 'postgres://none:none@127.0.0.1:9/none';
+// A closed port with a disposable name: a test run may only name a disposable database.
+const CLOSED_DB = 'postgres://devdigest:devdigest@127.0.0.1:9/devdigest_test';
 const EXPERIMENT_ENV = {
   DEVDIGEST_EXPERIMENT_STACK_ID: 'hw2f-loop0001',
   DEVDIGEST_EXPERIMENT_PROVIDER: 'example/fp8',
@@ -189,9 +190,19 @@ describe.skipIf(!linux)('scripts/e2e.sh --serve listeners', () => {
     expect(result.out).not.toContain(`:${loop} `);
   });
 
+  it('expands the possibly empty UI arguments the way bash before 4.4 accepts under set -u', () => {
+    // A bare "\${WEB_HOST_ARGS[@]}" aborts macOS's /bin/bash 3.2 when the array is empty (the hermetic run).
+    expect(script).not.toMatch(/(?<!\+)"\$\{WEB_HOST_ARGS\[@\]\}"(?!\})/);
+    const line = /^\(cd client && pnpm exec next dev .*$/m.exec(script)![0];
+    const args = (array: string) =>
+      execFileSync('bash', ['-c', `set -euo pipefail\nWEB_HOST_ARGS=(${array})\npnpm() { printf '%s|' "$@"; }\nWEB_PORT=3250\n${line.replace(/ &$/, '').replace(/^\(cd client && /, '').replace(/\)$/, '')}`], { encoding: 'utf8' });
+    expect(args('')).toBe('exec|next|dev|-p|3250|');
+    expect(args('-H 127.0.0.1')).toBe('exec|next|dev|-p|3250|-H|127.0.0.1|');
+  });
+
   it('wires the UI host, the check and the loopback Postgres port into --serve', () => {
     expect(script).toContain('WEB_HOST_ARGS=(-H 127.0.0.1)');
-    expect(script).toContain('pnpm exec next dev -p "$WEB_PORT" "${WEB_HOST_ARGS[@]}"');
+    expect(script).toContain('pnpm exec next dev -p "$WEB_PORT" ${WEB_HOST_ARGS[@]+"${WEB_HOST_ARGS[@]}"}');
     expect(script).toMatch(/assert_loopback_listeners "\$API_PORT" "\$WEB_PORT" \|\| \{[^}]*exit 1; \}\n\s*log "listeners on/);
     expect(script.indexOf('assert_loopback_listeners "$API_PORT"')).toBeLessThan(script.indexOf('HW2 experiment stack is up'));
     expect(script).toContain('-p "127.0.0.1:${PG_PORT}:5432"');
