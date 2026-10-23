@@ -24,19 +24,61 @@ export function databaseNameOf(url: string): string | null {
   }
 }
 
+/** The only database URL a test run may connect by: a closed loopback port (9, discard) with a disposable name. */
+export const TEST_DATABASE_URL = 'postgres://devdigest:devdigest@127.0.0.1:9/devdigest_test';
+
 /**
- * A test run (`NODE_ENV=test`, or anything under vitest) may only connect to a
- * disposable database. On boot the app's stale-run reaper writes to whatever
- * `databaseUrl` names, and an unset or `.env`-loaded URL is the development
- * database. Throws before any connection is opened; it never names more of the
- * URL than its database. Outside tests it does nothing.
+ * A table only the testcontainers helper (`test/helpers/pg.ts`) creates, in a
+ * fresh container: a database that has it was made for a test. A disposable
+ * name alone is not provenance (a development server may hold a database of
+ * that name too).
+ */
+export const DISPOSABLE_MARKER_TABLE = 'devdigest_disposable_marker';
+
+/** A test run: `NODE_ENV=test`, or anything under vitest. */
+export function isTestRun(nodeEnv: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  return nodeEnv === 'test' || Boolean(env.VITEST);
+}
+
+/**
+ * A test run without an injected `db` may only use `TEST_DATABASE_URL`. On
+ * boot the app's stale-run reaper writes to whatever `databaseUrl` names, and
+ * an unset or `.env`-loaded URL is the development database; so is a
+ * disposable-looking name on a real server. Throws before any connection is
+ * opened, naming no more of the URL than its database. Outside tests it does
+ * nothing.
  */
 export function assertTestDatabaseIsolated(config: { nodeEnv: string; databaseUrl: string }, env: NodeJS.ProcessEnv = process.env): void {
-  if (config.nodeEnv !== 'test' && !env.VITEST) return;
-  const name = databaseNameOf(config.databaseUrl);
-  if (name === null || !isDisposableDatabaseName(name)) {
+  if (!isTestRun(config.nodeEnv, env)) return;
+  if (config.databaseUrl !== TEST_DATABASE_URL) {
+    const name = databaseNameOf(config.databaseUrl);
     throw new Error(
-      `Refusing to connect: a test run may only use a disposable database (devdigest_test, devdigest_e2e, devdigest_hw2f…), not ${name ?? 'an unreadable URL'}. Inject a db, or use test/setup/isolate-database.ts.`,
+      `Refusing to connect: a test run without an injected db may only use the closed test URL, not a database named ${name ?? '(unreadable URL)'}. Inject a testcontainers db (test/helpers/pg.ts), or use test/setup/isolate-database.ts.`,
+    );
+  }
+}
+
+/**
+ * A test run with an injected `db` must show that the db was made for a test:
+ * a disposable `current_database()` and the testcontainers helper's marker
+ * table. Runs one read-only query before anything writes; a db that cannot
+ * answer (a fake, an unreachable server) is refused too. Outside tests it does
+ * nothing.
+ */
+export async function assertInjectedTestDatabase(db: Db, config: { nodeEnv: string }, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  if (!isTestRun(config.nodeEnv, env)) return;
+  let row: { name?: unknown; marked?: unknown } | undefined;
+  try {
+    const rows = (await db.execute(
+      sql`select current_database() as name, to_regclass(${`public.${DISPOSABLE_MARKER_TABLE}`}) is not null as marked`,
+    )) as unknown as Array<{ name?: unknown; marked?: unknown }>;
+    row = rows[0];
+  } catch {
+    row = undefined;
+  }
+  if (!row || typeof row.name !== 'string' || !isDisposableDatabaseName(row.name) || row.marked !== true) {
+    throw new Error(
+      `Refusing to use the injected db in a test run: it is not a marked disposable test database (${row && typeof row.name === 'string' ? `database ${row.name}${row.marked === true ? '' : ', no marker'}` : 'it could not be verified'}). Use test/helpers/pg.ts.`,
     );
   }
 }

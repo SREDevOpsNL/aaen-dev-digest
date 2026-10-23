@@ -173,9 +173,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cloneDir,
     // An experiment stack reads only its dedicated key file (no env fallback, see
     // container.ts), so it can never spend through the everyday key.
-    secretsPath: experiment
-      ? join(homedir(), '.devdigest', 'hw2-experiments', 'secrets.json')
-      : join(homedir(), '.devdigest', 'secrets.json'),
+    // A test run never reads the developer's key files: it gets the test-owned
+    // file from test/setup/isolate-database.ts, or nothing (/dev/null).
+    secretsPath:
+      parsed.NODE_ENV === 'test' || env.VITEST || process.env.VITEST
+        ? (env.DEVDIGEST_TEST_SECRETS_PATH ?? process.env.DEVDIGEST_TEST_SECRETS_PATH ?? '/dev/null')
+        : experiment
+          ? join(homedir(), '.devdigest', 'hw2-experiments', 'secrets.json')
+          : join(homedir(), '.devdigest', 'secrets.json'),
     nodeEnv: parsed.NODE_ENV,
     logLevel: parsed.LOG_LEVEL ?? (parsed.NODE_ENV === 'test' ? 'silent' : 'info'),
     webOrigin: `http://localhost:${parsed.WEB_PORT}`,

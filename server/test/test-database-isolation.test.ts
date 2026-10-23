@@ -7,9 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import type { Db } from '../src/db/client.js';
-import { assertTestDatabaseIsolated, databaseNameOf } from '../src/db/disposable.js';
+import { assertInjectedTestDatabase, assertTestDatabaseIsolated, databaseNameOf } from '../src/db/disposable.js';
+import { createDb } from '../src/db/client.js';
 import { loadConfig } from '../src/platform/config.js';
-import { TEST_DATABASE_URL } from './setup/isolate-database.js';
+import { SECRET_ENV_KEYS, TEST_DATABASE_URL } from './setup/isolate-database.js';
 
 /**
  * The app's boot reaper (`UPDATE agent_runs SET status = 'failed' WHERE status
@@ -54,6 +55,10 @@ describe('test runs are isolated from the development database', () => {
     const config = loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv);
     expect(databaseNameOf(config.databaseUrl)).toBe('devdigest_test');
     expect(new URL(config.databaseUrl).port).toBe('9');
+    // Secrets: a test-owned empty file, and nothing from the developer's shell.
+    expect(config.secretsPath).toBe(process.env.DEVDIGEST_TEST_SECRETS_PATH);
+    expect(config.secretsPath).toMatch(/devdigest-test-secrets-/);
+    for (const key of SECRET_ENV_KEYS) expect(process.env[key]).toBeUndefined();
   });
 
   it('server/.env is not read under test (and would be read without the setup)', () => {
@@ -72,25 +77,26 @@ describe('test runs are isolated from the development database', () => {
 
   it('in a test run, buildApp refuses the development database before connecting', async () => {
     const d = await decoy();
-    for (const name of ['devdigest', 'postgres', 'devdigest_prod']) {
+    // A disposable-looking name is not enough: a development server may hold a database of that name.
+    for (const name of ['devdigest', 'postgres', 'devdigest_prod', 'devdigest_test', 'devdigest_e2e']) {
       const config = loadConfig({ NODE_ENV: 'test', DATABASE_URL: url(d.port, name) } as NodeJS.ProcessEnv);
-      await expect(buildApp({ config })).rejects.toThrow(/may only use a disposable database/);
+      await expect(buildApp({ config })).rejects.toThrow(/may only use the closed test URL/);
     }
     expect(d.connections()).toBe(0);
     // The default URL (no DATABASE_URL at all) is the development database too.
     // Checked without buildApp, so that no regression of the guard can ever
     // connect to it.
-    expect(() => assertTestDatabaseIsolated(loadConfig({ NODE_ENV: 'test' } as NodeJS.ProcessEnv), {})).toThrow(/not devdigest\b/);
+    expect(() => assertTestDatabaseIsolated(loadConfig({ NODE_ENV: 'test' } as NodeJS.ProcessEnv), {})).toThrow(/named devdigest\b/);
   });
 
   it('a config that does not say "test" is still refused under vitest', async () => {
     const d = await decoy();
     const config = loadConfig({ NODE_ENV: 'development', DATABASE_URL: url(d.port, 'devdigest') } as NodeJS.ProcessEnv);
-    await expect(buildApp({ config })).rejects.toThrow(/disposable/);
+    await expect(buildApp({ config })).rejects.toThrow(/closed test URL/);
     expect(d.connections()).toBe(0);
   });
 
-  it('a disposable database is allowed: on the closed setup port the reaper fails fast and non-fatally', async () => {
+  it('the closed test URL is allowed: the reaper fails fast and non-fatally', async () => {
     const app = await buildApp({ config: loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv) });
     try {
       expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
@@ -99,19 +105,60 @@ describe('test runs are isolated from the development database', () => {
     }
   });
 
-  it('an injected db (the testcontainers tests) bypasses the URL check and opens no connection', async () => {
+  it('an injected db that cannot prove it is a marked test database is refused before anything writes', async () => {
+    const config = loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv);
+    await expect(buildApp({ config, db: {} as Db })).rejects.toThrow(/could not be verified/);
+    // A real client to an unreachable server (the decoy): refused, and only the read-only check was attempted.
     const d = await decoy();
-    const config = loadConfig({ NODE_ENV: 'test', DATABASE_URL: url(d.port, 'devdigest') } as NodeJS.ProcessEnv);
-    const app = await buildApp({ config, db: {} as Db });
-    await app.close();
-    expect(d.connections()).toBe(0);
+    const handle = createDb(url(d.port, 'devdigest'), { max: 1 });
+    try {
+      await expect(buildApp({ config, db: handle.db })).rejects.toThrow(/not a marked disposable test database/);
+    } finally {
+      await handle.close();
+    }
+    // Answers that are not a marked disposable database.
+    const answering = (rows: unknown[]) => ({ execute: async () => rows }) as unknown as Db;
+    await expect(assertInjectedTestDatabase(answering([{ name: 'devdigest', marked: true }]), { nodeEnv: 'test' })).rejects.toThrow(/database devdigest/);
+    await expect(assertInjectedTestDatabase(answering([{ name: 'devdigest_test', marked: false }]), { nodeEnv: 'test' })).rejects.toThrow(/no marker/);
+    await expect(assertInjectedTestDatabase(answering([{ name: 'devdigest_test', marked: true }]), { nodeEnv: 'test' })).resolves.toBeUndefined();
+    await expect(assertInjectedTestDatabase(answering([]), { nodeEnv: 'development' }, {})).resolves.toBeUndefined(); // outside tests: nothing
   });
+
+  it('an environment change after the setup cannot reintroduce the development database', async () => {
+    const previous = process.env.DATABASE_URL;
+    const d = await decoy();
+    process.env.DATABASE_URL = url(d.port, 'devdigest_test');
+    try {
+      await expect(buildApp({ config: loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv) })).rejects.toThrow(/closed test URL/);
+      expect(d.connections()).toBe(0);
+    } finally {
+      process.env.DATABASE_URL = previous;
+    }
+  });
+
+  it('secrets: the real key files outside test runs, never in a test run', () => {
+    const home = mkdtempSync(join(tmpdir(), 'devdigest-secrets-home-'));
+    try {
+      const script = `import(${JSON.stringify(join(SERVER_ROOT, 'src', 'platform', 'config.ts'))}).then((m) => console.log(m.loadConfig().secretsPath))`;
+      const experiment = { DEVDIGEST_EXPERIMENT_STACK_ID: 'hw2f-sec00001', DEVDIGEST_EXPERIMENT_PROVIDER: 'deepinfra/fp8', DEVDIGEST_EXPERIMENT_MODEL: 'm', DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS: '100', DEVDIGEST_EXPERIMENT_PRICE_INPUT: '0.1', DEVDIGEST_EXPERIMENT_PRICE_OUTPUT: '0.1' };
+      // No VITEST, development mode: production behaviour.
+      const read = (env: Record<string, string>) => execFileSync(TSX, ['-e', script], { cwd: home, env: { PATH: process.env.PATH ?? '', HOME: home, DOTENV_CONFIG_PATH: '/dev/null', ...env }, encoding: 'utf8' }).trim();
+      expect(read({ NODE_ENV: 'development' })).toBe(join(home, '.devdigest', 'secrets.json'));
+      expect(read({ NODE_ENV: 'development', ...experiment })).toBe(join(home, '.devdigest', 'hw2-experiments', 'secrets.json'));
+      expect(read({ NODE_ENV: 'development', DEVDIGEST_TEST_SECRETS_PATH: '/tmp/x' })).toBe(join(home, '.devdigest', 'secrets.json')); // ignored outside tests
+      // In a test run: the test-owned file, or nothing.
+      expect(read({ NODE_ENV: 'test', DEVDIGEST_TEST_SECRETS_PATH: '/tmp/x', ...experiment })).toBe('/tmp/x');
+      expect(read({ NODE_ENV: 'test', ...experiment })).toBe('/dev/null');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('outside tests the check does nothing', () => {
     for (const nodeEnv of ['development', 'production']) {
       expect(() => assertTestDatabaseIsolated({ nodeEnv, databaseUrl: 'postgres://u:p@localhost:5432/devdigest' }, {})).not.toThrow();
     }
-    expect(() => assertTestDatabaseIsolated({ nodeEnv: 'test', databaseUrl: 'not a url' }, {})).toThrow(/an unreadable URL/);
+    expect(() => assertTestDatabaseIsolated({ nodeEnv: 'test', databaseUrl: 'not a url' }, {})).toThrow(/unreadable URL/);
   });
 
   it('normal startup is unchanged: the real entrypoint in development mode boots and runs its stale-run recovery', async () => {
