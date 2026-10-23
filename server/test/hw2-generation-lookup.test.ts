@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { OPENROUTER_DEFAULT_TIMEOUT_MS, generationLookupDeadlineMs } from '@devdigest/reviewer-core';
+import { OPENROUTER_DEFAULT_TIMEOUT_MS, OpenRouterProvider, generationLookupDeadlineMs } from '@devdigest/reviewer-core';
+import { Container } from '../src/platform/container.js';
+import type { Db } from '../src/db/client.js';
 import { evaluateSlot, type FrozenExpectations } from '../src/experiments/hw2/eligibility.js';
 import { DEFAULT_POLL_TIMEOUT_MS } from '../src/experiments/hw2/runner.js';
 import { canonicalJson, sha256 } from '../src/modules/_shared/experiment.js';
-import { EXPERIMENT_GENERATION_LOOKUP, loadExperimentConfig } from '../src/platform/config.js';
+import { EXPERIMENT_GENERATION_LOOKUP, EXPERIMENT_REQUEST_TIMEOUT_MS, loadConfig, loadExperimentConfig } from '../src/platform/config.js';
 
 /**
  * Provenance as OpenRouter actually reported it in HW2 Gate 3:
@@ -104,9 +106,31 @@ describe('the generation lookup fits the runner', () => {
   });
 
   it('a slot cannot turn ambiguous while its run waits for the request and the lookup', () => {
-    // The run settles at most one request timeout plus the lookup deadline after
-    // dispatch; the runner records `ambiguous` only after DEFAULT_POLL_TIMEOUT_MS.
-    const worstCase = OPENROUTER_DEFAULT_TIMEOUT_MS + generationLookupDeadlineMs(EXPERIMENT_GENERATION_LOOKUP);
-    expect(worstCase + 15_000).toBeLessThanOrEqual(DEFAULT_POLL_TIMEOUT_MS);
+    // The run settles at most one experiment request timeout plus the lookup
+    // deadline after dispatch; the runner records `ambiguous` only after DEFAULT_POLL_TIMEOUT_MS.
+    const worstCase = EXPERIMENT_REQUEST_TIMEOUT_MS + generationLookupDeadlineMs(EXPERIMENT_GENERATION_LOOKUP);
+    expect(worstCase + 30_000).toBeLessThanOrEqual(DEFAULT_POLL_TIMEOUT_MS);
+  });
+
+  it('an experiment request may run long enough for a complete review at the slowest observed throughput', () => {
+    // Gate 3: 432 tokens in 49.3 s (8.8 tokens/s); complete reviews of this model reached about 2,750 tokens.
+    const slowest = 432 / 49.3;
+    expect(EXPERIMENT_REQUEST_TIMEOUT_MS / 1000 * slowest).toBeGreaterThanOrEqual(2_750);
+    expect(OPENROUTER_DEFAULT_TIMEOUT_MS / 1000 * slowest).toBeLessThan(800); // the default would not
+  });
+
+  it('the experiment OpenRouter provider gets the experiment timeout; other modes keep the default', async () => {
+    const secrets = { get: async () => 'sk-or-test-not-a-real-key' };
+    const timeoutOf = async (env: Record<string, string>) => {
+      const config = loadConfig({ NODE_ENV: 'test', ...env } as NodeJS.ProcessEnv);
+      const provider = await (new Container(config, {} as Db, { secrets }) as unknown as { buildLlm(id: string): Promise<OpenRouterProvider> }).buildLlm('openrouter');
+      return (provider as unknown as { timeoutMs: number }).timeoutMs;
+    };
+    const experiment = {
+      DEVDIGEST_EXPERIMENT_STACK_ID: 'hw2f-time0001', DEVDIGEST_EXPERIMENT_PROVIDER: 'deepinfra/fp8', DEVDIGEST_EXPERIMENT_MODEL: REQUESTED,
+      DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS: '16000', DEVDIGEST_EXPERIMENT_PRICE_INPUT: '0.00000009', DEVDIGEST_EXPERIMENT_PRICE_OUTPUT: '0.00000018',
+    };
+    expect(await timeoutOf(experiment)).toBe(EXPERIMENT_REQUEST_TIMEOUT_MS);
+    expect(await timeoutOf({})).toBe(OPENROUTER_DEFAULT_TIMEOUT_MS);
   });
 });

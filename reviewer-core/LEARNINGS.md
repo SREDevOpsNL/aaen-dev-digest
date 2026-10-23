@@ -140,6 +140,24 @@ correction. Genuinely cross-package findings belong in
   `reviewer-core/src/llm/openrouter.ts` (`lookupGeneration`),
   `reviewer-core/test/openrouter-generation-lookup.test.ts`.
 
+- **2026-10-23** — The OpenAI SDK's `timeout` does not bound a request's
+  body. In v4.104 `fetchWithTimeout` clears its timer when `fetch` resolves,
+  that is, when the response headers arrive. OpenRouter sends `200` and its
+  headers "as soon as the provider accepts the request… before the model
+  produces a single token", non-streaming requests included. So the SDK
+  timeout bounds only the time to the provider's acceptance; the whole
+  generation, and a stalled body, are unbounded.
+
+  To bound a request, pass an `AbortSignal.timeout(...)`, combined with the
+  caller's signal, as the request's `signal`; it also aborts the body read.
+  Classify its expiry as a timeout rather than a cancellation. A loopback test
+  shows it: headers at once and the body after 600 ms complete despite a
+  200 ms SDK `timeout`. Evidence:
+  `reviewer-core/node_modules/openai/core.js` (`fetchWithTimeout`),
+  https://openrouter.ai/docs/api_reference/errors-and-debugging.md ("Mid-stream
+  errors", "Non-streaming requests"),
+  `reviewer-core/test/openrouter-request-deadline.test.ts`.
+
 ## Decisions
 
 ## Recurring Errors & Fixes

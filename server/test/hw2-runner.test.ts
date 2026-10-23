@@ -318,6 +318,31 @@ describe('runner orchestration (fake API, no network)', () => {
     expect(spent(ledger.slots().values())).toBeCloseTo(0.05);
   });
 
+  it('a run that never settles (its terminal record was never persisted) is ambiguous at the runner deadline: full reservation, no replay, and a late record cannot rewrite it', async () => {
+    api.settle = (slotId, runId) => ({ runs: [{ run_id: runId, status: 'running', cost_usd: null, experiment: { slot_id: slotId, dispatch_state: 'dispatching' } }] });
+    deps = { ...deps, pollTimeoutMs: 50 };
+    expect(await runSlot(deps, slotRun('c-18-with-1'))).toMatchObject({ state: 'ambiguous', costUsd: null, reason: 'poll timeout', infraFailure: true });
+    expect(spent(ledger.slots().values())).toBeCloseTo(0.05);
+    await expect(runSlot(deps, slotRun('c-18-with-1'))).rejects.toThrow(/never replayed/);
+    expect(api.calls.filter((c) => c.path === '/experiments/runs')).toHaveLength(1);
+    api.slots.set('c-18-with-1', { runs: [{ run_id: 'run-c-18-with-1', status: 'done', cost_usd: 0.0002, experiment: { dispatch_state: 'completed', usage_known: true } }] });
+    await reconcile(deps);
+    expect(ledger.slots().get('c-18-with-1')).toMatchObject({ state: 'ambiguous' });
+    expect(spent(ledger.slots().values())).toBeCloseTo(0.05);
+  });
+
+  it('a run that settles before the runner deadline is recorded with its outcome, however long it took', async () => {
+    let polls = 0;
+    api.settle = (slotId, runId) => ({ get runs() {
+      polls++;
+      return polls < 5
+        ? [{ run_id: runId, status: 'running', cost_usd: null, experiment: { slot_id: slotId, dispatch_state: 'dispatching' } }]
+        : [{ run_id: runId, status: 'done', cost_usd: 0.0004, experiment: { slot_id: slotId, dispatch_state: 'completed', usage_known: true, attempts: [{ outcome: 'valid' }] } }];
+    } });
+    expect(await runSlot(deps, slotRun('c-18-with-1'))).toMatchObject({ state: 'completed', costUsd: 0.0004 });
+    expect(api.calls.filter((c) => c.path === '/experiments/runs')).toHaveLength(1);
+  });
+
   it('reconciles a crashed runner: a settled slot is recorded, an unknown one becomes ambiguous', async () => {
     ledger.append({ slot_id: 'c-18-with-1', phase: 'confirmatory', reservation_usd: 0.05, state: 'dispatched', run_id: 'run-a' });
     ledger.append({ slot_id: 'c-18-without-1', phase: 'confirmatory', reservation_usd: 0.05, state: 'reserved' });

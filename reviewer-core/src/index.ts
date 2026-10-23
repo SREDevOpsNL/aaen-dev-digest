@@ -64,6 +64,7 @@ export {
 // CI runner and the server's openrouter path. Owns session grouping + guards.
 export {
   GENERATION_LOOKUP_READ_TIMEOUT_MS,
+  METADATA_TIMEOUT_MS,
   OPENROUTER_DEFAULT_TIMEOUT_MS,
   OpenRouterProvider,
   experimentRequestBody,
