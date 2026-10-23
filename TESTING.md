@@ -17,6 +17,10 @@ workflow — and deliberately skips the rest. Concretely:
   `server/src/adapters/mocks.ts` so unit tests are hermetic and key-free.
 - **One real integration per data-backed workflow**, against a real Postgres —
   not a mock DB — because the bugs there live in SQL, migrations, and wiring.
+  That Postgres is always a disposable, marked container. Server tests never
+  read `server/.env` or the developer's key files. In a test run, `buildApp`
+  accepts only the closed test URL or a marked testcontainers database
+  (`server/test/setup/isolate-database.ts`, `server/src/db/disposable.ts`).
 - **A few end-to-end browser flows** over the *main* user journeys, on seeded
   data, with no LLM in the loop.
 
