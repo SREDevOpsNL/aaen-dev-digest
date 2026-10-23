@@ -19,6 +19,19 @@ correction. Repo-intel remains server-scoped;
   `server/src/db/schema/ops.ts:6` (`jobs`),
   `server/src/platform/jobs.ts:30` (`JobRunner`)
 
+- **2026-10-22** — Settling HW2 spend from the ledgers an operator names does
+  not work: a forgotten exploration stack silently drops out of the
+  conservative total (a synthetic X3 left out undercharged by $0.0103), even
+  with the `(stack_id, slot_id)` keys of the cross-stack entry under *Codebase
+  Patterns*. Settle by enumerating
+  `~/.devdigest/hw2-experiments/hw2f-*/ledger.jsonl` instead. A ledger exists
+  only once its stack reserved a slot, so unpaid stacks add nothing. Print each
+  stack's charge so the operator can confirm the list. Evidence:
+  `docs/plans/HW2-experiment-operator-guide.md` ("If stack E stops
+  unexpectedly", step 3), checked verbatim against the runner's
+  `Ledger.slots()` + `spent()` in 8 scenarios, including a nested copy that
+  must not count and the read-only real ledgers.
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-17** — `run-executor` fills only three of `assemblePrompt`'s optional
@@ -205,18 +218,6 @@ correction. Repo-intel remains server-scoped;
   `reviewer-core/src/llm/openrouter-metadata.ts:39` (`attemptsCount`),
   `server/src/platform/config.ts:140` (`generationLookup`), and the
   `routerMetadataRaw` of the exported Gate 3 traces.
-
-- **2026-10-22** — Extension of the 2026-10-22 cross-stack settlement entry
-  above: keying by `(stack_id, slot_id)` is not enough if the operator names
-  the ledgers. A forgotten exploration stack silently drops out of the
-  conservative total; a synthetic X3 left out undercharged by $0.0103. Settle
-  by enumerating `~/.devdigest/hw2-experiments/hw2f-*/ledger.jsonl` instead.
-  A ledger exists only once its stack reserved a slot, so unpaid stacks add
-  nothing. Print each stack's charge so the operator can confirm the list.
-  Evidence: `docs/plans/HW2-experiment-operator-guide.md` ("If stack E stops
-  unexpectedly", step 3), checked verbatim against the runner's
-  `Ledger.slots()` + `spent()` in 8 scenarios, including a nested copy that
-  must not count and the read-only real ledgers.
 
 ## Decisions
 
