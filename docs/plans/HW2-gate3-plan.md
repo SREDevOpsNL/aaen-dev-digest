@@ -494,6 +494,19 @@ Final ledger:
         2,750 tokens;
       - the runner waits 480 s;
       - the 16,000 cap is unchanged until experiment 17's length is known.
+    - **Correction (2026-10-23):** the premise above was wrong. The SDK's
+      timeout ends when the response *headers* arrive. OpenRouter sends a
+      `200` and its headers as soon as the provider accepts the request,
+      before the first token, for non-streaming requests too. So the 90 s
+      timeout never bounded generation, and a stalled body had no bound at
+      all, holding the stack's one in-flight slot.
+
+      The follow-up (draft PR `hw2/experiment-timeout-chain`) puts one
+      deadline on the whole request, headers and body; a deadline expiry is
+      recorded as a timeout, not a cancellation. It also bounds the
+      preflight's endpoints read. Only with that does the request timeout
+      limit how long a generation may run: about 3,100 tokens at 8.8
+      tokens/s, for 360 s.
   - **Risk: 429s versus a complete result.**
     - 2 of 4 dispatched Gate 3 attempts failed with 429.
     - A cell counts only with 5 counted slots, and failed slots are never

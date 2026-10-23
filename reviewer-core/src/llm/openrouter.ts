@@ -29,6 +29,8 @@ const FAILURE_REASON_MAX = 500;
 export const OPENROUTER_DEFAULT_TIMEOUT_MS = 90_000;
 /** Default timeout of one `GET /generation` read. */
 export const GENERATION_LOOKUP_READ_TIMEOUT_MS = 5_000;
+/** Default timeout of a `GET /models/{model}/endpoints` read. */
+export const METADATA_TIMEOUT_MS = 15_000;
 
 /**
  * The longest a generation lookup with `policy` can take: its delays between
@@ -78,6 +80,8 @@ export interface OpenRouterProviderOptions {
   now?: () => number;
   /** Timeout of one generation-lookup read (default `GENERATION_LOOKUP_READ_TIMEOUT_MS`). */
   generationLookupReadTimeoutMs?: number;
+  /** Timeout of a model-endpoints read (default `METADATA_TIMEOUT_MS`). */
+  metadataTimeoutMs?: number;
 }
 
 /**
@@ -124,6 +128,7 @@ export class OpenRouterProvider implements LLMProvider {
   private sleep: (ms: number) => Promise<void>;
   private now: () => number;
   private lookupReadTimeoutMs: number;
+  private metadataTimeoutMs: number;
 
   constructor(apiKey: string, opts: OpenRouterProviderOptions = {}) {
     this.id = opts.id ?? 'openrouter';
@@ -135,6 +140,7 @@ export class OpenRouterProvider implements LLMProvider {
     this.sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.now = opts.now ?? Date.now;
     this.lookupReadTimeoutMs = opts.generationLookupReadTimeoutMs ?? GENERATION_LOOKUP_READ_TIMEOUT_MS;
+    this.metadataTimeoutMs = opts.metadataTimeoutMs ?? METADATA_TIMEOUT_MS;
     this.client = new OpenAI({
       apiKey,
       baseURL: this.baseURL,
@@ -267,8 +273,15 @@ export class OpenRouterProvider implements LLMProvider {
     }
 
     const body = experimentRequestBody(req, options);
+    // One deadline for the whole request. The SDK's own timeout ends when the
+    // response headers arrive, and OpenRouter sends a 200 and its headers as
+    // soon as the provider accepts the request, before the first token: the
+    // body (the whole generation) would otherwise have no bound at all.
+    const deadlineMs = req.timeoutMs !== undefined && req.timeoutMs > 0 ? Math.min(req.timeoutMs, this.timeoutMs) : this.timeoutMs;
+    const deadline = AbortSignal.timeout(deadlineMs);
     const requestOptions = {
       ...(this.requestOptions(req) ?? {}),
+      signal: req.signal ? AbortSignal.any([req.signal, deadline]) : deadline,
       maxRetries: 0,
       headers: { 'X-OpenRouter-Metadata': 'enabled' },
     };
@@ -280,7 +293,8 @@ export class OpenRouterProvider implements LLMProvider {
       data = result.data as typeof data;
       headers = result.response.headers;
     } catch (err) {
-      const cancelled = req.signal?.aborted || err instanceof OpenAI.APIUserAbortError;
+      const timedOut = deadline.aborted && !req.signal?.aborted;
+      const cancelled = !timedOut && (req.signal?.aborted || err instanceof OpenAI.APIUserAbortError);
       const status = err instanceof OpenAI.APIError && typeof err.status === 'number' ? err.status : null;
       // The SDK error carries the raw body and headers: persist only sanitized, allowlisted parts.
       const secrets = [this.apiKey];
@@ -300,12 +314,14 @@ export class OpenRouterProvider implements LLMProvider {
       // fixed reason: the error it coincided with may be a provider response.
       const failureReason = cancelled
         ? 'cancelled during the request'
-        : status !== null && errorDetail
+        : timedOut
+          ? `request exceeded its ${deadlineMs / 1000} s deadline (headers and body)`
+          : status !== null && errorDetail
           ? `${status} ${errorDetail.message ?? 'error without a message'}`
           : (sanitizeText(err instanceof Error ? err.message : null, FAILURE_REASON_MAX, secrets) ?? 'request failed');
       report({
         dispatch: 'dispatched',
-        outcome: cancelled ? 'cancelled' : status !== null ? 'http_error' : 'network_error',
+        outcome: cancelled ? 'cancelled' : timedOut || status === null ? 'network_error' : 'http_error',
         httpStatus: status,
         failureReason,
         errorDetail,
@@ -445,8 +461,10 @@ export class OpenRouterProvider implements LLMProvider {
 
   /** Per-provider endpoints of `model` with prices and limits (free metadata call). */
   async listEndpoints(model: string): Promise<OpenRouterEndpointInfo[]> {
+    // Bounded: the experiment preflight waits for it before dispatch.
     const res = await this.fetchImpl(`${this.baseURL}/models/${model}/endpoints`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
+      signal: AbortSignal.timeout(this.metadataTimeoutMs),
     });
     if (!res.ok) throw new Error(`OpenRouter /models/${model}/endpoints returned ${res.status}`);
     return parseEndpoints(await res.json());
