@@ -875,6 +875,33 @@ pnpm exec tsx src/experiments/hw2/cli.ts reconcile "${STACK[@]}"
     Record the slot by its `(stack_id, slot_id)`, with its global attempt
     number, in the Gate 3 plan's execution log.
 
+### A further exploration stack, e.g. X3 (PROPOSED, NOT APPROVED)
+
+**Do not use this until it is approved in writing.** These are proposed
+values, not a spending authorization.
+
+The proposal:
+- the exploration stacks together stay within USD 0.15 of conservative
+  charge;
+- X3's own maximum is USD 0.10;
+- each X3 slot gets a capability of X3's current charge plus one USD 0.01
+  reservation, named in that slot's own written authorization;
+- slots are identified by `(stack_id, slot_id)`, with one guarded invocation
+  per authorization, immediate revocation and no automatic retry.
+
+The X2 addendum's lifecycle applies. Its cross-stack check is replaced by the
+settlement script of [If stack E stops unexpectedly](#if-stack-e-stops-unexpectedly),
+step 3, with the variables below:
+- run it before `authorize`, and again immediately before the run;
+- it fails closed unless every ledger is present and intact, X and X2 still
+  equal their pinned charges, and the next capability fits both limits;
+- the authorized budget must equal the `next capability` it prints.
+
+```bash
+X3_ID=hw2f-0a1b2c3d   # EXAMPLE: replace with the stack id that --serve printed
+export SETTLE_EXPECT="$X3_ID" SETTLE_NEXT_STACK="$X3_ID" SETTLE_STACK_MAX=0.10 SETTLE_ENVELOPE=0.15 SETTLE_RESERVATION=0.01
+```
+
 ### Gate 4: confirmatory on a new stack E (≤ USD 1.00)
 
 1. **Prepare E.**
@@ -972,55 +999,114 @@ ledger and zero recorded spend.
    - a `completed` or `failed` slot keeps its recorded outcome;
    - none of these is ever run again.
 3. **Settle the spend offline.** This uses the same rule as the runner's
-   `charge()`. It settles every stack's ledger under
-   `~/.devdigest/hw2-experiments/`, so no exploration stack (X, X2 or any later
-   one) and no E can be left out. Exploration counts toward the USD 1.50
-   total. A ledger exists only once its stack reserved a slot, so unpaid
-   stacks add nothing. The script reads the ledgers only.
+   `charge()`, and reads the ledgers only.
+   - **Every stack:** it settles every stack's ledger under
+     `~/.devdigest/hw2-experiments/`, so a later exploration stack or E cannot
+     be left out. A ledger exists only once its stack reserved a slot, so
+     unpaid stacks add nothing.
+   - **No stack can silently disappear.** The closed stacks X and X2 are
+     pinned: their ledgers must exist and keep their recorded charges. Every
+     open stack named in `SETTLE_EXPECT` must exist as well.
+   - **Stack-scoped slots:** every slot is settled by its
+     `(stack_id, slot_id)`, the stack id being the name of the ledger's
+     directory. X and X2 both have an `x-18-without-1`, and two stacks' slots
+     are never merged. As in the runner, a slot's first terminal event wins;
+     later events are counted and reported.
+   - **Fails closed** (`FAILED`, exit 1) when:
+     - a ledger is missing, unreadable or holds a line that is not a ledger
+       event;
+     - a pinned charge changed;
+     - the key's usage does not fit the ledgers.
 
-   Slot ids are scoped to a stack (X and X2 both have an `x-18-without-1`).
-   So every slot is settled by its `(stack_id, slot_id)`, where the stack id
-   is the name of the ledger's directory, and two stacks' slots are never
-   merged.
+   Set the stacks that must be present (E's `$ID`, and any later exploration
+   stack) and, optionally, the dedicated key's `usage` from `GET /api/v1/key`.
+   With a usage, the script checks that the key spent at least every known
+   cost, and no more than those plus the reservations of the slots whose cost
+   is unknown.
 
-   It prints every stack it settled, with that stack's charge. Check that the
-   list holds every stack of this experiment, and E's `$ID`.
+```bash
+export SETTLE_EXPECT="$ID"     # space-separated stack ids that must be present
+export SETTLE_KEY_USAGE=       # optional: the key's usage in USD, e.g. 0.00040788
+```
 
 ```bash
 python3 -I - "$HOME/.devdigest/hw2-experiments" <<'EOF'
 import glob, json, os, sys
+from decimal import Decimal
+ROOT = sys.argv[1]
+# Closed stacks: their ledgers must exist and keep these conservative charges (USD).
+PINNED = {"hw2f-f53ed971": Decimal("0.01022896"), "hw2f-39febf41": Decimal("0.01017892")}
+EXPECTED = os.environ.get("SETTLE_EXPECT", "").split()
 TERMINAL = {"completed", "failed", "refused", "ambiguous"}
-ledgers = sorted(glob.glob(os.path.join(sys.argv[1], "hw2f-*", "ledger.jsonl")))
-if not ledgers:
-    sys.exit(f"FAILED: no ledger under {sys.argv[1]}")
-slots = {}
-for path in ledgers:
-    stack = os.path.basename(os.path.dirname(path))  # slot ids are stack-scoped
-    for line in open(path):
+STATES = TERMINAL | {"reserved", "dispatched"}
+usd = lambda v: Decimal(str(v))
+problems = []
+ledgers = {os.path.basename(os.path.dirname(p)): p for p in glob.glob(os.path.join(ROOT, "hw2f-*", "ledger.jsonl"))}
+problems += [f"{stack}: ledger missing" for stack in sorted(set(PINNED) | set(EXPECTED)) if stack not in ledgers]
+slots, ignored = {}, 0
+for stack, path in sorted(ledgers.items()):
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except (OSError, UnicodeDecodeError) as err:
+        problems.append(f"{stack}: ledger unreadable ({type(err).__name__})")
+        continue
+    for n, line in enumerate(lines, 1):
         if not line.strip():
             continue
-        event = json.loads(line)
+        try:
+            event = json.loads(line, parse_float=Decimal)
+            valid = isinstance(event, dict) and isinstance(event.get("slot_id"), str) and event.get("state") in STATES \
+                and event.get("phase") in ("exploration", "confirmatory") and isinstance(event.get("reservation_usd"), (int, Decimal)) \
+                and (event.get("cost_usd") is None or isinstance(event.get("cost_usd"), (int, Decimal)))
+        except ValueError:
+            valid = False
+        if not valid:
+            problems.append(f"{stack}: line {n} is not a ledger event")
+            continue
         key = (stack, event["slot_id"])
         current = slots.get(key)
         if current and current["state"] in TERMINAL:
+            ignored += 1
             continue
-        slots[key] = {"state": event["state"], "phase": event["phase"], "reservation": event["reservation_usd"], "cost": event.get("cost_usd")}
+        slots[key] = {"state": event["state"], "phase": event["phase"], "reservation": usd(event["reservation_usd"]),
+                      "cost": None if event.get("cost_usd") is None else usd(event["cost_usd"])}
 def charge(slot):
     if slot["state"] == "refused":
-        return 0.0
+        return Decimal(0)
     if slot["state"] in ("completed", "failed") and slot["cost"] is not None:
         return slot["cost"]
     return slot["reservation"]
 name = lambda key: f"({key[0]}, {key[1]})"
-for stack in sorted({k[0] for k in slots}):
-    print(f"stack {stack}: {sum(1 for k in slots if k[0] == stack)} slot(s), charged ${sum(charge(s) for k, s in slots.items() if k[0] == stack):.6f}")
-spent = {phase: sum(charge(s) for s in slots.values() if s["phase"] == phase) for phase in ("exploration", "confirmatory")}
+by_stack = {stack: sum((charge(s) for k, s in slots.items() if k[0] == stack), Decimal(0)) for stack in sorted({k[0] for k in slots})}
+for stack, charged in by_stack.items():
+    print(f"stack {stack}: {sum(1 for k in slots if k[0] == stack)} slot(s), charged ${charged}")
+problems += [f"{stack}: charged ${by_stack.get(stack, 0)}, but closed at ${pin}" for stack, pin in PINNED.items() if stack in ledgers and by_stack.get(stack, Decimal(0)) != pin]
+spent = {phase: sum((charge(s) for s in slots.values() if s["phase"] == phase), Decimal(0)) for phase in ("exploration", "confirmatory")}
 total = spent["exploration"] + spent["confirmatory"]
 for state in sorted({s["state"] for s in slots.values()}):
     print(f"{state}: {', '.join(sorted(name(k) for k, s in slots.items() if s['state'] == state))}")
-print(f"charged: exploration ${spent['exploration']:.6f}, confirmatory ${spent['confirmatory']:.6f}, total ${total:.6f}")
-print(f"remaining confirmatory budget at most ${max(0.0, min(1.00 - spent['confirmatory'], 1.50 - total)):.6f}")
+print(f"charged: exploration ${spent['exploration']}, confirmatory ${spent['confirmatory']}, total ${total}")
+print(f"remaining confirmatory budget at most ${max(Decimal(0), min(Decimal('1.00') - spent['confirmatory'], Decimal('1.50') - total))}")
 print("never replay: " + (", ".join(sorted(name(k) for k, s in slots.items() if s["state"] != "refused")) or "(none)"))
+if ignored:
+    print(f"events after a slot's terminal state (ignored, as by the runner): {ignored}")
+if os.environ.get("SETTLE_KEY_USAGE"):
+    usage = Decimal(os.environ["SETTLE_KEY_USAGE"])
+    known = sum((s["cost"] for s in slots.values() if s["state"] in ("completed", "failed") and s["cost"] is not None), Decimal(0))
+    unknown = sum((s["reservation"] for s in slots.values() if s["state"] != "refused" and not (s["state"] in ("completed", "failed") and s["cost"] is not None)), Decimal(0))
+    print(f"key usage ${usage}: known costs ${known}, unknown-cost reservations ${unknown}")
+    if not (known - Decimal("0.000001") <= usage <= known + unknown + Decimal("0.000001")):
+        problems.append(f"key usage ${usage} is outside [{known}, {known + unknown}]: the key spent what the ledgers do not explain")
+if os.environ.get("SETTLE_NEXT_STACK"):
+    stack, reservation = os.environ["SETTLE_NEXT_STACK"], Decimal(os.environ["SETTLE_RESERVATION"])
+    stack_max, envelope = Decimal(os.environ["SETTLE_STACK_MAX"]), Decimal(os.environ["SETTLE_ENVELOPE"])
+    capability = by_stack.get(stack, Decimal(0)) + reservation
+    print(f"next capability for {stack}: ${capability} (stack maximum ${stack_max}; exploration ${spent['exploration'] + reservation} of ${envelope})")
+    if capability > stack_max or spent["exploration"] + reservation > envelope:
+        problems.append(f"the next {stack} slot does not fit: ${capability} of ${stack_max}, or ${spent['exploration'] + reservation} of the ${envelope} envelope")
+if problems:
+    sys.exit("FAILED:\n" + "\n".join(problems))
+print("settled")
 EOF
 ```
 

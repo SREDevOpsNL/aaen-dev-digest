@@ -32,6 +32,23 @@ correction. Repo-intel remains server-scoped;
   `Ledger.slots()` + `spent()` in 8 scenarios, including a nested copy that
   must not count and the read-only real ledgers.
 
+- **2026-10-23** — Correction to the entry above: discovery alone does not
+  stop a ledger from being omitted. It trades one silent omission for
+  another:
+  - **Naming the ledgers** fails closed when a named stack's directory is
+    gone, but silently skips a stack nobody named.
+  - **Globbing them** finds every stack present, but a stack whose directory
+    disappeared simply drops out, with exit 0. X's USD 0.01022896 vanished in
+    a test.
+
+  Do both: discover every ledger, and pin the closed stacks (here X and X2)
+  with their recorded charges. Require every named open stack, and fail on any
+  unreadable or malformed ledger line. Evidence: the step-3 script of "If
+  stack E stops unexpectedly" in `docs/plans/HW2-experiment-operator-guide.md`;
+  `server/test/hw2-settlement-runbook.test.ts`, which runs that script
+  verbatim against the runner's `Ledger` + `spent()` (seven mutations each
+  fail a test).
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-17** — `run-executor` fills only three of `assemblePrompt`'s optional
