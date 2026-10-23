@@ -210,6 +210,25 @@ correction. Repo-intel remains server-scoped;
 
 ## Recurring Errors & Fixes
 
+- **2026-10-22** — The "hermetic" unit subset is not hermetic towards the dev
+  database. `buildApp` without an injected `db` connects to
+  `config.databaseUrl` and, on boot, runs the stale-run reaper:
+  `UPDATE agent_runs SET status = 'failed' WHERE status = 'running'`.
+  Tests such as `routes-smoke.test.ts` build the app from
+  `loadConfig(process.env)`. Two cases point that URL at the dev database:
+  - in the main checkout, dotenv loads `server/.env`, which points at
+    `localhost:5432`;
+  - in a worktree without `.env`, the default URL is that same dev database.
+
+  So running `vitest run --exclude '**/*.it.test.ts'` while a dev review is in
+  flight marks that review failed. Run the subset with
+  `DATABASE_URL=postgres://none:none@127.0.0.1:9/none`. The reaper then fails
+  fast and non-fatally. Tests that boot the app should pass a closed URL or a
+  `db`. Evidence: `server/src/app.ts` (reaper before `listen`),
+  `server/src/modules/reviews/repository/run.repo.ts:136`
+  (`reapStaleRunningRuns`), `server/test/routes-smoke.test.ts:11`
+  (`loadConfig`), `server/test/experiment-loopback.test.ts` (`CLOSED_DB`).
+
 - **2026-09-21** — On Windows, `tsx src/db/migrate.ts` and
   `tsx src/db/seed.ts` can exit successfully without running because their CLI
   guards compare the canonical `import.meta.url` (`file:///D:/...`) with a

@@ -47,6 +47,8 @@ PG_PASS="${E2E_PG_PASS:-devdigest}"
 API_PORT="${E2E_API_PORT:-3101}"
 WEB_PORT="${E2E_WEB_PORT:-3100}"
 PG_LABELS=(--label devdigest.disposable=true)
+# Extra `next dev` arguments; --serve binds the UI to loopback only.
+WEB_HOST_ARGS=()
 
 if [ "$SERVE" -eq 1 ]; then
   NONCE="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
@@ -57,6 +59,9 @@ if [ "$SERVE" -eq 1 ]; then
   API_PORT="${E2E_API_PORT:-3251}"
   WEB_PORT="${E2E_WEB_PORT:-3250}"
   PG_LABELS+=(--label "devdigest.stack-id=${STACK_ID}" --label "devdigest.database=${PG_DB}")
+  # Loopback only, like Postgres and the experiment-mode API (config.apiHost):
+  # the UI's server side calls the API, so an exposed UI would expose it too.
+  WEB_HOST_ARGS=(-H 127.0.0.1)
   for var in DEVDIGEST_EXPERIMENT_PROVIDER DEVDIGEST_EXPERIMENT_MODEL DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS \
              DEVDIGEST_EXPERIMENT_PRICE_INPUT DEVDIGEST_EXPERIMENT_PRICE_OUTPUT; do
     [ -n "${!var:-}" ] || { echo "--serve needs $var (see docs/plans/HW2-experiment-operator-guide.md)"; exit 2; }
@@ -87,6 +92,21 @@ command -v docker >/dev/null || { echo "docker not found"; exit 1; }
 command -v pnpm   >/dev/null || { echo "pnpm not found (npm i -g pnpm)"; exit 1; }
 command -v agent-browser >/dev/null || \
   warn "agent-browser not found — install once: npm i -g agent-browser && agent-browser install"
+[ "$SERVE" -eq 0 ] || command -v ss >/dev/null || { echo "ss not found (iproute2): --serve checks its listeners with it"; exit 1; }
+
+# Every listener on these ports must be 127.0.0.1 only. Reads the kernel's
+# listening sockets, not the URLs the clients use; returns 1 otherwise.
+assert_loopback_listeners() {
+  local port addrs addr bad=0
+  for port in "$@"; do
+    addrs="$(ss -Hltn "sport = :$port" | awk '{print $4}')"
+    [ -n "$addrs" ] || { echo "no listener on :$port"; bad=1; continue; }
+    while read -r addr; do
+      [ "$addr" = "127.0.0.1:$port" ] || { echo "listener $addr is not loopback-only"; bad=1; }
+    done <<<"$addrs"
+  done
+  return "$bad"
+}
 
 # --- teardown trap (installed before we start anything) ----------------------
 SERVER_PID=""
@@ -188,7 +208,7 @@ log "API healthy"
 
 # --- web on :$WEB_PORT (next dev → reads NEXT_PUBLIC_API_BASE from env) -------
 log "starting web on :$WEB_PORT"
-(cd client && pnpm exec next dev -p "$WEB_PORT") &
+(cd client && pnpm exec next dev -p "$WEB_PORT" "${WEB_HOST_ARGS[@]}") &
 WEB_PID=$!
 log "waiting for web :$WEB_PORT"
 web_up=0
@@ -202,6 +222,8 @@ log "web up"
 
 # --- --serve: print the identity the runner checks, then wait ---------------
 if [ "$SERVE" -eq 1 ]; then
+  assert_loopback_listeners "$API_PORT" "$WEB_PORT" || { echo "refusing to serve: the stack is reachable beyond loopback"; exit 1; }
+  log "listeners on :$API_PORT and :$WEB_PORT are loopback-only"
   log "HW2 experiment stack is up (Ctrl-C tears it down)"
   cat <<IDENTITY
   stack id   ${STACK_ID}
