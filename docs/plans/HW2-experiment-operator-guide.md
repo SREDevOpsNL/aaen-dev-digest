@@ -972,32 +972,35 @@ ledger and zero recorded spend.
    - a `completed` or `failed` slot keeps its recorded outcome;
    - none of these is ever run again.
 3. **Settle the spend offline.** This uses the same rule as the runner's
-   `charge()`. Pass every ledger of this experiment: the exploration stacks X
-   and X2 (and any later exploration stack, in the same way), then E.
-   Exploration counts toward the USD 1.50 total. The script reads the ledgers
-   only.
+   `charge()`. It settles every stack's ledger under
+   `~/.devdigest/hw2-experiments/`, so no exploration stack (X, X2 or any later
+   one) and no E can be left out. Exploration counts toward the USD 1.50
+   total. A ledger exists only once its stack reserved a slot, so unpaid
+   stacks add nothing. The script reads the ledgers only.
 
    Slot ids are scoped to a stack (X and X2 both have an `x-18-without-1`).
    So every slot is settled by its `(stack_id, slot_id)`, where the stack id
    is the name of the ledger's directory, and two stacks' slots are never
    merged.
 
-```bash
-X_ID=hw2f-f53ed971; X2_ID=hw2f-39febf41   # the Gate 3 exploration stacks X and X2
-```
+   It prints every stack it settled, with that stack's charge. Check that the
+   list holds every stack of this experiment, and E's `$ID`.
 
 ```bash
-python3 -I - "$HOME/.devdigest/hw2-experiments/$X_ID/ledger.jsonl" "$HOME/.devdigest/hw2-experiments/$X2_ID/ledger.jsonl" "$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl" <<'EOF'
-import json, os, sys
+python3 -I - "$HOME/.devdigest/hw2-experiments" <<'EOF'
+import glob, json, os, sys
 TERMINAL = {"completed", "failed", "refused", "ambiguous"}
+ledgers = sorted(glob.glob(os.path.join(sys.argv[1], "hw2f-*", "ledger.jsonl")))
+if not ledgers:
+    sys.exit(f"FAILED: no ledger under {sys.argv[1]}")
 slots = {}
-for path in sys.argv[1:]:
-    stack = os.path.basename(os.path.dirname(os.path.abspath(path)))  # slot ids are stack-scoped
+for path in ledgers:
+    stack = os.path.basename(os.path.dirname(path))  # slot ids are stack-scoped
     for line in open(path):
         if not line.strip():
             continue
         event = json.loads(line)
-        key = f"({stack}, {event['slot_id']})"
+        key = (stack, event["slot_id"])
         current = slots.get(key)
         if current and current["state"] in TERMINAL:
             continue
@@ -1008,13 +1011,16 @@ def charge(slot):
     if slot["state"] in ("completed", "failed") and slot["cost"] is not None:
         return slot["cost"]
     return slot["reservation"]
+name = lambda key: f"({key[0]}, {key[1]})"
+for stack in sorted({k[0] for k in slots}):
+    print(f"stack {stack}: {sum(1 for k in slots if k[0] == stack)} slot(s), charged ${sum(charge(s) for k, s in slots.items() if k[0] == stack):.6f}")
 spent = {phase: sum(charge(s) for s in slots.values() if s["phase"] == phase) for phase in ("exploration", "confirmatory")}
 total = spent["exploration"] + spent["confirmatory"]
 for state in sorted({s["state"] for s in slots.values()}):
-    print(f"{state}: {', '.join(sorted(k for k, s in slots.items() if s['state'] == state))}")
+    print(f"{state}: {', '.join(sorted(name(k) for k, s in slots.items() if s['state'] == state))}")
 print(f"charged: exploration ${spent['exploration']:.6f}, confirmatory ${spent['confirmatory']:.6f}, total ${total:.6f}")
 print(f"remaining confirmatory budget at most ${max(0.0, min(1.00 - spent['confirmatory'], 1.50 - total)):.6f}")
-print("never replay: " + (", ".join(sorted(k for k, s in slots.items() if s["state"] != "refused")) or "(none)"))
+print("never replay: " + (", ".join(sorted(name(k) for k, s in slots.items() if s["state"] != "refused")) or "(none)"))
 EOF
 ```
 
