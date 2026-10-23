@@ -19,7 +19,7 @@ correction. Repo-intel remains server-scoped;
   `server/src/db/schema/ops.ts:6` (`jobs`),
   `server/src/platform/jobs.ts:30` (`JobRunner`)
 
-- **2026-10-22** — Settling HW2 spend from the ledgers an operator names does
+- **2026-10-23** — Settling HW2 spend from the ledgers an operator names does
   not work: a forgotten exploration stack silently drops out of the
   conservative total (a synthetic X3 left out undercharged by $0.0103), even
   with the `(stack_id, slot_id)` keys of the cross-stack entry under *Codebase
