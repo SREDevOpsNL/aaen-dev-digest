@@ -14,6 +14,33 @@ export function isDisposableDatabaseName(name: string): boolean {
   return DISPOSABLE_DATABASE_NAME.test(name);
 }
 
+/** The database name in a Postgres URL, or null when the URL names none or cannot be parsed. */
+export function databaseNameOf(url: string): string | null {
+  try {
+    const name = decodeURIComponent(new URL(url).pathname.replace(/^\//, ''));
+    return name.length > 0 ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A test run (`NODE_ENV=test`, or anything under vitest) may only connect to a
+ * disposable database. On boot the app's stale-run reaper writes to whatever
+ * `databaseUrl` names, and an unset or `.env`-loaded URL is the development
+ * database. Throws before any connection is opened; it never names more of the
+ * URL than its database. Outside tests it does nothing.
+ */
+export function assertTestDatabaseIsolated(config: { nodeEnv: string; databaseUrl: string }, env: NodeJS.ProcessEnv = process.env): void {
+  if (config.nodeEnv !== 'test' && !env.VITEST) return;
+  const name = databaseNameOf(config.databaseUrl);
+  if (name === null || !isDisposableDatabaseName(name)) {
+    throw new Error(
+      `Refusing to connect: a test run may only use a disposable database (devdigest_test, devdigest_e2e, devdigest_hw2f…), not ${name ?? 'an unreadable URL'}. Inject a db, or use test/setup/isolate-database.ts.`,
+    );
+  }
+}
+
 /** The only repository a freshly seeded disposable database may hold. */
 const SEEDED_REPO = 'acme/payments-api';
 

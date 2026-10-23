@@ -341,6 +341,32 @@ correction. Repo-intel remains server-scoped;
   18,000 iterations. A shim that dates every index write into the window
   failed the old test file in 24 of 30 runs and the fixed one in 0 of 30.
 
+- **2026-10-23** — The server's "hermetic" unit tests could write to the
+  development database.
+  - **Mechanism:** `buildApp` without an injected `db` connects to
+    `config.databaseUrl` and runs the stale-run reaper before listening
+    (`UPDATE agent_runs SET status = 'failed' WHERE status = 'running'`).
+    `routes-smoke.test.ts` booted the app five times with
+    `loadConfig(process.env)`. `import 'dotenv/config'` filled `DATABASE_URL`
+    from `server/.env` (the dev database, `localhost:5432`). A worktree without
+    `.env` falls back to the default URL, which is that same database. CI sets
+    no `DATABASE_URL`, so it never showed there.
+  - **Proof:** a decoy listener named as the dev database got a connection from
+    the unit suite on `main` (`d4c1be5`), and none with the fix.
+  - **Fix:** `test/setup/isolate-database.ts` (vitest `setupFiles`) points
+    dotenv at `/dev/null` and `DATABASE_URL` at a closed, disposable endpoint.
+    `buildApp` calls `assertTestDatabaseIsolated`: in a test run (`NODE_ENV=test`,
+    or `VITEST` set), without an injected `db`, it refuses any non-disposable
+    database name before connecting.
+  - **Testing a guard like this:** check its refusal with a pure call, or
+    against a decoy that stops listening after the first connection. Never use
+    the real default URL, which a regressed guard would connect to. A decoy
+    that only drops connections made the postgres client retry until the test
+    timed out.
+
+  Evidence: `server/src/db/disposable.ts` (`assertTestDatabaseIsolated`),
+  `server/src/app.ts`, `server/test/test-database-isolation.test.ts`.
+
 ## Session Notes
 
 ## Open Questions

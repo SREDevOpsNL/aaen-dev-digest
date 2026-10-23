@@ -27,6 +27,15 @@ pnpm db:seed                                       # idempotent demo data
 Plain `pnpm test` runs the `*.it.test.ts` files too, which need Docker. For a
 quick loop, use the hermetic subset.
 
+No test can reach your development database. `test/setup/isolate-database.ts`
+runs before every test file:
+- it stops dotenv from reading `server/.env`;
+- it points `DATABASE_URL` at a closed, disposable endpoint.
+
+In a test run, `buildApp` without an injected `db` refuses any non-disposable
+database. A test that needs Postgres injects a testcontainers database
+(`test/helpers/pg.ts`).
+
 ## Architecture rules
 
 - One feature = one `src/modules/<name>/` plugin, registered statically in
