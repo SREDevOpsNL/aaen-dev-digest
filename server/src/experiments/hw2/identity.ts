@@ -24,6 +24,7 @@ export interface StackIdentity {
   provider: string;
   provider_name: string | null;
   model: string;
+  served_model: string | null;
   max_output_tokens: number;
   in_flight_slot: string | null;
   secrets_path: string;

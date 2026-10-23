@@ -13,7 +13,7 @@ import type {
   StructuredRequest,
   StructuredResult,
 } from '@devdigest/shared';
-import { OpenRouterProvider } from '@devdigest/reviewer-core';
+import { INTENT_PROMPT_VERSION, OpenRouterProvider } from '@devdigest/reviewer-core';
 import { buildApp } from '../src/app.js';
 import { MockGitClient, MockGitHubClient } from '../src/adapters/mocks.js';
 import { seed } from '../src/db/seed.js';
@@ -24,6 +24,7 @@ import { diffFromPrFiles } from '../src/modules/reviews/diff-loader.js';
 import type { ReviewRepository } from '../src/modules/reviews/repository.js';
 import { canonicalJson, sha256 } from '../src/modules/_shared/experiment.js';
 import { expectedSkillFingerprint, writeCapability } from '../src/experiments/hw2/cli.js';
+import { evaluateSlot } from '../src/experiments/hw2/eligibility.js';
 import { dockerAvailable, startPg, type PgFixture } from './helpers/pg.js';
 
 const hasDocker = await dockerAvailable();
@@ -614,13 +615,28 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
   /**
    * One experiment slot through the real OpenRouterProvider, SDK and extractor
    * against a loopback stand-in for OpenRouter: endpoint metadata for the
-   * preflight, and `chat` for the one generation. Returns what was persisted.
+   * preflight, `chat` for the one generation and, when given, `lookup` for the
+   * generation record (`GET /generation`, read n = 1, 2, …; the provider's
+   * clock and sleep are fakes, so 5 s between reads costs no time). Returns
+   * what was persisted.
    */
-  async function loopbackSlot(chat: (req: IncomingMessage, res: ServerResponse) => void) {
+  async function loopbackSlot(
+    chat: (req: IncomingMessage, res: ServerResponse) => void,
+    lookup?: (read: number) => Promise<{ status: number; body?: unknown }> | { status: number; body?: unknown },
+  ) {
     const chats: Array<{ authorization: string | undefined }> = [];
+    const generationReads: string[] = [];
+    let clock = 0;
     const server: Server = createServer((req, res) => {
       req.resume();
-      req.on('end', () => {
+      req.on('end', async () => {
+        if (lookup && req.method === 'GET' && req.url?.startsWith('/v1/generation?id=')) {
+          generationReads.push(new URL(req.url, 'http://loopback').searchParams.get('id') ?? '');
+          const answer = await lookup(generationReads.length);
+          res.writeHead(answer.status, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(answer.body ?? {}));
+          return;
+        }
         if (req.method === 'GET' && req.url === `/v1/models/${MODEL}/endpoints`) {
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ data: { endpoints: [{ provider_name: 'DeepInfra', tag: 'deepinfra', quantization: 'fp8', context_length: 128_000, max_completion_tokens: 16_384, pricing: { prompt: '0.00000014', completion: '0.00000028', request: '0' } }] } }));
@@ -643,6 +659,7 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
         NODE_ENV: 'test',
         DEVDIGEST_CLONE_DIR: cloneDir,
         ...EXPERIMENT_ENV,
+        DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP: lookup ? '1' : '0',
         DEVDIGEST_EXPERIMENT_CAPABILITY_PATH: join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1', 'capability.json'),
       } as NodeJS.ProcessEnv),
       db: pg.handle.db,
@@ -650,7 +667,16 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
         git: new MockGitClient({ diff: '' }),
         github: new MockGitHubClient(),
         // maxRetries 2 on the client: the experiment path must still send exactly one request.
-        llm: { openrouter: new OpenRouterProvider(LOOPBACK_KEY, { baseURL: `http://127.0.0.1:${port}/v1`, maxRetries: 2 }) },
+        llm: {
+          openrouter: new OpenRouterProvider(LOOPBACK_KEY, {
+            baseURL: `http://127.0.0.1:${port}/v1`,
+            maxRetries: 2,
+            sleep: async (ms) => {
+              clock += ms;
+            },
+            now: () => clock,
+          }),
+        },
       },
     });
     try {
@@ -678,7 +704,7 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
       );
       const slot = (await real.inject({ url: `/experiments/slots/${slotId}` })).json();
       // Every persisted or served form of the failure: run row (error), trace (log, attempts, refusal reason), slot lookup.
-      return { chats, run, trace, serialized: [JSON.stringify(run), JSON.stringify(trace), JSON.stringify(slot)] };
+      return { chats, generationReads, run, trace, slot, serialized: [JSON.stringify(run), JSON.stringify(trace), JSON.stringify(slot)] };
     } finally {
       await real.close();
       await new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
@@ -748,5 +774,66 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
       errorDetail: { origin: 'upstream_provider', code: 502, providerName: 'DeepInfra' },
     });
     for (const text of serialized) for (const leaked of [LOOPBACK_KEY, 'routing-itest-marker', 'echoed_authorization', 'echo Bearer']) expect(text).not.toContain(leaked);
+  });
+
+  /** The served version OpenRouter's records name, as in HW2 Gate 3. */
+  const SERVED = 'deepseek/deepseek-v4-flash-20260423';
+  /** A completed generation as Gate 3 saw it: router metadata with `attempt: 1` and no `attempts` array. */
+  const completedChat = (_req: IncomingMessage, res: ServerResponse) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      id: 'gen-itest-late-1',
+      model: MODEL,
+      choices: [{ message: { content: JSON.stringify({ verdict: 'approve', summary: 'ok', score: 100, findings: [] }) }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 900, completion_tokens: 120, cost: 0.0002 },
+      openrouter_metadata: { requested: MODEL, strategy: 'direct', attempt: 1, endpoints: { total: 15, available: [{ provider: 'DeepInfra', model: SERVED, selected: true }] } },
+    }));
+  };
+  const generationRecord = {
+    data: { id: 'gen-itest-late-1', model: SERVED, provider_name: 'DeepInfra', finish_reason: 'stop', tokens_prompt: 900, tokens_completion: 120, total_cost: 0.0002, provider_responses: [{ provider_name: 'DeepInfra', endpoint_id: 'ep-1', model_permaslug: SERVED, status: 200 }] },
+  };
+  /** What `cli.ts report` expects of a counted experiment-18 slot. */
+  const expectations18 = async () => {
+    const fixture = EXPERIMENT_FIXTURES.find((f) => f.number === 502)!;
+    return {
+      providerName: 'DeepInfra',
+      model: MODEL,
+      servedModel: SERVED,
+      intent: { derivation_id: null, head_sha: fixture.headSha, prompt_version: INTENT_PROMPT_VERSION, analysis_sha: sha256(canonicalJson(fixture.intent.analysis)) },
+      expectedDiffSha256: await fixtureDiffSha(502),
+    };
+  };
+  const runningRuns = async () => (await pg.handle.db.select({ id: t.agentRuns.id }).from(t.agentRuns).where(eq(t.agentRuns.status, 'running'))).length;
+
+  it('a generation record that appears 35 s after the response is found, persisted with the trace, and makes the slot eligible', async () => {
+    const runningDuringLookup: number[] = [];
+    const { chats, generationReads, run, trace, slot } = await loopbackSlot(completedChat, async (read) => {
+      runningDuringLookup.push(await runningRuns());
+      return read < 8 ? { status: 404 } : { status: 200, body: generationRecord }; // reads 5 s apart: the 8th is at 35 s
+    });
+    expect(chats).toHaveLength(1); // the lookup reads metadata only: no second generation
+    expect(generationReads).toEqual(Array(8).fill('gen-itest-late-1'));
+    // While the lookup ran the run was not terminal, so the runner could not settle the slot without the record.
+    expect(runningDuringLookup.every((n) => n >= 1)).toBe(true);
+    expect(run).toMatchObject({ status: 'done', costUsd: 0.0002 });
+    expect(trace.experiment).toMatchObject({ dispatch_state: 'completed', usage_known: true });
+    expect(trace.experiment.attempts[0].generation).toEqual({
+      status: 'found', providerName: 'DeepInfra', model: SERVED, finishReason: 'stop', tokensPrompt: 900, tokensCompletion: 120, totalCost: 0.0002,
+      providerResponses: [{ providerName: 'DeepInfra', endpointId: 'ep-1', modelPermaslug: SERVED, status: 200 }],
+    });
+    // The report evaluates what the slot lookup serves.
+    const [served] = slot.runs;
+    expect(evaluateSlot(served, await expectations18())).toEqual({ eligible: true, provenance: 'verified', sources: ['router_metadata', 'generation'], reasons: [] });
+  });
+
+  it('a generation record that never appears is recorded as not_found: the cost stays known, nothing is invented, the slot is not counted', async () => {
+    const { chats, generationReads, run, trace, slot } = await loopbackSlot(completedChat, () => ({ status: 404 }));
+    expect(chats).toHaveLength(1);
+    expect(generationReads).toHaveLength(13);
+    expect(run).toMatchObject({ status: 'done', costUsd: 0.0002 });
+    expect(trace.experiment).toMatchObject({ dispatch_state: 'completed', usage_known: true });
+    expect(trace.experiment.attempts[0].generation).toMatchObject({ status: 'not_found', providerName: null, model: null, providerResponses: [] });
+    const verdict = evaluateSlot(slot.runs[0], await expectations18());
+    expect(verdict).toMatchObject({ eligible: false, provenance: 'unverified', sources: ['router_metadata'] });
   });
 });

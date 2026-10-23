@@ -206,6 +206,31 @@ correction. Repo-intel remains server-scoped;
   `server/src/platform/config.ts:140` (`generationLookup`), and the
   `routerMetadataRaw` of the exported Gate 3 traces.
 
+- **2026-10-23** — Extension of the eligibility entry above: the blocker had a
+  second cause, which showed only when the rule ran on the generation records
+  that Gate 3 read 29–38 s after each response. Even a found record was
+  rejected. Eligibility compared the record's `model` with the *requested*
+  slug, but OpenRouter's records name the dated served version:
+  - the generation `model`, the router's selected model, and each provider
+    response's `model_permaslug` were all `deepseek/deepseek-v4-flash-20260423`;
+  - the chat response's `model` echoes `deepseek/deepseek-v4-flash`.
+
+  That mismatch also blocked the single-attempt proof, so lengthening the
+  lookup alone would not have unblocked Gate 4.
+
+  The unit fixtures had hidden both causes. They were invented, not observed:
+  - router metadata with `attempts: [{}]`;
+  - a generation `model` equal to the requested slug.
+
+  Build provenance fixtures from a real record's shape, and apply a new
+  eligibility rule to preserved real records before trusting it.
+
+  Evidence: `server/test/hw2-generation-lookup.test.ts` (Gate 3 shapes),
+  `server/test/hw2-runner.test.ts` (fixtures corrected),
+  `server/src/experiments/hw2/eligibility.ts` (`servedModel`), and the sealed
+  records in `~/.devdigest/hw2-experiments/hw2f-f53ed971/gate3-slot1/` and
+  `hw2f-39febf41/gate3-x-18-without-1/`.
+
 ## Decisions
 
 ## Recurring Errors & Fixes

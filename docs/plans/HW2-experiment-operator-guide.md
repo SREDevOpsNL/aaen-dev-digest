@@ -51,8 +51,16 @@ export DEVDIGEST_EXPERIMENT_PRICE_OUTPUT=       # required: USD per output token
 Optional:
 - `DEVDIGEST_EXPERIMENT_PROVIDER_NAME`: the serving provider's display name,
   frozen after exploration and required at Gate 4;
+- `DEVDIGEST_EXPERIMENT_SERVED_MODEL`: the served model version that
+  OpenRouter's records name, for example `deepseek/deepseek-v4-flash-20260423`.
+  It is the generation record's `model`, the router's selected model, and each
+  provider response's `model_permaslug`. Frozen after exploration and required
+  at Gate 4;
 - `DEVDIGEST_EXPERIMENT_PRICE_REQUEST`;
-- `DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP=0|1` (default 1).
+- `DEVDIGEST_EXPERIMENT_GENERATION_LOOKUP=0|1` (default 1). The lookup reads
+  the generation record up to 13 times, 5 s apart, and stops by about 65 s
+  after the response. The record appeared 29–38 s after the response in
+  Gate 3, and a slot counts at Gate 4 only when its record was found.
 
 A partial set fails the server's startup. Validate the settings with the same
 rules the server applies:
@@ -74,8 +82,9 @@ need("DEVDIGEST_EXPERIMENT_PROVIDER", lambda v: re.fullmatch(r"[a-z0-9][a-z0-9._
 need("DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS", lambda v: v.isdigit() and 0 < int(v) <= 200000, "an integer from 1 to 200000")
 need("DEVDIGEST_EXPERIMENT_PRICE_INPUT", usd, "a positive USD amount per token")
 need("DEVDIGEST_EXPERIMENT_PRICE_OUTPUT", usd, "a positive USD amount per token")
-if "DEVDIGEST_EXPERIMENT_PROVIDER_NAME" in env and not env["DEVDIGEST_EXPERIMENT_PROVIDER_NAME"]:
-    problems.append("DEVDIGEST_EXPERIMENT_PROVIDER_NAME is set but empty")
+for name in ("DEVDIGEST_EXPERIMENT_PROVIDER_NAME", "DEVDIGEST_EXPERIMENT_SERVED_MODEL"):
+    if name in env and not env[name]:
+        problems.append(f"{name} is set but empty")
 if problems:
     sys.exit("FAILED:\n" + "\n".join(problems))
 print("experiment settings are valid")
@@ -189,7 +198,7 @@ pnpm exec tsx src/experiments/hw2/cli.ts manifest "${STACK[@]}" --seed "$SEED" -
   [Paid](#paid)); one generated on any other stack never matches. The manifest
   freezes:
   - the **stack settings and identity**: database name, provider, provider name,
-    model, output cap, prices and generation lookup;
+    model, served model, output cap, prices and generation lookup;
   - the **implementation fingerprint**: committed blob ids of `server/src`,
     `reviewer-core/src`, their package and lock files, and `scripts/e2e.sh`.
     Unlike `HEAD`, it does not change when the preregistration is committed,
@@ -504,6 +513,8 @@ Exploration confirms what the implementation must not assume:
 - which generation id `/generation` accepts;
 - the provider's display name (from the slug), which becomes
   `DEVDIGEST_EXPERIMENT_PROVIDER_NAME` for E;
+- the served model version (the generation record's `model`), which becomes
+  `DEVDIGEST_EXPERIMENT_SERVED_MODEL` for E;
 - endpoint prices and limits;
 - whether one-item `order` + `only` + `allow_fallbacks: false` routes as intended;
 - a viable output cap.
@@ -880,11 +891,11 @@ pnpm exec tsx src/experiments/hw2/cli.ts reconcile "${STACK[@]}"
 1. **Prepare E.**
    - In a new terminal at the repository root, set the §2 settings to the final
      values established at Gate 3, including
-     `DEVDIGEST_EXPERIMENT_PROVIDER_NAME`.
-   - Run the §2 validation, then confirm that the provider name is set:
+     `DEVDIGEST_EXPERIMENT_PROVIDER_NAME` and `DEVDIGEST_EXPERIMENT_SERVED_MODEL`.
+   - Run the §2 validation, then confirm that both are set:
 
 ```bash
-if [ -n "${DEVDIGEST_EXPERIMENT_PROVIDER_NAME:-}" ]; then echo "provider name: $DEVDIGEST_EXPERIMENT_PROVIDER_NAME"; else echo "FAILED: DEVDIGEST_EXPERIMENT_PROVIDER_NAME is required for stack E"; false; fi
+if [ -n "${DEVDIGEST_EXPERIMENT_PROVIDER_NAME:-}" ] && [ -n "${DEVDIGEST_EXPERIMENT_SERVED_MODEL:-}" ]; then echo "provider name: $DEVDIGEST_EXPERIMENT_PROVIDER_NAME, served model: $DEVDIGEST_EXPERIMENT_SERVED_MODEL"; else echo "FAILED: DEVDIGEST_EXPERIMENT_PROVIDER_NAME and DEVDIGEST_EXPERIMENT_SERVED_MODEL are required for stack E"; false; fi
 ```
 
    - Start E with `scripts/e2e.sh --serve` (§2). Leave this terminal and E

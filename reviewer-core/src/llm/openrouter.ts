@@ -25,6 +25,23 @@ import { ExperimentRequestError, attemptErrorDetail, failedResponseTelemetry, sa
 /** Bound on a persisted failure reason. */
 const FAILURE_REASON_MAX = 500;
 
+/** Default per-request timeout of the SDK client (also the ceiling for `StructuredRequest.timeoutMs`). */
+export const OPENROUTER_DEFAULT_TIMEOUT_MS = 90_000;
+/** Default timeout of one `GET /generation` read. */
+export const GENERATION_LOOKUP_READ_TIMEOUT_MS = 5_000;
+
+/**
+ * The longest a generation lookup with `policy` can take: its delays between
+ * reads plus one read's timeout. The lookup stops at this deadline whatever
+ * the reads do, so the attempt is reported at most this long after the response.
+ */
+export function generationLookupDeadlineMs(
+  policy: { attempts: number; delayMs: number },
+  readTimeoutMs: number = GENERATION_LOOKUP_READ_TIMEOUT_MS,
+): number {
+  return (Math.max(policy.attempts, 1) - 1) * policy.delayMs + readTimeoutMs;
+}
+
 /**
  * The single OpenAI-compatible structured provider, owned by the engine because
  * BOTH consumers need it: the CI runner (the GitHub Action runs reviewer-core
@@ -57,6 +74,10 @@ export interface OpenRouterProviderOptions {
   fetchImpl?: typeof fetch;
   /** Delay between generation-lookup polls; tests inject one. */
   sleep?: (ms: number) => Promise<void>;
+  /** Clock for the generation-lookup deadline; tests inject one. */
+  now?: () => number;
+  /** Timeout of one generation-lookup read (default `GENERATION_LOOKUP_READ_TIMEOUT_MS`). */
+  generationLookupReadTimeoutMs?: number;
 }
 
 /**
@@ -101,15 +122,19 @@ export class OpenRouterProvider implements LLMProvider {
   private estimateCost?: OpenRouterProviderOptions['estimateCost'];
   private fetchImpl: typeof fetch;
   private sleep: (ms: number) => Promise<void>;
+  private now: () => number;
+  private lookupReadTimeoutMs: number;
 
   constructor(apiKey: string, opts: OpenRouterProviderOptions = {}) {
     this.id = opts.id ?? 'openrouter';
     this.apiKey = apiKey;
     this.baseURL = opts.baseURL ?? 'https://openrouter.ai/api/v1';
     this.estimateCost = opts.estimateCost;
-    this.timeoutMs = opts.timeoutMs ?? 90_000;
+    this.timeoutMs = opts.timeoutMs ?? OPENROUTER_DEFAULT_TIMEOUT_MS;
     this.fetchImpl = opts.fetchImpl ?? ((...args) => fetch(...args));
     this.sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.now = opts.now ?? Date.now;
+    this.lookupReadTimeoutMs = opts.generationLookupReadTimeoutMs ?? GENERATION_LOOKUP_READ_TIMEOUT_MS;
     this.client = new OpenAI({
       apiKey,
       baseURL: this.baseURL,
@@ -318,7 +343,7 @@ export class OpenRouterProvider implements LLMProvider {
       routerMetadataRaw: data.openrouter_metadata ?? null,
       generation: options.generationLookup
         ? generationId
-          ? await this.lookupGeneration(generationId, options.generationLookup)
+          ? await this.lookupGeneration(generationId, options.generationLookup, req.signal)
           : emptyGeneration('unavailable')
         : null,
     };
@@ -361,25 +386,61 @@ export class OpenRouterProvider implements LLMProvider {
     };
   }
 
-  /** Bounded polling of `GET /generation?id=`; never throws. */
+  /**
+   * Bounded polling of `GET /generation?id=`: metadata reads only, never a
+   * generation. The record lags the response by tens of seconds (29–38 s in
+   * HW2 Gate 3), so these are read again:
+   * - a 404, a 429 or a 5xx;
+   * - a timed-out or failed read;
+   * - a record that does not list its provider responses yet.
+   *
+   * Polling stops after `policy.attempts` reads, at `generationLookupDeadlineMs`
+   * or on `signal`; any other answer ends it at once. Never throws and never
+   * invents a record. The result is one of:
+   * - `found`: OpenRouter's own record, with no provider responses if it never
+   *   listed any;
+   * - `not_found`: the last read was a 404;
+   * - `unavailable`: otherwise.
+   */
   private async lookupGeneration(
     id: string,
     policy: { attempts: number; delayMs: number },
+    signal?: AbortSignal,
   ): Promise<GenerationMetadataSummary> {
+    const deadline = this.now() + generationLookupDeadlineMs(policy, this.lookupReadTimeoutMs);
+    let found: GenerationMetadataSummary | null = null;
+    let missing: 'not_found' | 'unavailable' = 'not_found';
     for (let attempt = 1; attempt <= Math.max(policy.attempts, 1); attempt++) {
-      if (attempt > 1) await this.sleep(policy.delayMs);
+      if (attempt > 1) {
+        if (this.now() + policy.delayMs >= deadline) break; // never wait past the deadline
+        await this.sleep(policy.delayMs);
+      }
+      const remaining = deadline - this.now();
+      if (signal?.aborted || remaining <= 0) break;
       try {
+        const timeout = AbortSignal.timeout(Math.min(this.lookupReadTimeoutMs, remaining));
         const res = await this.fetchImpl(`${this.baseURL}/generation?id=${encodeURIComponent(id)}`, {
           headers: { Authorization: `Bearer ${this.apiKey}` },
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
-        if (res.status === 404) continue; // metadata can lag the response
-        if (!res.ok) return emptyGeneration('unavailable');
-        return summarizeGeneration(await res.json());
+        if (res.status === 404) {
+          missing = 'not_found'; // metadata can lag the response
+          continue;
+        }
+        if (res.status === 429 || res.status >= 500) {
+          missing = 'unavailable';
+          continue;
+        }
+        if (!res.ok) return found ?? emptyGeneration('unavailable');
+        const summary = summarizeGeneration(await res.json());
+        if (summary.status !== 'found') return found ?? summary;
+        found = summary;
+        if (summary.providerResponses.length > 0) return summary;
       } catch {
-        return emptyGeneration('unavailable');
+        missing = 'unavailable';
       }
     }
-    return emptyGeneration('not_found');
+    return found ?? emptyGeneration(signal?.aborted ? 'unavailable' : missing);
   }
 
   /** Per-provider endpoints of `model` with prices and limits (free metadata call). */

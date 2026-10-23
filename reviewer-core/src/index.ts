@@ -63,8 +63,11 @@ export {
 // The single OpenAI-compatible structured provider (OpenRouter), shared by the
 // CI runner and the server's openrouter path. Owns session grouping + guards.
 export {
+  GENERATION_LOOKUP_READ_TIMEOUT_MS,
+  OPENROUTER_DEFAULT_TIMEOUT_MS,
   OpenRouterProvider,
   experimentRequestBody,
+  generationLookupDeadlineMs,
   type OpenRouterProviderOptions,
 } from './llm/openrouter.js';
 // Pure parsers of OpenRouter's provenance metadata (HW2 experiment mode).

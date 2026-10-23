@@ -130,3 +130,14 @@ says which file a finding goes in.
   Details: [`server/LEARNINGS.md`](server/LEARNINGS.md#codebase-patterns--tool--library-notes)
   (2026-10-22, both entries) and
   [`HW2-gate3-plan.md`](docs/plans/HW2-gate3-plan.md#gate-3-status-and-remaining-work).
+
+- **2026-10-23 — HW2 Gate 4 provenance blocker: two causes, one draft fix.**
+  Applying the eligibility rule to the generation records that Gate 3 read
+  29–38 s after each response showed that a longer lookup alone would not
+  have been enough. The rule also compared the record's dated model with the
+  requested slug, so even a found record failed. The draft fix bounds the
+  lookup at about 65 s and freezes the served model. Details:
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#codebase-patterns--tool--library-notes)
+  (2026-10-23, the extension of the eligibility entry) and
+  [`reviewer-core/LEARNINGS.md`](reviewer-core/LEARNINGS.md#codebase-patterns--tool--library-notes)
+  (what OpenRouter documents).
