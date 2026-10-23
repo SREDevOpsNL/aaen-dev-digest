@@ -131,7 +131,7 @@ correction. Genuinely cross-package findings belong in
   no-choices branch), `reviewer-core/test/openrouter-error-detail.test.ts`
   ("a cancellation coinciding with a provider error").
 
-- **2026-10-22** — What OpenRouter documents about provenance, and what it
+- **2026-10-23** — What OpenRouter documents about provenance, and what it
   does not (checked 2026-10-22):
   - **`openrouter_metadata.attempt`** is only "the attempt number that
     succeeded". The docs' own guardrail example shows `attempt: 1` for a

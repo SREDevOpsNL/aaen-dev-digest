@@ -206,7 +206,7 @@ correction. Repo-intel remains server-scoped;
   `server/src/platform/config.ts:140` (`generationLookup`), and the
   `routerMetadataRaw` of the exported Gate 3 traces.
 
-- **2026-10-22** — Extension of the eligibility entry above: the blocker had a
+- **2026-10-23** — Extension of the eligibility entry above: the blocker had a
   second cause, which showed only when the rule ran on the generation records
   that Gate 3 read 29–38 s after each response. Even a found record was
   rejected. Eligibility compared the record's `model` with the *requested*
