@@ -129,6 +129,8 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
   let token = '';
   /** Write the operator's capability for a phase (what `cli.ts authorize` does after a gate is authorized). */
   const authorize = (phase: 'exploration' | 'confirmatory', budgetUsd = phase === 'exploration' ? 0.5 : 1, hours = 2) => {
+    // An authorize never replaces a capability: revoke the previous one and drop its token first, as the operator does.
+    for (const f of ['capability.json', 'capability.token']) rmSync(join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1', f), { force: true });
     writeCapability({ stackId: 'hw2f-itest1', phase, budgetUsd, hours, home: capHome });
     token = readFileSync(join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1', 'capability.token'), 'utf8');
   };
