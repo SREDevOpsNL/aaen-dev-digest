@@ -323,6 +323,24 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   `npm ci` in `reviewer-core/`, with identical `typescript` and `zod`
   versions in `server/`.
 
+- **2026-10-24** — Two facts about stacked PRs in this fork.
+  - **Squash-merging a parent PR into `main` makes its stacked child
+    conflict.** The child's branch still carries the parent's original
+    commits, and they collide with the squash commit on the same lines.
+    #48 conflicted in both files #46 had touched (`api.ts`, and the test
+    added in both histories). Fix with a normal push: merge `main` into the
+    child branch, keeping the branch side (`git merge -X ours origin/main`),
+    then check that `git diff origin/main HEAD` equals the child's own
+    commit. Do not force-push.
+  - **A PR's checks test the merge ref as of their last trigger.** Once
+    `main` moves, they no longer test what a merge would produce. Closing and
+    reopening the PR reruns every workflow on the current merge ref without
+    changing the head. Confirm in the checkout step's log
+    (`+<sha>:refs/remotes/pull/<n>/merge`).
+
+  Evidence: PR #48 (`git merge-tree` before and after); PRs #46 and #47,
+  whose checks were re-run that way before merging.
+
 ## Session Notes
 
 ## Open Questions

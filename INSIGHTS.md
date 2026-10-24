@@ -163,3 +163,18 @@ says which file a finding goes in.
   Evidence: `~/.devdigest/hw2-experiments/integration-20261023c/`
   (`validation-log.md`, `logs/iso-mutation-S2c.log`,
   `rules/heldout-probes.md`).
+
+- **2026-10-24 — HW2 final integration.** The accounting chain (#37 → #45),
+  #46 and #47 were merged. The pre-merge audits found two limits that tests
+  alone had not stated:
+  - **The global lock covers only the X3 block.** Three other `authorize`
+    paths in the guide bypass it, so the guide now scopes its claim.
+  - **A poll can still overshoot the runner deadline** by up to one request
+    bound; draft #48 caps a poll at the time left.
+
+  **Expected-finding rules.** On 50 blinded, frozen cases written by a
+  reviewer who saw neither rule set, v1 scored 45/50 and v2 43/50. With the
+  earlier held-out set, that is two independent sets on which v2 is not
+  better. Evidence: `~/.devdigest/hw2-experiments/integration-20261024/`
+  (`rules/rules-review-blinded.md`, `validation-log.md`,
+  `security-review.md`).
