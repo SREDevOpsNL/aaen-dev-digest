@@ -243,6 +243,74 @@ d('run lifecycle: cancellation and terminal states (Testcontainers pg)', () => {
     }
   });
 
+  async function traceFor(runId: string) {
+    await vi.waitFor(async () => {
+      const [row] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, runId));
+      expect(row).toBeDefined();
+    });
+    const [row] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, runId));
+    return row!.trace as { stats: { findings: number; grounding: string }; raw_output?: unknown };
+  }
+
+  it('a cancel that lands after the last checkpoint is stopped by the guarded persistence', async () => {
+    const { app, llm, pr, agents, service } = await setup();
+    const repo = new ReviewRepository(pg.handle.db);
+    const finalize = ReviewRepository.prototype.finalizeRunSuccess;
+    let applied: boolean | undefined;
+    // Cancel durably (no in-memory flag) between the executor's last
+    // checkpoint and the success transaction, as another process would.
+    const finalizeSpy = vi
+      .spyOn(ReviewRepository.prototype, 'finalizeRunSuccess')
+      .mockImplementation(async function (this: ReviewRepository, ...args) {
+        await repo.cancelRunIfRunning(workspaceId, args[0].runId);
+        const result = await finalize.apply(this, args);
+        applied = result.applied;
+        return result;
+      });
+
+    try {
+      const { runs } = await service.runReview(workspaceId, pr.id, agents);
+      const runId = runs[0]!.run_id;
+      llm.gate.resolve();
+      const trace = await traceFor(runId);
+
+      expect(applied).toBe(false);
+      expect((await runRow(runId)).status).toBe('cancelled');
+      expect(await reviewsForRun(runId)).toHaveLength(0);
+      expect(await lastReviewedSha(pr.id)).toBeNull();
+      expect(trace.stats).toMatchObject({ findings: 0, grounding: '0/0 passed' });
+    } finally {
+      finalizeSpy.mockRestore();
+      await app.close();
+    }
+  });
+
+  it('a provider that succeeds after the cancel finished cannot persist or write a success trace', async () => {
+    const { app, llm, pr, agents, service } = await setup();
+    const { runs } = await service.runReview(workspaceId, pr.id, agents);
+    const runId = runs[0]!.run_id;
+
+    await llm.started.promise;
+    const cancel = await app.inject({ method: 'POST', url: `/runs/${runId}/cancel` });
+    expect(cancel.statusCode).toBe(200);
+    expect((await runRow(runId)).status).toBe('cancelled');
+
+    // The provider now returns a full, valid review: a late success.
+    llm.gate.resolve();
+    const trace = await traceFor(runId);
+
+    expect(llm.calls.filter((c) => c.method === 'completeStructured')).toHaveLength(1);
+    const row = await runRow(runId);
+    expect(row.status).toBe('cancelled');
+    expect(row.findingsCount ?? 0).toBe(0);
+    expect(await reviewsForRun(runId)).toHaveLength(0);
+    expect(await lastReviewedSha(pr.id)).toBeNull();
+    // The stored trace is the cancelled one, not the model's success trace.
+    expect(trace.stats).toMatchObject({ findings: 0, grounding: '0/0 passed' });
+    expect(trace.raw_output ?? null).not.toEqual(expect.stringContaining('Hardcoded Stripe secret key'));
+    await app.close();
+  });
+
   it('terminal writes are compare-and-set: nothing overwrites a cancelled run', async () => {
     const repo = new ReviewRepository(pg.handle.db);
     const { pr } = await setup();
