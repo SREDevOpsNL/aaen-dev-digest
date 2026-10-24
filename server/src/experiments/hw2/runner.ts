@@ -130,10 +130,11 @@ const INFRA_OUTCOMES = new Set(['http_error', 'network_error']);
 
 /**
  * How long a slot's run may stay unsettled before it is recorded `ambiguous`.
- * It must cover the request timeout plus the generation lookup's deadline
- * (`test/hw2-generation-lookup.test.ts` checks the margin).
+ * It must cover the experiment request timeout plus the generation lookup's
+ * deadline (`test/hw2-generation-lookup.test.ts` checks the margin):
+ * 360 s + 65 s + margin.
  */
-export const DEFAULT_POLL_TIMEOUT_MS = 180_000;
+export const DEFAULT_POLL_TIMEOUT_MS = 480_000;
 
 /** Run one scheduled slot. Never retries it: every outcome is final. */
 export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResult> {

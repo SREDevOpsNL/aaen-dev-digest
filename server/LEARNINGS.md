@@ -19,6 +19,73 @@ correction. Repo-intel remains server-scoped;
   `server/src/db/schema/ops.ts:6` (`jobs`),
   `server/src/platform/jobs.ts:30` (`JobRunner`)
 
+- **2026-10-23** — Settling HW2 spend from the ledgers an operator names does
+  not work: a forgotten exploration stack silently drops out of the
+  conservative total (a synthetic X3 left out undercharged by $0.0103), even
+  with the `(stack_id, slot_id)` keys of the cross-stack entry under *Codebase
+  Patterns*. Settle by enumerating
+  `~/.devdigest/hw2-experiments/hw2f-*/ledger.jsonl` instead. A ledger exists
+  only once its stack reserved a slot, so unpaid stacks add nothing. Print each
+  stack's charge so the operator can confirm the list. Evidence:
+  `docs/plans/HW2-experiment-operator-guide.md` ("If stack E stops
+  unexpectedly", step 3), checked verbatim against the runner's
+  `Ledger.slots()` + `spent()` in 8 scenarios, including a nested copy that
+  must not count and the read-only real ledgers.
+
+- **2026-10-23** — Correction to the entry above: discovery alone does not
+  stop a ledger from being omitted. It trades one silent omission for
+  another:
+  - **Naming the ledgers** fails closed when a named stack's directory is
+    gone, but silently skips a stack nobody named.
+  - **Globbing them** finds every stack present, but a stack whose directory
+    disappeared simply drops out, with exit 0. X's USD 0.01022896 vanished in
+    a test.
+
+  Do both: discover every ledger, and pin the closed stacks (here X and X2)
+  with their recorded charges. Require every named open stack, and fail on any
+  unreadable or malformed ledger line. Evidence: the step-3 script of "If
+  stack E stops unexpectedly" in `docs/plans/HW2-experiment-operator-guide.md`;
+  `server/test/hw2-settlement-runbook.test.ts`, which runs that script
+  verbatim against the runner's `Ledger` + `spent()` (seven mutations each
+  fail a test).
+
+- **2026-10-23** — A fail-closed "every ledger must exist" check also locks
+  out a stack's first use. The runner writes a ledger only when it reserves
+  the first slot, so a fresh stack has none, and the proposed X3 check failed
+  with "ledger missing" before X3's first authorization. The earlier test had
+  hidden this by giving X3 an empty ledger file that the runner never writes.
+
+  First use has to be declared and proven, not inferred from absence:
+  - the stack's `--serve` directory exists, without a kept token from an
+    earlier slot or a runner lock;
+  - its live server has no run for any slot `run` could take.
+
+  The capability of the lifecycle in progress is allowed, which a second check
+  before dispatch would otherwise have refused. Evidence:
+  `docs/plans/hw2-settle.py` (`SETTLE_NEW`), the X3 procedure in
+  `docs/plans/HW2-experiment-operator-guide.md`, and
+  `server/test/hw2-settlement-runbook.test.ts`, which runs the guide's blocks
+  verbatim against the runner's `Ledger`, a mock stack API and a stub `pnpm`.
+  Six mutations each fail a test.
+
+- **2026-10-23** — A lock per stack does not protect a budget that the stacks
+  share. The X3 lifecycle locked its own stack's directory, and the
+  settlement read only ledgers. A capability exists before its slot reaches a
+  ledger, so a lifecycle on another stack could not see it.
+  - **Reproduced:** two lifecycles on different stacks, each fitting the
+    USD 0.15 exploration envelope on its own, both authorized, for 0.15540788
+    together.
+  - **Fix:** take one lock that all stacks share for the whole lifecycle, and
+    refuse to size a capability while any other stack holds a live
+    `capability.json`.
+
+  When a limit spans several resources, lock at the scope of the limit, and
+  count the spend that has been granted but not yet recorded. Evidence:
+  `docs/plans/hw2-settle.py` (`SETTLE_NEXT_STACK`), the X3 lifecycle in
+  `docs/plans/HW2-experiment-operator-guide.md` (`authorization.lock`), and
+  `server/test/hw2-settlement-runbook.test.ts` ("two concurrent lifecycles on
+  different stacks"). Reverting to the per-stack lock fails that test.
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-17** — `run-executor` fills only three of `assemblePrompt`'s optional
