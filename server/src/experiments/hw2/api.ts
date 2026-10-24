@@ -24,12 +24,13 @@ export class ExperimentApi {
     private readonly timeoutMs: number = API_REQUEST_TIMEOUT_MS,
   ) {}
 
-  async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+  /** `timeoutMs` can only shorten the client's bound, e.g. to what is left of a caller's deadline. */
+  async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, headers: Record<string, string> = {}, timeoutMs?: number): Promise<T> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
       headers: { ...headers, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(Math.max(1, Math.min(this.timeoutMs, timeoutMs ?? this.timeoutMs))),
     });
     const text = await res.text();
     const parsed = text ? (JSON.parse(text) as unknown) : null;
@@ -40,8 +41,8 @@ export class ExperimentApi {
     return parsed as T;
   }
 
-  get<T>(path: string) {
-    return this.request<T>('GET', path);
+  get<T>(path: string, timeoutMs?: number) {
+    return this.request<T>('GET', path, undefined, {}, timeoutMs);
   }
   post<T>(path: string, body: unknown, headers: Record<string, string> = {}) {
     return this.request<T>('POST', path, body, headers);
