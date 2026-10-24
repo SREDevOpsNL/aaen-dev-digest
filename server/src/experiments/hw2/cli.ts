@@ -16,7 +16,7 @@
  * The full procedure is in docs/plans/HW2-experiment-operator-guide.md.
  */
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -73,10 +73,43 @@ export function assertPaidAuthorization(flags: Flags): Phase {
 export const experimentDir = (stackId: string, home = homedir()) => join(home, '.devdigest', 'hw2-experiments', stackId);
 const tokenFile = (stackId: string, home?: string) => join(experimentDir(stackId, home), 'capability.token');
 
+/** Create `path` exclusively (mode 0600): fails if anything, a symlink included, is already there. */
+function writeExclusive(path: string, content: string): void {
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    writeSync(fd, content);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Stacks other than `stackId` whose directory holds a `capability.json` (a symlink counts). */
+function otherLiveCapabilities(stackId: string, home?: string): string[] {
+  const root = join(home ?? homedir(), '.devdigest', 'hw2-experiments');
+  if (!existsSync(root)) return [];
+  return readdirSync(root).filter((name) => {
+    if (!name.startsWith('hw2f-') || name === stackId) return false;
+    try {
+      lstatSync(join(root, name, 'capability.json'));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 /**
  * Write the server-side spending capability for one phase (stores only the
  * token's hash) and the token for this runner (mode 0600). Run only after the
  * phase's gate was explicitly authorized.
+ *
+ * Enforced on every authorization path, not only the guide's X3 block:
+ * - never replaces anything: an existing `capability.json` or
+ *   `capability.token` (or a symlink at either path) is refused;
+ * - refused while another stack holds a live `capability.json`, because what
+ *   it spends is in no ledger yet;
+ * - one `authorize` at a time across all stacks (`authorize.lock`, created
+ *   exclusively and removed afterwards; a leftover one is refused, not stolen).
  */
 export function writeCapability(args: { stackId: string; phase: Phase; budgetUsd: number; hours: number; home?: string; now?: Date }): ExperimentCapability {
   if (!(args.budgetUsd > 0) || args.budgetUsd > EXPERIMENT_CAPS[args.phase]) {
@@ -86,6 +119,22 @@ export function writeCapability(args: { stackId: string; phase: Phase; budgetUsd
   const dir = experimentDir(args.stackId, args.home);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
+  const lock = join(dir, '..', 'authorize.lock');
+  try {
+    writeExclusive(lock, `${process.pid}\n`);
+  } catch {
+    throw new Error(`Another authorize holds ${lock} (or it was left behind): nothing was authorized; remove it by hand only when no authorize runs`);
+  }
+  try {
+    return writeCapabilityLocked(args, dir);
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+function writeCapabilityLocked(args: { stackId: string; phase: Phase; budgetUsd: number; hours: number; home?: string; now?: Date }, dir: string): ExperimentCapability {
+  const others = otherLiveCapabilities(args.stackId, args.home);
+  if (others.length > 0) throw new Error(`Another stack holds a live capability (${others.join(', ')}): its spend is in no ledger yet; nothing was authorized`);
   const token = randomBytes(32).toString('hex');
   const now = args.now ?? new Date();
   const capability: ExperimentCapability = {
@@ -98,8 +147,19 @@ export function writeCapability(args: { stackId: string; phase: Phase; budgetUsd
     token_sha256: sha256(token),
     authorized_at: now.toISOString(),
   };
-  writeFileSync(join(dir, 'capability.json'), `${JSON.stringify(capability, null, 2)}\n`, { mode: 0o600 });
-  writeFileSync(tokenFile(args.stackId, args.home), token, { mode: 0o600 });
+  const capPath = join(dir, 'capability.json');
+  const tokPath = tokenFile(args.stackId, args.home);
+  try {
+    writeExclusive(capPath, `${JSON.stringify(capability, null, 2)}\n`);
+  } catch {
+    throw new Error(`${capPath} already exists (or is a symlink): a capability is never replaced; revoke it and investigate`);
+  }
+  try {
+    writeExclusive(tokPath, token);
+  } catch {
+    rmSync(capPath, { force: true }); // the token was not written: the capability must not stay usable
+    throw new Error(`${tokPath} already exists (or is a symlink): keep the old token first (guide, X2 step 4); nothing was authorized`);
+  }
   return capability;
 }
 
