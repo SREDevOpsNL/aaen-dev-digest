@@ -86,6 +86,20 @@ correction. Repo-intel remains server-scoped;
   `server/test/hw2-settlement-runbook.test.ts` ("two concurrent lifecycles on
   different stacks"). Reverting to the per-stack lock fails that test.
 
+- **2026-10-24** — The API's global rate limit (120 requests per minute per
+  client) is off whenever `nodeEnv` is `test`, so no unit or DB-backed test
+  can show a client tripping it. A real experiment stack runs in development
+  mode. There, the X3 checks (about 17 calls each), the previews and the
+  runner's 1/s polls reached 166 calls in 60 s:
+  - 46 runner polls got 429;
+  - in one run the pre-dispatch check got 429 and the lifecycle aborted.
+
+  Every 429 failed closed. Exercise a client of this API end to end against a
+  stack in development mode, not only through `inject()` under test. On an
+  experiment stack, loopback is now exempt. Evidence: `server/src/app.ts`
+  (`rateLimit` registration), `server/test/experiment-rate-limit.test.ts`, and
+  the simulation logs in `~/.devdigest/hw2-experiments/integration-20261024b/sim/`.
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-17** — `run-executor` fills only three of `assemblePrompt`'s optional
