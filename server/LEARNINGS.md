@@ -73,6 +73,20 @@ correction. Repo-intel remains server-scoped;
   `server/src/platform/run-logger.ts:94` (`RunLogger.logFor`),
   `server/test/run-lifecycle.it.test.ts`.
 
+- **2026-10-24** — A substring check on `prompt_assembly.user` can pass for
+  the wrong reason. On `main`, `seed.it.test.ts` asserted that a fixture PR
+  was "reviewed from the stored patch" because the prompt contained
+  `src/api/payments.ts`, but the test's `MockGitClient()` returned its default
+  `src/config.ts` diff, so the loader never fell back to `pr_files`; the path
+  appeared only in the L03 intent block. On the L02 branch, which has no intent
+  layer, the same assertion failed. Make the mock behave like the real case
+  (`MockGitClient({ diff: '' })`: an uncloned repository yields no files) and
+  assert on content that only the intended source can supply, plus the absence
+  of the decoy. Evidence: `server/src/modules/reviews/diff-loader.ts`
+  (`loadDiff` falls back only when `diff.files.length === 0`),
+  `server/src/adapters/mocks.ts` (`MockGitClient.diff` default),
+  `server/test/seed.it.test.ts` (fixture review case).
+
 ## Decisions
 
 ## Recurring Errors & Fixes

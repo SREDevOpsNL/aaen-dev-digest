@@ -99,7 +99,9 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
     const app = await buildApp({
       config: loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv),
       db: db(),
-      overrides: { git: new MockGitClient(), github: new MockGitHubClient(), llm: { openrouter: llm } },
+      // The fixture repository is never cloned, so `git diff` yields no files and
+      // the executor falls back to the stored pr_files patches, as on a real stack.
+      overrides: { git: new MockGitClient({ diff: '' }), github: new MockGitHubClient(), llm: { openrouter: llm } },
     });
     const agent = await agentNamed('API Contract Reviewer');
     const [pull] = await db().select().from(t.pullRequests).where(eq(t.pullRequests.number, 502));
@@ -112,6 +114,8 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
 
     expect(llm.calls.filter((call) => call.method === 'completeStructured')).toHaveLength(1);
     expect(trace.prompt_assembly.user).toContain('src/api/payments.ts'); // reviewed from the stored patch
+    expect(trace.prompt_assembly.user).toContain('amount: (payment.amountCents / 100).toFixed(2)');
+    expect(trace.prompt_assembly.user).not.toContain('src/config.ts'); // not the mock git diff
     expect(trace.prompt_assembly.skills).toContain('breaking-change');
     await app.close();
   });
