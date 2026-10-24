@@ -26,7 +26,8 @@ cd "$ROOT"
 PG_CONTAINER="${E2E_PG_CONTAINER:-devdigest-e2e-postgres}"
 PG_PORT="${E2E_PG_PORT:-5433}"
 PG_IMAGE="${E2E_PG_IMAGE:-pgvector/pgvector:pg16}"
-PG_DB="${E2E_PG_DB:-devdigest}"
+# A disposable database name (server/src/db/disposable.ts); the dev DB is `devdigest`.
+PG_DB="${E2E_PG_DB:-devdigest_e2e}"
 PG_USER="${E2E_PG_USER:-devdigest}"
 PG_PASS="${E2E_PG_PASS:-devdigest}"
 API_PORT="${E2E_API_PORT:-3101}"
@@ -124,8 +125,10 @@ case "$DATABASE_URL" in
 esac
 log "applying migrations (isolated db)"
 (cd server && pnpm db:migrate)
-log "seeding demo data (isolated db)"
-(cd server && pnpm db:seed)
+log "seeding demo data + HW2 experiment fixtures (isolated db)"
+# The fixtures (PRs #501/#502, flow 13) are opt-in, and the seed refuses unless
+# the database is demonstrably disposable.
+(cd server && DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 pnpm db:seed)
 
 # --- API on :$API_PORT -------------------------------------------------------
 # tsx directly (not `pnpm start`, which needs a build; not `tsx watch`, to avoid

@@ -1,7 +1,8 @@
 {
   "card": {
     "noDescription": "No description",
-    "skillCount": "{count} skills"
+    "skillCount": "{count, plural, one {# skill} other {# skills}}",
+    "delete": "Delete agent {name}"
   },
   "list": {
     "breadcrumbLab": "Skills Lab",
@@ -90,10 +91,38 @@
   "skills": {
     "title": "Skills",
     "enabledCount": "{linked} of {total} enabled",
+    "attachedCount": "{linked} / {max} attached",
     "filterPlaceholder": "Filter skills…",
-    "orderHint": "Order matters — earlier skills appear earlier in the assembled prompt. Toggle to attach."
+    "orderHint": "Attach up to {max} skills. Earlier skills appear earlier in the assembled prompt: drag an enabled skill to reorder, or use the arrows.",
+    "limitReached": "This agent already has the maximum of {max} skills attached.",
+    "loadError": "Could not load skills.",
+    "emptyTitle": "No skills yet",
+    "emptyBody": "Create a reusable skill before attaching guidance to this agent.",
+    "emptyCta": "Go to Skills",
+    "manage": "Manage skills",
+    "saving": "Saving…",
+    "autoSaved": "Changes save automatically.",
+    "disabledGlobally": "disabled globally",
+    "moveUp": "Move {name} up",
+    "moveDown": "Move {name} down",
+    "type": {
+      "rubric": "rubric",
+      "convention": "convention",
+      "security": "security",
+      "custom": "custom"
+    },
+    "dragHint": "Drag to reorder",
+    "linkLabel": "attached to this agent"
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
+  },
+  "delete": {
+    "title": "Delete agent",
+    "body": "Delete agent “{name}”? This cannot be undone.",
+    "confirm": "Delete",
+    "deleting": "Deleting…",
+    "cancel": "Cancel",
+    "failed": "The agent could not be deleted. Try again."
   }
 }

@@ -14,8 +14,10 @@
 // Prompt assembly + prompt-injection hardening.
 export {
   assemblePrompt,
+  renderSkillsSection,
   wrapUntrusted,
   type PromptParts,
+  type SkillsSection,
   type AssembledPrompt,
 } from './prompt.js';
 

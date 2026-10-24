@@ -48,14 +48,22 @@ export class RunBus {
     return e;
   }
 
-  /** Publish a live event for a run. Returns the constructed RunEvent. */
+  /**
+   * Publish a live event for a run. Returns the constructed RunEvent.
+   *
+   * After `complete()` (e.g. the user cancelled while the executor was still
+   * finishing) the event is only appended to the buffer — the persisted trace
+   * keeps it — and is not emitted, so a finished stream is never reopened.
+   */
   publish(runId: string, kind: RunEventKind, msg: string, data?: unknown): RunEvent {
-    const e = this.emitterFor(runId);
+    const done = this.completed.has(runId);
+    const e = done ? undefined : this.emitterFor(runId);
+    if (!this.buffers.has(runId)) this.buffers.set(runId, []);
     const next = (this.seq.get(runId) ?? 0) + 1;
     this.seq.set(runId, next);
     const event: RunEvent = { runId, seq: next, kind, msg, t: clockTime(), data };
     this.buffers.get(runId)!.push(event);
-    e.emit('event', event);
+    e?.emit('event', event);
     return event;
   }
 

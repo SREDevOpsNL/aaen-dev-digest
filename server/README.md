@@ -106,7 +106,7 @@ through `SecretsProvider` (`~/.devdigest/secrets.json`, mode `0600`, with
 
 Migrations are **not** applied on boot — run `pnpm db:migrate` (pgvector is
 enabled by migration `0000`). `pnpm db:seed` is idempotent demo data
-(`acme/payments-api`, PR #482, the three built-in agents: General, Security, and Performance Reviewer).
+(`acme/payments-api`, PR #482, the built-in agents and skills). The HW2 experiment fixture PRs #501 and #502 are added only with `DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1`, and only into a disposable database (`devdigest_test`, `devdigest_e2e` or `devdigest_hw2f[_<nonce>]` holding no other repository; `src/db/disposable.ts`). The hermetic e2e runner and CI's browser workflow enable it; the plain `pnpm db:seed` never does.
 
 ## Review context (non-obvious)
 

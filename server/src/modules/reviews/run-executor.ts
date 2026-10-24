@@ -6,7 +6,7 @@ import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
 import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './repository.js';
 import { REVIEW_STRATEGY } from './constants.js';
-import { taskLine } from './helpers.js';
+import { skillsSectionTokens, taskLine, toSkillPromptBlock } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
@@ -154,6 +154,9 @@ export class ReviewRunExecutor {
     runLog.info(`Starting review with agent "${agent.name}" (${agent.provider}/${agent.model})`);
 
     try {
+      // A run cancelled while it waited behind earlier agents stops here.
+      await this.checkpoint(runId);
+
       // Resolve the agent's LLM provider. (container.llm throws if the provider
       // key is missing — caught below and persisted as a failed run.)
       const llm = await runLog.step(
@@ -184,6 +187,11 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote;
 
+      // User-editable skill text is resolved from the same workspace in link
+      // order. reviewer-core wraps every block as untrusted data before it can
+      // reach the model; it is guidance to evaluate, never executable content.
+      const skillBlocks = await this.buildSkillBlocks(agent.id, runLog);
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -196,6 +204,7 @@ export class ReviewRunExecutor {
         // Per-agent review strategy (configured in the Agent editor); falls back
         // to the studio default. single-pass = whole diff in one call.
         strategy: agent.strategy ?? REVIEW_STRATEGY,
+        ...(skillBlocks.length > 0 ? { skills: skillBlocks } : {}),
         // T1.3 — pass the callers digest only when we built one. assemblePrompt
         // omits the section when this is empty/undefined.
         ...(callersDigest ? { callers: callersDigest } : {}),
@@ -207,32 +216,11 @@ export class ReviewRunExecutor {
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
-        checkCancelled: () => {
-          if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();
-        },
+        checkCancelled: () => this.checkpoint(runId),
       });
       const { tokensIn, tokensOut, grounding } = outcome;
 
       const keptFindings = outcome.review.findings;
-
-      // ---- Persist review + findings ----------------------------------------
-      const review = await this.repo.insertReview({
-        workspaceId,
-        prId: pull.id,
-        agentId: agent.id,
-        runId,
-        kind: 'review',
-        verdict: outcome.review.verdict,
-        summary: outcome.review.summary,
-        score: outcome.review.score,
-        model: agent.model,
-      });
-      const findingRows = await this.repo.insertFindings(review.id, keptFindings);
-      runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
-
-      // Mark the commit this review ran against so the PR list can tell
-      // reviewed / needs-review (head moved) / stale apart.
-      await this.repo.markReviewed(pull.id, pull.headSha);
 
       const durationMs = Date.now() - start;
 
@@ -240,19 +228,45 @@ export class ReviewRunExecutor {
       // the timeline colors on, NOT the model's self-reported verdict.
       const blockers = countBlockers(keptFindings, agent.ciFailOn);
 
-      // ---- Observability: agent_runs + ONE run_traces document --------------
-      await this.repo.completeAgentRun(runId, {
-        status: 'done',
-        durationMs,
-        tokensIn,
-        tokensOut,
-        costUsd: outcome.providerCostUsd,
-        findingsCount: findingRows.length,
-        grounding,
-        score: outcome.review.score,
-        blockers,
-        error: null,
+      // ---- Persist atomically: run → done, review, findings, reviewed head ---
+      // One transaction guarded on status = 'running'. A cancel that landed
+      // after the model returned wins: nothing is written and the run stays
+      // cancelled. The reviewed head is marked so the PR list can tell
+      // reviewed / needs-review (head moved) / stale apart.
+      await this.checkpoint(runId);
+      const persisted = await this.repo.finalizeRunSuccess({
+        runId,
+        completion: {
+          durationMs,
+          tokensIn,
+          tokensOut,
+          costUsd: outcome.providerCostUsd,
+          findingsCount: keptFindings.length,
+          grounding,
+          score: outcome.review.score,
+          blockers,
+          error: null,
+        },
+        review: {
+          workspaceId,
+          prId: pull.id,
+          agentId: agent.id,
+          runId,
+          kind: 'review',
+          verdict: outcome.review.verdict,
+          summary: outcome.review.summary,
+          score: outcome.review.score,
+          model: agent.model,
+        },
+        findings: keptFindings,
+        prId: pull.id,
+        headSha: pull.headSha,
       });
+      if (!persisted.applied) throw new RunCancelledError();
+      const { review, findings: findingRows } = persisted;
+      runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
+
+      // ---- Observability: ONE run_traces document ---------------------------
 
       const trace: RunTrace = {
         config: {
@@ -271,7 +285,11 @@ export class ReviewRunExecutor {
           findings: findingRows.length,
           grounding,
         },
-        prompt_assembly: outcome.assembly,
+        prompt_assembly: {
+          ...outcome.assembly,
+          // Same renderer as assemblePrompt, so this is the section the model received.
+          skills_tokens: skillsSectionTokens(skillBlocks, this.container.tokenizer),
+        },
         tool_calls: outcome.chunks.map((c) => ({
           tool: 'review_file',
           args: c.label,
@@ -314,6 +332,31 @@ export class ReviewRunExecutor {
         .catch(() => undefined);
       this.container.runBus.complete(runId);
       throw err;
+    }
+  }
+
+  /**
+   * Cancellation checkpoint. The in-memory flag is only a fast path: cancelRun
+   * completes the bus right after signalling, which clears it. The durable
+   * `agent_runs.status = 'cancelled'` row is the authoritative signal.
+   */
+  private async checkpoint(runId: string): Promise<void> {
+    if (this.container.runBus.isCancelled(runId) || (await this.repo.isRunCancelled(runId))) {
+      throw new RunCancelledError();
+    }
+  }
+
+  /** Best-effort prompt enrichment; a lookup failure degrades to no skills. */
+  private async buildSkillBlocks(agentId: string, runLog: RunLogger): Promise<string[]> {
+    try {
+      const links = await this.agents.enabledSkillsForPrompt(agentId);
+      if (links.length === 0) return [];
+      const blocks = links.map(({ skill }) => toSkillPromptBlock(skill));
+      runLog.info(`skills: ${links.length} enabled and attached`);
+      return blocks;
+    } catch (error) {
+      runLog.info(`skills: skipped — ${(error as Error).message}`);
+      return [];
     }
   }
 

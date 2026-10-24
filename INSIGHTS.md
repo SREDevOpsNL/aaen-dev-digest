@@ -82,3 +82,11 @@ says which file a finding goes in.
   Evidence: `server/test/reviews.it.test.ts` (PR-list FINDINGS matrix),
   `server/src/modules/pulls/status.ts:81` (`compareReviewRuns`), and
   `e2e/specs/written/01-pr-findings-ui.md`.
+
+- **2026-10-16** — Homework 2: the approved plan used one-line `@AGENTS.md`
+  imports for the required `CLAUDE.md` files, and a sentinel probe below a
+  package root showed that this would have stopped Claude Code loading project
+  instructions in nested sessions (none at all from `client/src/app`). The
+  repository uses symlinks instead, after approval. A probe started only at the
+  root or a package root would have passed the broken setup. Details and
+  evidence: the 2026-10-16 correction in `LEARNINGS.md`.

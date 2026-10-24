@@ -40,6 +40,14 @@ server/src/vendor/shared/contracts/platform.ts:178.
 
 ## What Doesn't Work
 
+- **2026-10-24** — A prompt-content assertion can pass through an unrelated
+  prompt section. Porting L02 without L03 broke the seed test asserting that a
+  fixture PR is "reviewed from the stored patch": on `main` it had passed only
+  because the L03 intent block cited the file, while the mock git diff was used.
+  Assert on text only the intended source contains and on the absence of the
+  decoy. Details: the 2026-10-24 entry in `LEARNINGS.md`. Evidence:
+  `server/test/seed.it.test.ts` (fixture review case).
+
 ## Codebase Patterns & Tool / Library Notes
 
 ## Decisions

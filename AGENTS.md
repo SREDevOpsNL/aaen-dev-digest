@@ -11,10 +11,12 @@ capability is operational.
 agent. This file holds the shared engineering contract; each package's own
 `AGENTS.md` adds module-local context. Keep tool-specific configuration in that
 tool's directory — `.claude/` for Claude Code skills, hooks, and settings,
-`.codex/` for Codex configuration. Do not add `CLAUDE.md`, `CLAUDE.local.md`,
-or `.claude/CLAUDE.md` to the repository: an agent that prefers those names
+`.codex/` for Codex configuration. Next to each of the five `AGENTS.md` files
+there is a `CLAUDE.md` for Claude Code, which is a symlink to that `AGENTS.md`:
+edit `AGENTS.md`, never replace the symlink with a file of its own. Do not add
+`CLAUDE.local.md` or `.claude/CLAUDE.md`: an agent that prefers those names
 would stop reading these instructions. `node scripts/verify-agent-instructions.mjs`
-enforces this, and CI runs it.
+enforces both rules, and CI runs it.
 
 ## Before answering
 
@@ -202,9 +204,11 @@ not restate what is here.
   it **may contain another DevDigest checkout or a similarly named source tree**.
   **Once it exists, always exclude it from grep and glob** or you will read and
   edit the wrong file. Gitignored; never commit its contents.
-- `**/src/vendor/**` — vendored. The one exception is a deliberate contract
+- `**/src/vendor/**` — vendored. Two exceptions only: (1) a deliberate contract
   change, which touches two copies in order: `server/src/vendor/shared/` first,
-  then the `client/src/vendor/shared/` mirror. Nothing else in `vendor/` changes.
+  then the `client/src/vendor/shared/` mirror; (2) the navigation data in
+  `client/src/vendor/ui/nav.ts` (sections, items, hrefs), because the vendored
+  `Sidebar` reads `NAV` directly. Nothing else in `vendor/` changes.
 - `**/node_modules/**`.
 - **Lockfiles are generated, not edited.** Never hand-edit `pnpm-lock.yaml` or
   `package-lock.json`. When a dependency changes, regenerate the lockfile with

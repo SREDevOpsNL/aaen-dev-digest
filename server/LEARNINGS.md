@@ -53,6 +53,54 @@ correction. Repo-intel remains server-scoped;
   `server/test/reviews.it.test.ts` ("counts a run's cost once…"), which fails
   against the earlier per-row sum (0.09 instead of 0.05).
 
+- **2026-09-23** — Correction to the 2026-09-17 prompt-slot entry: the studio
+  executor now resolves an agent's enabled linked skills in link order and
+  passes them to `reviewer-core`; only memory and project specs remain unused
+  optional slots. Preserve the workspace/effective-enabled filter when changing
+  prompt inputs. Evidence: `server/src/modules/reviews/run-executor.ts:190`
+  (`ReviewRunExecutor.runOneAgent`),
+  `server/src/modules/agents/repository.ts:208`
+  (`AgentsRepository.enabledSkillsForPrompt`).
+
+- **2026-10-13** — `RunBus.isCancelled()` is not a reliable cancellation signal
+  after any await: `cancelRun` calls `runBus.complete()` right after
+  signalling, and `complete()` clears the flag. Check the durable
+  `agent_runs.status = 'cancelled'` instead, and keep terminal writes
+  compare-and-set from `running`. The persisted trace is built from the bus
+  buffer (`RunLogger.logFor`), so events published after `complete()` must
+  still be buffered even though they are no longer emitted. Evidence:
+  `server/src/platform/sse.ts` (`RunBus.complete`, `RunBus.publish`),
+  `server/src/platform/run-logger.ts:94` (`RunLogger.logFor`),
+  `server/test/run-lifecycle.it.test.ts`.
+
+- **2026-10-24** — A substring check on `prompt_assembly.user` can pass for
+  the wrong reason. On `main`, `seed.it.test.ts` asserted that a fixture PR
+  was "reviewed from the stored patch" because the prompt contained
+  `src/api/payments.ts`, but the test's `MockGitClient()` returned its default
+  `src/config.ts` diff, so the loader never fell back to `pr_files`; the path
+  appeared only in the L03 intent block. On the L02 branch, which has no intent
+  layer, the same assertion failed. Make the mock behave like the real case
+  (`MockGitClient({ diff: '' })`: an uncloned repository yields no files) and
+  assert on content that only the intended source can supply, plus the absence
+  of the decoy. Evidence: `server/src/modules/reviews/diff-loader.ts`
+  (`loadDiff` falls back only when `diff.files.length === 0`),
+  `server/src/adapters/mocks.ts` (`MockGitClient.diff` default),
+  `server/test/seed.it.test.ts` (fixture review case).
+
+- **2026-10-20** — In a single-table Drizzle select, column references inside
+  a `sql` template are rendered **unqualified** (`"id"`, `"workspace_id"`).
+  Inside a correlated subquery they then bind to the subquery's own tables, not
+  to the outer row. The first linked-skill count for `GET /agents` rendered
+  `… on "id" = "skill_id" and "workspace_id" = "workspace_id" where "agent_id" =
+  "id"`, typechecked, and returned 0 for every agent. Build the subquery with
+  the query builder (a joined select qualifies its own columns) and qualify the
+  outer columns explicitly with
+  `` sql`${table}.${sql.identifier(column.name)}` ``. Print the SQL with
+  `new QueryBuilder()…toSQL()` to check it. Evidence:
+  `server/src/modules/agents/repository.ts` (`AgentsRepository.list`),
+  `server/test/agent-skill-count.it.test.ts` (four count tests failed on the
+  unqualified version).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
@@ -75,6 +123,23 @@ correction. Repo-intel remains server-scoped;
   Evidence: `pnpm db:migrate` and `pnpm db:seed` both executed their CLI paths
   successfully during `npm run e2e:hermetic` in WSL, followed by 7/7 passing
   browser flows.
+
+- **2026-09-25** — When Drizzle replaces a boolean scaffold column with several
+  semantically related columns, its interactive rename inference can generate a
+  syntactically valid migration that drops the old value after adding defaults.
+  Choose “create column” for each new field, then add an explicit data-copy
+  statement before the generated drop; for conventions this preserves
+  `accepted = true` as `status = 'accepted'`. Evidence:
+  `server/src/db/migrations/0011_add_convention_evidence.sql:7` (status backfill).
+
+- **2026-10-14** — In tests, `waitForPrRuns` does not mean the executor has
+  finished for a run cancelled through the API: `cancelRun` writes `cancelled`
+  immediately, so the poll returns while the executor is still in its catch
+  path. Assertions such as "no review persisted" can then pass vacuously, and
+  trace assertions fail intermittently. Wait for the run's trace (the
+  executor's last step) with `vi.waitFor` before asserting. Evidence:
+  `server/test/run-lifecycle.it.test.ts` failed once (`expected undefined to
+  be defined` on the trace), then passed in 5 of 5 runs after the fix.
 
 ## Session Notes
 
