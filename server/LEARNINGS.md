@@ -470,6 +470,22 @@ correction. Repo-intel remains server-scoped;
   and a whole-suite run with a `.env` naming a decoy `devdigest_test` server
   plus fake keys (0 connections).
 
+- **2026-10-24** — Extension of the 2026-10-20 WSL2 clock entry above: the
+  jumps also bias durations, not only `git` stat checks. On this host the
+  wall clock under-reads elapsed time. Over one minute, `Date.now()` advanced
+  58,343 ms while `process.hrtime` measured 60,063 ms, a ratio of 0.9714.
+
+  An experiment request ended by the 360 s `AbortSignal.timeout` (a monotonic
+  timer) was recorded with `durationMs` 341,045. Durations and throughput
+  computed from wall-clock timestamps on this host therefore run about 3–5%
+  short and optimistic. That applies to `durationMs`, ledger `at` fields, and
+  tokens/s from them. It also affects Gate 3's 8.8–14.4 tokens/s and the
+  tokens a deadline covers. Measure with a monotonic clock
+  (`performance.now()`, `process.hrtime`), or allow for the bias. Evidence:
+  `~/.devdigest/hw2-experiments/integration-20261024b/logs/clock-drift-probe.txt`,
+  and the `fstall` simulation run's trace (`failureReason` "request exceeded
+  its 360 s deadline", `durationMs` 341045).
+
 ## Session Notes
 
 ## Open Questions

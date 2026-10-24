@@ -179,3 +179,24 @@ says which file a finding goes in.
   better. Evidence: `~/.devdigest/hw2-experiments/integration-20261024/`
   (`rules/rules-review-blinded.md`, `validation-log.md`,
   `security-review.md`).
+
+- **2026-10-24 — HW2: end-to-end simulation, R1, X3 Phase 0.**
+  - **Simulation.** The real `scripts/e2e.sh --serve`, server, runner CLI and
+    the guide's blocks ran verbatim against a local TLS mock of OpenRouter.
+    A Node preload redirected `openrouter.ai` and refused any other egress;
+    python and curl used an allow-one-host proxy. HOME was a temp dir with a
+    fake key.
+    - It passed on 10 disposable stacks: the happy path, 8 provider and
+      stack faults, and 19 operator-level faults.
+    - It found what tests could not: the API's rate limit is off under
+      `NODE_ENV=test`, and on a dev-mode stack it refused the runner's own
+      polls and once a pre-dispatch check (draft #51).
+  - **R1.** No Chrome extension was connected, so a local headless browser
+    (agent-browser) clicked the DeepInfra copy control on the model page. A
+    wrapper around the page's `navigator.clipboard.writeText` recorded the
+    value: `deepinfra/fp8`.
+  - **X3 Phase 0** then passed on a real stack: R2–R10, previews identical
+    to X2's, key usage unchanged, nothing authorized.
+
+  Evidence: `~/.devdigest/hw2-experiments/integration-20261024b/`
+  (`sim/acceptance-matrix.md`, `r1/R1-verification.md`, `x3/steps.log`).
