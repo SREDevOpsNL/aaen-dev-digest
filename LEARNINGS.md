@@ -323,6 +323,35 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   `npm ci` in `reviewer-core/`, with identical `typescript` and `zod`
   versions in `server/`.
 
+- **2026-10-24** — Two facts about stacked PRs in this fork.
+  - **Squash-merging a parent PR into `main` can make its stacked child
+    conflict.** It happens when the child changes lines next to the
+    parent's: the child's branch still carries the parent's original
+    commits, and those collide with the squash commit. It is not inevitable:
+    a child that touches other lines merges cleanly. Here #48 conflicted in
+    both files #46 had touched (`api.ts`, and the test added in both
+    histories). Check with `git merge-tree --write-tree origin/main <child>`.
+    If it conflicts, fix it with a normal push: merge `main` into the child
+    branch, keeping the branch side (`git merge -X ours origin/main`), then
+    check that `git diff origin/main HEAD` equals the child's own commit. Do
+    not force-push.
+  - **A PR's checks test the merge ref as of their last trigger.** Once
+    `main` moves, they no longer test what a merge would produce. In this
+    repository, closing and reopening the PR re-ran its pull-request
+    workflows without changing the head. This is observed behaviour, not a
+    documented GitHub guarantee, and the re-run does not always test the
+    current merge. For #46 and #47 it did. For #48, reopened right after
+    `main` moved, the runs checked out a stale merge commit whose parent was
+    the previous `main`. A second reopen, after GitHub had recomputed the
+    merge ref, tested the current one. Confirm in each run's checkout step
+    which merge commit it fetched (`+<sha>:refs/remotes/pull/<n>/merge`), and
+    that its parents are the current `main` and the PR head.
+
+  Evidence: PR #48 (`git merge-tree` before and after; runs 40087998445,
+  stale merge `1bd79ff` on `afe32c2`, and 40088325757, merge `f7dc98c` on
+  `af1a10d`); PRs #46 and #47, whose checks were re-run that way before
+  merging.
+
 ## Session Notes
 
 ## Open Questions
