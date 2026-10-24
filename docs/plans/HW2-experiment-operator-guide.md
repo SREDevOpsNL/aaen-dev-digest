@@ -988,9 +988,18 @@ python3 -I -c 'import re, sys; from decimal import Decimal; a, n, m = sys.argv[1
    X2's step 6, with three changes:
    - **Lock.** It first takes the authorization lock that every stack shares,
      `~/.devdigest/hw2-experiments/authorization.lock` (an atomic `mkdir`),
-     and gives it back on every exit. A second lifecycle, on this stack or on
-     any other, stops before it checks or authorizes anything. Two stacks
-     can therefore never both be sized against the same remaining envelope.
+     and gives it back on every exit. A second lifecycle run with this block,
+     on this stack or on any other, stops before it checks or authorizes
+     anything, so two such lifecycles can never both be sized against the
+     same remaining envelope.
+   - **What the lock does not cover.** Only this block takes it. The other
+     `authorize` commands in this guide do not:
+     - the example in [Authorizing a paid phase](#authorizing-a-paid-phase-server-side-capability);
+     - X2's step 6 (X2 is closed);
+     - Gate 4's step 6;
+     - `cli.ts authorize` run by hand.
+
+     Never run any of them while an X3 lifecycle may be running.
    - **Cross-stack check.** It uses `xs_cross_stack_check` and `XS_MAX`.
    - **Slot.** The slot comes from step 5's variables.
 
