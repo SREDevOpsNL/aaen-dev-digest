@@ -58,6 +58,35 @@ describe('stack API requests are bounded', () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
+  it('a poll gets only what is left of the runner deadline, not the full request timeout', async () => {
+    const base = await stack((req, res) => {
+      if (req.method === 'POST') {
+        res.writeHead(req.url === '/experiments/runs' ? 202 : 200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(req.url === '/experiments/runs' ? { run_id: 'run-1' } : {}));
+      }
+      // every poll hangs
+    });
+    const dir = mkdtempSync(join(tmpdir(), 'hw2-api-timeout-'));
+    dirs.push(dir);
+    const ledger = new Ledger(dir);
+    ledger.acquire({ pid: process.pid, stackId: 'hw2f-apitime2' });
+    try {
+      const run: SlotRun = {
+        slot: { slot_id: 'x-17-with-1', index: 0, phase: 'exploration', experiment: '17', condition: 'with', trial: 1 },
+        prId: 'pr', agentId: 'agent', skillIds: [], manifestFingerprint: 'f'.repeat(64), expectedDiffSha256: 'd'.repeat(64),
+        reservationUsd: 0.01, expectedNonSkillFingerprint: null,
+      };
+      const started = Date.now();
+      // A 5 s request bound, a 600 ms slot deadline: the hung poll must end at the deadline.
+      const result = await runSlot({ api: new ExperimentApi(base, undefined, 5_000), ledger, log: () => {}, capabilityToken: 'tok', pollIntervalMs: 10, pollTimeoutMs: 600 }, run);
+      expect(Date.now() - started).toBeLessThan(1_500);
+      expect(result).toMatchObject({ state: 'ambiguous', reason: 'poll timeout' });
+      expect(spent([...ledger.slots().values()], 'exploration')).toBeCloseTo(0.01);
+    } finally {
+      ledger.release();
+    }
+  });
+
   it('a stack that stops answering after dispatch: the slot is ambiguous at the runner deadline, with its full reservation, not 300 s later', async () => {
     const posts: string[] = [];
     const base = await stack((req, res) => {
