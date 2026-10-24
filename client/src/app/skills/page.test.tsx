@@ -35,7 +35,7 @@ const skill = (id: string, overrides: Partial<SkillSummary> = {}): SkillSummary 
   enabled: true,
   version: 3,
   evidence_files: null,
-  used_by_count: 2,
+  agent_count: 2, used_by_count: 2,
   ...overrides,
 });
 
@@ -48,7 +48,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
-  skills = [skill("a"), skill("b", { enabled: false, used_by_count: 0, version: 1 })];
+  skills = [skill("a"), skill("b", { enabled: false, agent_count: 0, used_by_count: 0, version: 1 })];
   push.mockReset();
   updateSkill.mockReset();
   deleteSkill.mockReset().mockResolvedValue({ ok: true });
@@ -69,6 +69,14 @@ describe("Skills page", () => {
     expect(first.getByText("v3")).toBeInTheDocument();
     expect(first.getByText("2 agents")).toBeInTheDocument();
     expect(within(cards[1]!).getByText("No agents")).toBeInTheDocument();
+  });
+
+  it("reads the linked-agent count from agent_count", () => {
+    skills = [skill("a", { agent_count: 5, used_by_count: 1 })];
+    renderPage();
+    const card = within(within(screen.getByRole("list", { name: "Skills" })).getAllByRole("listitem")[0]!);
+    expect(card.getByText("5 agents")).toBeInTheDocument();
+    expect(card.queryByText("1 agent")).not.toBeInTheDocument();
   });
 
   it("marks imported skills with an Imported badge on the card and in the preview", () => {

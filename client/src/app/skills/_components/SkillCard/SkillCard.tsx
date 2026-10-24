@@ -60,7 +60,7 @@ export function SkillCard({
         <Badge color={SKILL_TYPE_COLORS[skill.type]}>{t(`listItem.type.${skill.type}`)}</Badge>
         <SourceBadge source={skill.source} />
         <span className="mono" style={{ ...s.muted, fontSize: 11 }}>{t("card.version", { version: skill.version })}</span>
-        <span style={{ ...s.muted, fontSize: 11, marginLeft: "auto" }}>{t("card.usedBy", { count: skill.used_by_count })}</span>
+        <span style={{ ...s.muted, fontSize: 11, marginLeft: "auto" }}>{t("card.usedBy", { count: skill.agent_count })}</span>
       </div>
     </article>
   );

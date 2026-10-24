@@ -132,8 +132,13 @@ export const Skill = z.object({
 });
 export type Skill = z.infer<typeof Skill>;
 
-/** Library-list projection. `used_by_count` is the number of linked agents. */
+/**
+ * Library-list projection. `agent_count` is the number of agents linked to the
+ * skill. `used_by_count` carries the same value and stays for compatibility
+ * with existing consumers.
+ */
 export const SkillSummary = Skill.extend({
+  agent_count: z.number().int().nonnegative(),
   used_by_count: z.number().int().nonnegative(),
 });
 export type SkillSummary = z.infer<typeof SkillSummary>;

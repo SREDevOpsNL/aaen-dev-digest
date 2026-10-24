@@ -20,7 +20,7 @@ const SKILLS: SkillSummary[] = [
     enabled: true,
     version: 1,
     evidence_files: null,
-    used_by_count: 1,
+    agent_count: 1, used_by_count: 1,
   },
   {
     id: "two",
@@ -32,7 +32,7 @@ const SKILLS: SkillSummary[] = [
     enabled: false,
     version: 2,
     evidence_files: null,
-    used_by_count: 0,
+    agent_count: 0, used_by_count: 0,
   },
 ];
 

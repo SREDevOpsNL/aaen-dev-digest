@@ -32,7 +32,7 @@ export function SkillPreviewDrawer({ skill, onClose }: { skill: SkillSummary; on
         <Badge color={SKILL_TYPE_COLORS[skill.type]}>{t(`listItem.type.${skill.type}`)}</Badge>
         <SourceBadge source={skill.source} />
         <span className="mono" style={s.muted}>{t("card.version", { version: skill.version })}</span>
-        <span style={s.muted}>{t("card.usedBy", { count: skill.used_by_count })}</span>
+        <span style={s.muted}>{t("card.usedBy", { count: skill.agent_count })}</span>
         <span style={{ ...s.muted, marginLeft: "auto" }}>{skill.enabled ? t("preview.enabled") : t("preview.disabled")}</span>
       </div>
       <div style={s.preview}><Markdown>{skill.body}</Markdown></div>

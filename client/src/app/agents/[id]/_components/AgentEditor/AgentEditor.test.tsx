@@ -7,8 +7,8 @@ import { ToastProvider } from "../../../../../lib/toast";
 
 const { mockSkills, mockLinks } = vi.hoisted(() => ({
   mockSkills: [
-    { id: "s1", name: "Behavioral Coverage", description: "Check behavior", type: "rubric", source: "manual", body: "body", enabled: true, version: 1, evidence_files: null, used_by_count: 1 },
-    { id: "s2", name: "Isolation", description: "Check isolation", type: "convention", source: "manual", body: "body", enabled: false, version: 1, evidence_files: null, used_by_count: 1 },
+    { id: "s1", name: "Behavioral Coverage", description: "Check behavior", type: "rubric", source: "manual", body: "body", enabled: true, version: 1, evidence_files: null, agent_count: 1, used_by_count: 1 },
+    { id: "s2", name: "Isolation", description: "Check isolation", type: "convention", source: "manual", body: "body", enabled: false, version: 1, evidence_files: null, agent_count: 1, used_by_count: 1 },
   ],
   mockLinks: [
     { agent_id: "ag1", skill_id: "s1", order: 0, enabled: true, skill: { id: "s1" } },

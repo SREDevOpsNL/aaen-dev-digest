@@ -97,6 +97,32 @@ d('skills API and persistence', () => {
     }
   });
 
+  it('lists agent_count, the number of linked agents, with used_by_count kept equal for compatibility', async () => {
+    const app = await makeApp();
+    const linked = await createSkill(app, `Agent count ${Date.now()}`);
+    const agentIds: string[] = [];
+    for (const n of [1, 2]) {
+      const agent = (
+        await app.inject({
+          method: 'POST',
+          url: '/agents',
+          payload: { name: `Agent count ${n} ${Date.now()}`, provider: 'openai', model: 'gpt-4o-mini', system_prompt: 'Review.' },
+        })
+      ).json() as { id: string };
+      const set = await app.inject({ method: 'POST', url: `/agents/${agent.id}/skills`, payload: { skill_ids: [linked.id] } });
+      expect(set.statusCode).toBe(200);
+      agentIds.push(agent.id);
+    }
+    const counts = async () =>
+      ((await app.inject({ url: '/skills' })).json() as Array<{ id: string; agent_count: number; used_by_count: number }>)
+        .find((skill) => skill.id === linked.id);
+
+    expect(await counts()).toMatchObject({ agent_count: 2, used_by_count: 2 });
+    await app.inject({ method: 'POST', url: `/agents/${agentIds[0]}/skills`, payload: { skill_ids: [] } });
+    expect(await counts()).toMatchObject({ agent_count: 1, used_by_count: 1 });
+    await app.close();
+  });
+
   it('supports workspace-scoped CRUD and deliberately permits duplicate display names', async () => {
     const app = await makeApp();
     const duplicateName = `Duplicate ${Date.now()}`;
@@ -106,9 +132,10 @@ d('skills API and persistence', () => {
 
     const listed = (await app.inject({ url: '/skills' })).json() as Array<{
       id: string;
+      agent_count: number;
       used_by_count: number;
     }>;
-    expect(listed.find((skill) => skill.id === first.id)?.used_by_count).toBe(0);
+    expect(listed.find((skill) => skill.id === first.id)).toMatchObject({ agent_count: 0, used_by_count: 0 });
 
     const [otherWorkspace] = await pg.handle.db
       .insert(t.workspaces)

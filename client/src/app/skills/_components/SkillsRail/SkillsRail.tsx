@@ -41,7 +41,7 @@ function SkillRailCard({ skill, active, tab }: { skill: SkillSummary; active: bo
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Badge color={SKILL_TYPE_COLORS[skill.type]}>{t(`listItem.type.${skill.type}`)}</Badge>
-        <span style={{ ...s.muted, fontSize: 11 }}>{t("card.usedBy", { count: skill.used_by_count })}</span>
+        <span style={{ ...s.muted, fontSize: 11 }}>{t("card.usedBy", { count: skill.agent_count })}</span>
       </div>
     </div>
   );

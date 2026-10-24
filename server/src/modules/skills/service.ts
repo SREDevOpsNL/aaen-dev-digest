@@ -35,6 +35,7 @@ export class SkillsService {
   async list(workspaceId: string): Promise<SkillSummary[]> {
     return (await this.repository.list(workspaceId)).map(({ skill, usedByCount }) => ({
       ...toSkillDto(skill),
+      agent_count: usedByCount,
       used_by_count: usedByCount,
     }));
   }

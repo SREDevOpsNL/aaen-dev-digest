@@ -8,7 +8,7 @@ const mutate = vi.fn();
 let pending = false;
 
 const skill = (id: string, name: string, enabled = true): SkillSummary => ({
-  id, name, description: `${name} guidance`, type: "rubric", source: "manual", body: "b", enabled, version: 1, evidence_files: null, used_by_count: 1,
+  id, name, description: `${name} guidance`, type: "rubric", source: "manual", body: "b", enabled, version: 1, evidence_files: null, agent_count: 1, used_by_count: 1,
 });
 const SKILLS = [skill("s1", "Alpha"), skill("s2", "Beta off", false), skill("s3", "Gamma"), skill("s4", "Delta")];
 const LINKS = ["s1", "s2", "s3"].map((id, order) => ({ agent_id: "ag1", skill_id: id, order, enabled: id !== "s2", skill: { id } }));
