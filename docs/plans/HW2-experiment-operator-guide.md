@@ -875,12 +875,13 @@ pnpm exec tsx src/experiments/hw2/cli.ts reconcile "${STACK[@]}"
     Record the slot by its `(stack_id, slot_id)`, with its global attempt
     number, in the Gate 3 plan's execution log.
 
-### A further exploration stack, e.g. X3 (PROPOSED, NOT APPROVED)
+### A further exploration stack, e.g. X3 (values approved; no paid authorization)
 
-**Do not use this until it is approved in writing.** These are proposed
-values, not a spending authorization.
+**No paid slot without its own written authorization.** The values below were
+approved on 2026-10-23 as maximum bounds for planning and configuration. That
+approval creates no capability and authorizes no paid slot.
 
-The proposal:
+The policy:
 - the exploration stacks together stay within USD 0.15 of conservative
   charge;
 - X3's own maximum is USD 0.10;
@@ -893,10 +894,17 @@ Steps 4, 5, 7 and 8 of the [X2 addendum](#gate-3-on-stack-x2-addendum) do not
 depend on the stack, and apply with `ID` set to X3. Steps 1–3 and 6 below
 replace X2's, whose constants belong to X2.
 
-1. **After Phase 0 passed on X3**, with the §3 variables set for X3:
+1. **After Phase 0 passed on X3**, with the §3 variables set for X3, set the
+   values. Then read the dedicated key's `usage` with step D of the
+   [Gate 2 checklist](HW2-gate2-checklist.md) (a free call), and read it again
+   before every authorization:
 
 ```bash
-XS_MAX=0.10; XS_ENVELOPE=0.15; X_RESERVATION=0.01   # PROPOSED, not approved: X3 maximum, exploration envelope, per-slot reservation (USD)
+XS_MAX=0.10; XS_ENVELOPE=0.15; X_RESERVATION=0.01   # approved 2026-10-23 as maximum bounds (USD): X3 maximum, exploration envelope, per-slot reservation
+```
+
+```bash
+XS_KEY_USAGE=   # required: the dedicated key's usage in USD from step D, read just now, e.g. 0.00040788
 ```
 
 2. **The cross-stack check.** The block defines `xs_cross_stack_check`, which
@@ -916,6 +924,13 @@ XS_MAX=0.10; XS_ENVELOPE=0.15; X_RESERVATION=0.01   # PROPOSED, not approved: X3
    - **Settlement.** It then settles every ledger, with X and X2 pinned, and
      prints the next capability: X3's charge plus one reservation, within
      `XS_MAX` and the envelope.
+   - **Key usage.** The settlement checks `XS_KEY_USAGE` against every
+     ledger. The key must have spent at least every known cost, and no more
+     than those plus the reservations of the slots whose cost is unknown. An
+     unset or malformed value fails.
+   - **Other stacks.** It fails while any other stack holds a live
+     `capability.json`, because what that capability spends is in no ledger
+     yet.
 
 ```bash
 xs_cross_stack_check() {
@@ -948,8 +963,9 @@ else:
     print(f"{stack}: ledger present")
 EOF
 local mode=SETTLE_EXPECT out
+[[ "${XS_KEY_USAGE:-}" =~ ^[0-9]+(\.[0-9]{1,8})?$ ]] || { echo "FAILED: XS_KEY_USAGE=${XS_KEY_USAGE:-<not set>} is not the key's usage in USD (step 1)" >&2; return 1; }
 [ -e "$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl" ] || mode=SETTLE_NEW
-out=$(env "$mode=$ID" SETTLE_NEXT_STACK="$ID" SETTLE_STACK_MAX="$XS_MAX" SETTLE_ENVELOPE="$XS_ENVELOPE" SETTLE_RESERVATION="$X_RESERVATION" \
+out=$(env "$mode=$ID" SETTLE_KEY_USAGE="$XS_KEY_USAGE" SETTLE_NEXT_STACK="$ID" SETTLE_STACK_MAX="$XS_MAX" SETTLE_ENVELOPE="$XS_ENVELOPE" SETTLE_RESERVATION="$X_RESERVATION" \
   python3 -I "$(git rev-parse --show-toplevel)/docs/plans/hw2-settle.py" "$HOME/.devdigest/hw2-experiments") || { printf '%s\n' "$out" >&2; return 1; }
 printf '%s\n' "$out" >&2
 printf '%s\n' "$out" | sed -n "s/^next capability for $ID: \$\([0-9.]*\) .*/\1/p"
@@ -970,15 +986,26 @@ python3 -I -c 'import re, sys; from decimal import Decimal; a, n, m = sys.argv[1
 
 6. **Authorize, check, run once and revoke: one guarded, locked block.** It is
    X2's step 6, with three changes:
-   - **Lock.** It first takes the stack's lifecycle lock (an atomic `mkdir`)
-     and gives it back on every exit. A second lifecycle on the same stack,
-     started at the same time, stops before it checks or authorizes anything.
+   - **Lock.** It first takes the authorization lock that every stack shares,
+     `~/.devdigest/hw2-experiments/authorization.lock` (an atomic `mkdir`),
+     and gives it back on every exit. A second lifecycle run with this block,
+     on this stack or on any other, stops before it checks or authorizes
+     anything, so two such lifecycles can never both be sized against the
+     same remaining envelope.
+   - **What the lock does not cover.** Only this block takes it. The other
+     `authorize` commands in this guide do not:
+     - the example in [Authorizing a paid phase](#authorizing-a-paid-phase-server-side-capability);
+     - X2's step 6 (X2 is closed);
+     - Gate 4's step 6;
+     - `cli.ts authorize` run by hand.
+
+     Never run any of them while an X3 lifecycle may be running.
    - **Cross-stack check.** It uses `xs_cross_stack_check` and `XS_MAX`.
    - **Slot.** The slot comes from step 5's variables.
 
 ```bash
 (
-  DIR="$HOME/.devdigest/hw2-experiments/$ID"; CAP="$DIR/capability.json"; LOCK="$DIR/lifecycle.lock"; OWN=; LOCKED=
+  DIR="$HOME/.devdigest/hw2-experiments/$ID"; CAP="$DIR/capability.json"; LOCK="$HOME/.devdigest/hw2-experiments/authorization.lock"; OWN=; LOCKED=
   revoke() { if [ -L "$CAP" ]; then echo "FAILED: $CAP is a symlink; revoke it by hand and investigate"; return 1; elif [ -f "$CAP" ]; then if rm -- "$CAP" && [ ! -e "$CAP" ]; then date -u +"capability revoked %FT%TZ"; else echo "FAILED: could not revoke $CAP"; return 1; fi; else echo "no capability to revoke"; fi; }
   finish() { status=$?; trap - EXIT INT TERM HUP; if [ -n "$OWN" ]; then revoke || status=1; fi; if [ -n "$LOCKED" ]; then rmdir -- "$LOCK" || status=1; fi; echo "lifecycle finished with status $status: judge any slot from the ledger and the trace"; exit "$status"; }
   trap finish EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
@@ -998,9 +1025,19 @@ python3 -I -c 'import re, sys; from decimal import Decimal; a, n, m = sys.argv[1
 )
 ```
 
-   **Recovery** (X2's step 7) is unchanged. After a `SIGKILL` the lifecycle
-   lock can also remain. Remove `lifecycle.lock` by hand only when no
-   lifecycle and no runner still runs (`pgrep -af 'cli.ts'` prints nothing).
+   **Recovery** (X2's step 7) is unchanged. After a `SIGKILL` the
+   authorization lock can also remain. Remove
+   `~/.devdigest/hw2-experiments/authorization.lock` by hand only when no
+   lifecycle and no runner still runs on any stack (`pgrep -af 'cli.ts'`
+   prints nothing).
+
+   **Killed after `authorize`, before the runner reserved the slot.** The
+   stack then keeps its capability, its token and the lock, and has no
+   ledger. The runner reserves before it dispatches, so without a ledger
+   nothing was dispatched, and the server's run list shows none. After
+   recovery, though, a kept token without a ledger looks exactly like a lost
+   ledger, so the cross-stack check refuses this stack from then on. Record
+   the stopped lifecycle and use a new stack for the next slot.
 
 ### Gate 4: confirmatory on a new stack E (≤ USD 1.00)
 
