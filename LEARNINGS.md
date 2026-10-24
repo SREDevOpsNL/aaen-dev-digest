@@ -338,13 +338,19 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   - **A PR's checks test the merge ref as of their last trigger.** Once
     `main` moves, they no longer test what a merge would produce. In this
     repository, closing and reopening the PR re-ran its pull-request
-    workflows on the current merge ref without changing the head. That is
-    observed behaviour here, not a documented GitHub guarantee, so confirm
-    in each run's checkout step that it fetched the new merge commit
-    (`+<sha>:refs/remotes/pull/<n>/merge`).
+    workflows without changing the head. This is observed behaviour, not a
+    documented GitHub guarantee, and the re-run does not always test the
+    current merge. For #46 and #47 it did. For #48, reopened right after
+    `main` moved, the runs checked out a stale merge commit whose parent was
+    the previous `main`. A second reopen, after GitHub had recomputed the
+    merge ref, tested the current one. Confirm in each run's checkout step
+    which merge commit it fetched (`+<sha>:refs/remotes/pull/<n>/merge`), and
+    that its parents are the current `main` and the PR head.
 
-  Evidence: PR #48 (`git merge-tree` before and after); PRs #46 and #47,
-  whose checks were re-run that way before merging.
+  Evidence: PR #48 (`git merge-tree` before and after; runs 40087998445,
+  stale merge `1bd79ff` on `afe32c2`, and 40088325757, merge `f7dc98c` on
+  `af1a10d`); PRs #46 and #47, whose checks were re-run that way before
+  merging.
 
 ## Session Notes
 
