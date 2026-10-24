@@ -178,7 +178,8 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
   const deadline = Date.now() + (deps.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS);
   while (Date.now() < deadline) {
     await wait(deps, deps.pollIntervalMs ?? 1_000);
-    const lookup = await deps.api.get<SlotLookup>(`/experiments/slots/${run.slot.slot_id}`).catch(() => null);
+    // A poll never outlives the slot's deadline: it gets at most the time that is left.
+    const lookup = await deps.api.get<SlotLookup>(`/experiments/slots/${run.slot.slot_id}`, deadline - Date.now()).catch(() => null);
     const current = lookup?.runs.find((r) => r.run_id === runId);
     const settled = current ? terminalOf(current) : null;
     if (settled && current?.status !== 'running') {
