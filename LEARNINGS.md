@@ -324,18 +324,23 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   versions in `server/`.
 
 - **2026-10-24** — Two facts about stacked PRs in this fork.
-  - **Squash-merging a parent PR into `main` makes its stacked child
-    conflict.** The child's branch still carries the parent's original
-    commits, and they collide with the squash commit on the same lines.
-    #48 conflicted in both files #46 had touched (`api.ts`, and the test
-    added in both histories). Fix with a normal push: merge `main` into the
-    child branch, keeping the branch side (`git merge -X ours origin/main`),
-    then check that `git diff origin/main HEAD` equals the child's own
-    commit. Do not force-push.
+  - **Squash-merging a parent PR into `main` can make its stacked child
+    conflict.** It happens when the child changes lines next to the
+    parent's: the child's branch still carries the parent's original
+    commits, and those collide with the squash commit. It is not inevitable:
+    a child that touches other lines merges cleanly. Here #48 conflicted in
+    both files #46 had touched (`api.ts`, and the test added in both
+    histories). Check with `git merge-tree --write-tree origin/main <child>`.
+    If it conflicts, fix it with a normal push: merge `main` into the child
+    branch, keeping the branch side (`git merge -X ours origin/main`), then
+    check that `git diff origin/main HEAD` equals the child's own commit. Do
+    not force-push.
   - **A PR's checks test the merge ref as of their last trigger.** Once
-    `main` moves, they no longer test what a merge would produce. Closing and
-    reopening the PR reruns every workflow on the current merge ref without
-    changing the head. Confirm in the checkout step's log
+    `main` moves, they no longer test what a merge would produce. In this
+    repository, closing and reopening the PR re-ran its pull-request
+    workflows on the current merge ref without changing the head. That is
+    observed behaviour here, not a documented GitHub guarantee, so confirm
+    in each run's checkout step that it fetched the new merge commit
     (`+<sha>:refs/remotes/pull/<n>/merge`).
 
   Evidence: PR #48 (`git merge-tree` before and after); PRs #46 and #47,

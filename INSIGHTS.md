@@ -168,7 +168,8 @@ says which file a finding goes in.
   #46 and #47 were merged. The pre-merge audits found two limits that tests
   alone had not stated:
   - **The global lock covers only the X3 block.** Three other `authorize`
-    paths in the guide bypass it, so the guide now scopes its claim.
+    paths in the guide, and a hand-run `cli.ts authorize`, bypass it, so the
+    guide now scopes its claim.
   - **A poll can still overshoot the runner deadline** by up to one request
     bound; draft #48 caps a poll at the time left.
 
