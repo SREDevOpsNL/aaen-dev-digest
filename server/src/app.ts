@@ -39,6 +39,8 @@ export interface BuildAppOptions {
  * DI container and the statically-registered feature modules, plus a structured
  * error handler returning the ApiErrorBody envelope.
  */
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
 export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInstance> {
   const config = opts.config ?? loadConfig();
   // A test must not reach a real database: the stale-run reaper below writes
@@ -98,8 +100,15 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
 
   // Global rate limit. Disabled under test so integration suites can hammer
   // endpoints via inject(); per-route overrides live on the routes themselves.
+  // An experiment stack is loopback-only and its runner, checks and previews
+  // are its only clients: the limit would only refuse their own calls (a
+  // pre-dispatch check, a dispatch recorded as refused), so loopback is exempt.
   if (config.nodeEnv !== 'test') {
-    await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
+    await app.register(rateLimit, {
+      max: 120,
+      timeWindow: '1 minute',
+      ...(config.experiment ? { allowList: (req: { ip: string }) => LOOPBACK.has(req.ip) } : {}),
+    });
   }
 
   // Liveness check (no module, no DB, no rate limit).
