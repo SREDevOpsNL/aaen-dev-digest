@@ -298,6 +298,19 @@ correction. Repo-intel remains server-scoped;
   records in `~/.devdigest/hw2-experiments/hw2f-f53ed971/gate3-slot1/` and
   `hw2f-39febf41/gate3-x-18-without-1/`.
 
+- **2026-10-23** — Node's built-in `fetch` without a `signal` is not
+  unbounded, but its only limit is undici's 300 s headers timeout. The HW2
+  runner's stack client passed no signal. Against a loopback server that
+  accepts and never answers, it gave up after 300.9 s (`TypeError: fetch
+  failed`, cause `UND_ERR_HEADERS_TIMEOUT`).
+
+  A deadline checked only between requests, as in `runSlot`'s poll loop,
+  therefore holds only if every request is bounded below the deadline's
+  margin. Give each request its own `AbortSignal.timeout`; it covers the body
+  too. Evidence: `server/src/experiments/hw2/api.ts`
+  (`API_REQUEST_TIMEOUT_MS`), `server/test/hw2-api-timeout.test.ts`, which
+  fails when the signal is removed.
+
 ## Decisions
 
 ## Recurring Errors & Fixes

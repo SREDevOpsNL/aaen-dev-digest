@@ -9,10 +9,19 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The longest one request to the local stack may take, headers and body. The
+ * slowest route reads the provider's endpoints (bounded at 15 s server-side).
+ * Without it, fetch waits up to its own 300 s headers timeout, so a stack that
+ * stops answering would hold a slot's poll that long past the runner deadline.
+ */
+export const API_REQUEST_TIMEOUT_MS = 60_000;
+
 export class ExperimentApi {
   constructor(
     private readonly baseUrl: string,
     private readonly fetchImpl: typeof fetch = (...args) => fetch(...args),
+    private readonly timeoutMs: number = API_REQUEST_TIMEOUT_MS,
   ) {}
 
   async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
@@ -20,6 +29,7 @@ export class ExperimentApi {
       method,
       headers: { ...headers, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     const text = await res.text();
     const parsed = text ? (JSON.parse(text) as unknown) : null;
