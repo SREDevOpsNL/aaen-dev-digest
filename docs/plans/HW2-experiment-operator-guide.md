@@ -875,12 +875,13 @@ pnpm exec tsx src/experiments/hw2/cli.ts reconcile "${STACK[@]}"
     Record the slot by its `(stack_id, slot_id)`, with its global attempt
     number, in the Gate 3 plan's execution log.
 
-### A further exploration stack, e.g. X3 (PROPOSED, NOT APPROVED)
+### A further exploration stack, e.g. X3 (values approved; no paid authorization)
 
-**Do not use this until it is approved in writing.** These are proposed
-values, not a spending authorization.
+**No paid slot without its own written authorization.** The values below were
+approved on 2026-10-23 as maximum bounds for planning and configuration. That
+approval creates no capability and authorizes no paid slot.
 
-The proposal:
+The policy:
 - the exploration stacks together stay within USD 0.15 of conservative
   charge;
 - X3's own maximum is USD 0.10;
@@ -889,18 +890,154 @@ The proposal:
 - slots are identified by `(stack_id, slot_id)`, with one guarded invocation
   per authorization, immediate revocation and no automatic retry.
 
-The X2 addendum's lifecycle applies. Its cross-stack check is replaced by the
-settlement script of [If stack E stops unexpectedly](#if-stack-e-stops-unexpectedly),
-step 3, with the variables below:
-- run it before `authorize`, and again immediately before the run;
-- it fails closed unless every ledger is present and intact, X and X2 still
-  equal their pinned charges, and the next capability fits both limits;
-- the authorized budget must equal the `next capability` it prints.
+Steps 4, 5, 7 and 8 of the [X2 addendum](#gate-3-on-stack-x2-addendum) do not
+depend on the stack, and apply with `ID` set to X3. Steps 1–3 and 6 below
+replace X2's, whose constants belong to X2.
+
+1. **After Phase 0 passed on X3**, with the §3 variables set for X3, set the
+   values. Then read the dedicated key's `usage` with step D of the
+   [Gate 2 checklist](HW2-gate2-checklist.md) (a free call), and read it again
+   before every authorization:
 
 ```bash
-X3_ID=hw2f-0a1b2c3d   # EXAMPLE: replace with the stack id that --serve printed
-export SETTLE_EXPECT="$X3_ID" SETTLE_NEXT_STACK="$X3_ID" SETTLE_STACK_MAX=0.10 SETTLE_ENVELOPE=0.15 SETTLE_RESERVATION=0.01
+XS_MAX=0.10; XS_ENVELOPE=0.15; X_RESERVATION=0.01   # approved 2026-10-23 as maximum bounds (USD): X3 maximum, exploration envelope, per-slot reservation
 ```
+
+```bash
+XS_KEY_USAGE=   # required: the dedicated key's usage in USD from step D, read just now, e.g. 0.00040788
+```
+
+2. **The cross-stack check.** The block defines `xs_cross_stack_check`, which
+   step 6 runs again, and runs it once.
+   - **Identity.** It checks `ID`, `LEDGER`, `DB` and the API's identity
+     against each other, and that no slot is in flight.
+   - **First use.** The runner writes a stack's ledger only when it reserves
+     the stack's first slot, so a fresh X3 has none. Without a ledger, X3
+     counts as new only if both hold:
+     - the server shows no run for any slot `run` could take next;
+     - [`hw2-settle.py`](hw2-settle.py) finds the stack's directory with no
+       kept token of an earlier slot and no runner lock. The capability of the
+       lifecycle in progress is allowed, because step 6 refuses to start while
+       any capability or unkept token exists.
+
+     Otherwise the ledger may be lost, and the check fails.
+   - **Settlement.** It then settles every ledger, with X and X2 pinned, and
+     prints the next capability: X3's charge plus one reservation, within
+     `XS_MAX` and the envelope.
+   - **Key usage.** The settlement checks `XS_KEY_USAGE` against every
+     ledger. The key must have spent at least every known cost, and no more
+     than those plus the reservations of the slots whose cost is unknown. An
+     unset or malformed value fails.
+   - **Other stacks.** It fails while any other stack holds a live
+     `capability.json`, because what that capability spends is in no ledger
+     yet.
+
+```bash
+xs_cross_stack_check() {
+python3 -I - "$HOME/.devdigest/hw2-experiments" "${ID:-}" "${LEDGER:-}" "${API:-}" "${DB:-}" <<'EOF' >&2 || return 1
+import json, os, re, sys, urllib.error, urllib.request
+base, stack, ledger_var, api, db = sys.argv[1:6]
+if not re.fullmatch(r"hw2f-[a-z0-9]{4,32}", stack) or stack in ("hw2f-f53ed971", "hw2f-39febf41"):
+    sys.exit(f"FAILED: ID={stack!r} must be the new stack's own id, not X's or X2's")
+ledger = os.path.join(base, stack, "ledger.jsonl")
+if not ledger_var or os.path.normpath(ledger_var) != os.path.normpath(ledger):
+    sys.exit(f"FAILED: LEDGER={ledger_var!r} is not {ledger}, the ledger of ID={stack}: set the §3 variables again")
+if db != "devdigest_hw2f_" + stack[len("hw2f-"):]:
+    sys.exit(f"FAILED: DB={db!r} is not the database of {stack}")
+def get(path):
+    try:
+        return json.load(urllib.request.urlopen(f"{api}{path}", timeout=30))
+    except (OSError, ValueError) as err:
+        sys.exit(f"FAILED: cannot read {api}{path}: {err}")
+identity = get("/experiments/identity")
+if identity.get("stack_id") != stack or identity.get("database") != db:
+    sys.exit(f"FAILED: the API at {api} serves {identity.get('stack_id')!r} / {identity.get('database')!r}, not {stack} / {db}")
+if identity.get("in_flight_slot"):
+    sys.exit(f"FAILED: slot {identity['in_flight_slot']} is in flight on {stack}")
+if not os.path.exists(ledger):
+    used = [s for s in (f"x-{e}-{c}-{n}" for e in ("17", "18") for c in ("with", "without") for n in (1, 2, 3, 4)) if get(f"/experiments/slots/{s}").get("runs")]
+    if used:
+        sys.exit(f"FAILED: {stack} has no ledger, but its server has runs for {', '.join(used)}: the ledger may be lost; investigate")
+    print(f"{stack}: no ledger and no run on its server: first use")
+else:
+    print(f"{stack}: ledger present")
+EOF
+local mode=SETTLE_EXPECT out
+[[ "${XS_KEY_USAGE:-}" =~ ^[0-9]+(\.[0-9]{1,8})?$ ]] || { echo "FAILED: XS_KEY_USAGE=${XS_KEY_USAGE:-<not set>} is not the key's usage in USD (step 1)" >&2; return 1; }
+[ -e "$HOME/.devdigest/hw2-experiments/$ID/ledger.jsonl" ] || mode=SETTLE_NEW
+out=$(env "$mode=$ID" SETTLE_KEY_USAGE="$XS_KEY_USAGE" SETTLE_NEXT_STACK="$ID" SETTLE_STACK_MAX="$XS_MAX" SETTLE_ENVELOPE="$XS_ENVELOPE" SETTLE_RESERVATION="$X_RESERVATION" \
+  python3 -I "$(git rev-parse --show-toplevel)/docs/plans/hw2-settle.py" "$HOME/.devdigest/hw2-experiments") || { printf '%s\n' "$out" >&2; return 1; }
+printf '%s\n' "$out" >&2
+printf '%s\n' "$out" | sed -n "s/^next capability for $ID: \$\([0-9.]*\) .*/\1/p"
+}
+XS_NEXT_BUDGET=$(xs_cross_stack_check) && echo "next X3 capability: \$$XS_NEXT_BUDGET" || { echo "FAILED: cross-stack check"; false; }
+```
+
+3. **Set the authorized amount**, exactly as the slot's written authorization
+   states it. It must equal the computed next capability:
+
+```bash
+AUTHORIZED_BUDGET=   # required: the USD amount in the slot's written authorization, e.g. 0.01
+```
+
+```bash
+python3 -I -c 'import re, sys; from decimal import Decimal; a, n, m = sys.argv[1:4]; usd = re.compile(r"\d+(\.\d{1,8})?"); ok = bool(usd.fullmatch(a) and usd.fullmatch(n)) and Decimal(a) == Decimal(n) and 0 < Decimal(a) <= Decimal(m); print("authorized budget $" + a + " equals the next X3 capability" if ok else "FAILED: the authorization says " + (a or "<not set>") + ", the next X3 capability is " + (n or "<not computed>") + " (maximum $" + m + ")"); sys.exit(0 if ok else 1)' "${AUTHORIZED_BUDGET:-}" "${XS_NEXT_BUDGET:-}" "$XS_MAX"
+```
+
+6. **Authorize, check, run once and revoke: one guarded, locked block.** It is
+   X2's step 6, with three changes:
+   - **Lock.** It first takes the authorization lock that every stack shares,
+     `~/.devdigest/hw2-experiments/authorization.lock` (an atomic `mkdir`),
+     and gives it back on every exit. A second lifecycle run with this block,
+     on this stack or on any other, stops before it checks or authorizes
+     anything, so two such lifecycles can never both be sized against the
+     same remaining envelope.
+   - **What the lock does not cover.** Only this block takes it. The other
+     `authorize` commands in this guide do not:
+     - the example in [Authorizing a paid phase](#authorizing-a-paid-phase-server-side-capability);
+     - X2's step 6 (X2 is closed);
+     - Gate 4's step 6;
+     - `cli.ts authorize` run by hand.
+
+     Never run any of them while an X3 lifecycle may be running.
+   - **Cross-stack check.** It uses `xs_cross_stack_check` and `XS_MAX`.
+   - **Slot.** The slot comes from step 5's variables.
+
+```bash
+(
+  DIR="$HOME/.devdigest/hw2-experiments/$ID"; CAP="$DIR/capability.json"; LOCK="$HOME/.devdigest/hw2-experiments/authorization.lock"; OWN=; LOCKED=
+  revoke() { if [ -L "$CAP" ]; then echo "FAILED: $CAP is a symlink; revoke it by hand and investigate"; return 1; elif [ -f "$CAP" ]; then if rm -- "$CAP" && [ ! -e "$CAP" ]; then date -u +"capability revoked %FT%TZ"; else echo "FAILED: could not revoke $CAP"; return 1; fi; else echo "no capability to revoke"; fi; }
+  finish() { status=$?; trap - EXIT INT TERM HUP; if [ -n "$OWN" ]; then revoke || status=1; fi; if [ -n "$LOCKED" ]; then rmdir -- "$LOCK" || status=1; fi; echo "lifecycle finished with status $status: judge any slot from the ledger and the trace"; exit "$status"; }
+  trap finish EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+  if [ ! -d "$DIR" ] || ! mkdir -- "$LOCK" 2>/dev/null; then echo "FAILED: another lifecycle holds $LOCK (or $DIR is missing): nothing was authorized"; exit 1; fi
+  LOCKED=1
+  if [ -e "$CAP" ] || [ -L "$CAP" ]; then echo "FAILED: a capability already exists for $ID; it is not replaced: stop and investigate"; exit 1; fi
+  if [ -e "${CAP%.json}.token" ] || [ -L "${CAP%.json}.token" ]; then echo "FAILED: an old capability.token is still in place: run step 4 first"; exit 1; fi
+  NOW=$(xs_cross_stack_check) || { echo "FAILED: cross-stack check before authorizing; nothing was authorized"; exit 1; }
+  python3 -I -c 'import re, sys; from decimal import Decimal; a, n = sys.argv[1:3]; sys.exit(0 if re.fullmatch(r"\d+(\.\d{1,8})?", a) and re.fullmatch(r"\d+(\.\d{1,8})?", n) and Decimal(a) == Decimal(n) else 1)' "${AUTHORIZED_BUDGET:-}" "$NOW" || { echo "FAILED: the authorization says ${AUTHORIZED_BUDGET:-<not set>}, the next X3 capability is ${NOW:-<none>}; nothing was authorized"; exit 1; }
+  OWN=1   # from here on, every exit revokes
+  pnpm exec tsx src/experiments/hw2/cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget "$AUTHORIZED_BUDGET" --hours 12 "${STACK[@]}" || { echo "FAILED: authorize"; exit 1; }
+  NOW=$(xs_cross_stack_check) || { echo "FAILED: cross-stack check before dispatch; nothing was dispatched"; exit 1; }
+  python3 -I -c 'import datetime, json, sys; from decimal import Decimal; p, s, a, n, m = sys.argv[1:6]; c = json.load(open(p)); bad = [x for x, ok in (("stack", c.get("stack_id") == s), ("phase/gate", c.get("phase") == "exploration" and c.get("gate") == 3), ("budget", Decimal(str(c.get("budget_usd"))) == Decimal(a) == Decimal(n) and Decimal(a) <= Decimal(m)), ("expiry", datetime.datetime.fromisoformat(c["expires_at"].replace("Z", "+00:00")) > datetime.datetime.now(datetime.timezone.utc))) if not ok]; print("FAILED: capability " + ", ".join(bad) if bad else f"capability: exploration, Gate 3, budget ${a} as authorized and as sized now, for {s}"); sys.exit(1 if bad else 0)' "$CAP" "$ID" "${AUTHORIZED_BUDGET:-}" "$NOW" "$XS_MAX" || { echo "nothing was dispatched"; exit 1; }
+  x2_endpoint_check || { echo "FAILED: endpoint check; nothing was dispatched"; exit 1; }
+  x2_settings_check || { echo "FAILED: settings check; nothing was dispatched"; exit 1; }
+  pnpm exec tsx src/experiments/hw2/cli.ts run --phase exploration --authorized-gate 3 --confirm-spend "${STACK[@]}" --experiment "$X2_EXPERIMENT" --condition "$X2_CONDITION" --count 1 --reservation "$X_RESERVATION"
+)
+```
+
+   **Recovery** (X2's step 7) is unchanged. After a `SIGKILL` the
+   authorization lock can also remain. Remove
+   `~/.devdigest/hw2-experiments/authorization.lock` by hand only when no
+   lifecycle and no runner still runs on any stack (`pgrep -af 'cli.ts'`
+   prints nothing).
+
+   **Killed after `authorize`, before the runner reserved the slot.** The
+   stack then keeps its capability, its token and the lock, and has no
+   ledger. The runner reserves before it dispatches, so without a ledger
+   nothing was dispatched, and the server's run list shows none. After
+   recovery, though, a kept token without a ledger looks exactly like a lost
+   ledger, so the cross-stack check refuses this stack from then on. Record
+   the stopped lifecycle and use a new stack for the next slot.
 
 ### Gate 4: confirmatory on a new stack E (≤ USD 1.00)
 
@@ -1022,7 +1159,8 @@ ledger and zero recorded spend.
    stack) and, optionally, the dedicated key's `usage` from `GET /api/v1/key`.
    With a usage, the script checks that the key spent at least every known
    cost, and no more than those plus the reservations of the slots whose cost
-   is unknown.
+   is unknown. The script is
+   [`hw2-settle.py`](hw2-settle.py), shared with the X3 procedure.
 
 ```bash
 export SETTLE_EXPECT="$ID"     # space-separated stack ids that must be present
@@ -1030,84 +1168,7 @@ export SETTLE_KEY_USAGE=       # optional: the key's usage in USD, e.g. 0.000407
 ```
 
 ```bash
-python3 -I - "$HOME/.devdigest/hw2-experiments" <<'EOF'
-import glob, json, os, sys
-from decimal import Decimal
-ROOT = sys.argv[1]
-# Closed stacks: their ledgers must exist and keep these conservative charges (USD).
-PINNED = {"hw2f-f53ed971": Decimal("0.01022896"), "hw2f-39febf41": Decimal("0.01017892")}
-EXPECTED = os.environ.get("SETTLE_EXPECT", "").split()
-TERMINAL = {"completed", "failed", "refused", "ambiguous"}
-STATES = TERMINAL | {"reserved", "dispatched"}
-usd = lambda v: Decimal(str(v))
-problems = []
-ledgers = {os.path.basename(os.path.dirname(p)): p for p in glob.glob(os.path.join(ROOT, "hw2f-*", "ledger.jsonl"))}
-problems += [f"{stack}: ledger missing" for stack in sorted(set(PINNED) | set(EXPECTED)) if stack not in ledgers]
-slots, ignored = {}, 0
-for stack, path in sorted(ledgers.items()):
-    try:
-        lines = open(path, encoding="utf-8").read().splitlines()
-    except (OSError, UnicodeDecodeError) as err:
-        problems.append(f"{stack}: ledger unreadable ({type(err).__name__})")
-        continue
-    for n, line in enumerate(lines, 1):
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line, parse_float=Decimal)
-            valid = isinstance(event, dict) and isinstance(event.get("slot_id"), str) and event.get("state") in STATES \
-                and event.get("phase") in ("exploration", "confirmatory") and isinstance(event.get("reservation_usd"), (int, Decimal)) \
-                and (event.get("cost_usd") is None or isinstance(event.get("cost_usd"), (int, Decimal)))
-        except ValueError:
-            valid = False
-        if not valid:
-            problems.append(f"{stack}: line {n} is not a ledger event")
-            continue
-        key = (stack, event["slot_id"])
-        current = slots.get(key)
-        if current and current["state"] in TERMINAL:
-            ignored += 1
-            continue
-        slots[key] = {"state": event["state"], "phase": event["phase"], "reservation": usd(event["reservation_usd"]),
-                      "cost": None if event.get("cost_usd") is None else usd(event["cost_usd"])}
-def charge(slot):
-    if slot["state"] == "refused":
-        return Decimal(0)
-    if slot["state"] in ("completed", "failed") and slot["cost"] is not None:
-        return slot["cost"]
-    return slot["reservation"]
-name = lambda key: f"({key[0]}, {key[1]})"
-by_stack = {stack: sum((charge(s) for k, s in slots.items() if k[0] == stack), Decimal(0)) for stack in sorted({k[0] for k in slots})}
-for stack, charged in by_stack.items():
-    print(f"stack {stack}: {sum(1 for k in slots if k[0] == stack)} slot(s), charged ${charged}")
-problems += [f"{stack}: charged ${by_stack.get(stack, 0)}, but closed at ${pin}" for stack, pin in PINNED.items() if stack in ledgers and by_stack.get(stack, Decimal(0)) != pin]
-spent = {phase: sum((charge(s) for s in slots.values() if s["phase"] == phase), Decimal(0)) for phase in ("exploration", "confirmatory")}
-total = spent["exploration"] + spent["confirmatory"]
-for state in sorted({s["state"] for s in slots.values()}):
-    print(f"{state}: {', '.join(sorted(name(k) for k, s in slots.items() if s['state'] == state))}")
-print(f"charged: exploration ${spent['exploration']}, confirmatory ${spent['confirmatory']}, total ${total}")
-print(f"remaining confirmatory budget at most ${max(Decimal(0), min(Decimal('1.00') - spent['confirmatory'], Decimal('1.50') - total))}")
-print("never replay: " + (", ".join(sorted(name(k) for k, s in slots.items() if s["state"] != "refused")) or "(none)"))
-if ignored:
-    print(f"events after a slot's terminal state (ignored, as by the runner): {ignored}")
-if os.environ.get("SETTLE_KEY_USAGE"):
-    usage = Decimal(os.environ["SETTLE_KEY_USAGE"])
-    known = sum((s["cost"] for s in slots.values() if s["state"] in ("completed", "failed") and s["cost"] is not None), Decimal(0))
-    unknown = sum((s["reservation"] for s in slots.values() if s["state"] != "refused" and not (s["state"] in ("completed", "failed") and s["cost"] is not None)), Decimal(0))
-    print(f"key usage ${usage}: known costs ${known}, unknown-cost reservations ${unknown}")
-    if not (known - Decimal("0.000001") <= usage <= known + unknown + Decimal("0.000001")):
-        problems.append(f"key usage ${usage} is outside [{known}, {known + unknown}]: the key spent what the ledgers do not explain")
-if os.environ.get("SETTLE_NEXT_STACK"):
-    stack, reservation = os.environ["SETTLE_NEXT_STACK"], Decimal(os.environ["SETTLE_RESERVATION"])
-    stack_max, envelope = Decimal(os.environ["SETTLE_STACK_MAX"]), Decimal(os.environ["SETTLE_ENVELOPE"])
-    capability = by_stack.get(stack, Decimal(0)) + reservation
-    print(f"next capability for {stack}: ${capability} (stack maximum ${stack_max}; exploration ${spent['exploration'] + reservation} of ${envelope})")
-    if capability > stack_max or spent["exploration"] + reservation > envelope:
-        problems.append(f"the next {stack} slot does not fit: ${capability} of ${stack_max}, or ${spent['exploration'] + reservation} of the ${envelope} envelope")
-if problems:
-    sys.exit("FAILED:\n" + "\n".join(problems))
-print("settled")
-EOF
+python3 -I "$(git rev-parse --show-toplevel)/docs/plans/hw2-settle.py" "$HOME/.devdigest/hw2-experiments"
 ```
 
 4. **Preserve what survived.**

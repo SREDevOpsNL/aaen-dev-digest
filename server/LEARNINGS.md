@@ -49,6 +49,43 @@ correction. Repo-intel remains server-scoped;
   verbatim against the runner's `Ledger` + `spent()` (seven mutations each
   fail a test).
 
+- **2026-10-23** — A fail-closed "every ledger must exist" check also locks
+  out a stack's first use. The runner writes a ledger only when it reserves
+  the first slot, so a fresh stack has none, and the proposed X3 check failed
+  with "ledger missing" before X3's first authorization. The earlier test had
+  hidden this by giving X3 an empty ledger file that the runner never writes.
+
+  First use has to be declared and proven, not inferred from absence:
+  - the stack's `--serve` directory exists, without a kept token from an
+    earlier slot or a runner lock;
+  - its live server has no run for any slot `run` could take.
+
+  The capability of the lifecycle in progress is allowed, which a second check
+  before dispatch would otherwise have refused. Evidence:
+  `docs/plans/hw2-settle.py` (`SETTLE_NEW`), the X3 procedure in
+  `docs/plans/HW2-experiment-operator-guide.md`, and
+  `server/test/hw2-settlement-runbook.test.ts`, which runs the guide's blocks
+  verbatim against the runner's `Ledger`, a mock stack API and a stub `pnpm`.
+  Six mutations each fail a test.
+
+- **2026-10-23** — A lock per stack does not protect a budget that the stacks
+  share. The X3 lifecycle locked its own stack's directory, and the
+  settlement read only ledgers. A capability exists before its slot reaches a
+  ledger, so a lifecycle on another stack could not see it.
+  - **Reproduced:** two lifecycles on different stacks, each fitting the
+    USD 0.15 exploration envelope on its own, both authorized, for 0.15540788
+    together.
+  - **Fix:** take one lock that all stacks share for the whole lifecycle, and
+    refuse to size a capability while any other stack holds a live
+    `capability.json`.
+
+  When a limit spans several resources, lock at the scope of the limit, and
+  count the spend that has been granted but not yet recorded. Evidence:
+  `docs/plans/hw2-settle.py` (`SETTLE_NEXT_STACK`), the X3 lifecycle in
+  `docs/plans/HW2-experiment-operator-guide.md` (`authorization.lock`), and
+  `server/test/hw2-settlement-runbook.test.ts` ("two concurrent lifecycles on
+  different stacks"). Reverting to the per-stack lock fails that test.
+
 ## Codebase Patterns & Tool / Library Notes
 
 - **2026-09-17** — `run-executor` fills only three of `assemblePrompt`'s optional
