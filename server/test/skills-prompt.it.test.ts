@@ -6,7 +6,7 @@ import { seed } from '../src/db/seed.js';
 import * as t from '../src/db/schema.js';
 import { loadConfig } from '../src/platform/config.js';
 import { dockerAvailable, startPg, type PgFixture } from './helpers/pg.js';
-import { waitForPrRuns } from './helpers/runs.js';
+import { waitForPrRuns, waitForRunTrace } from './helpers/runs.js';
 
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
@@ -111,6 +111,7 @@ d('skills in review prompt and trace', () => {
       })
     ).json() as { runs: Array<{ run_id: string }> };
     await waitForPrRuns(pg.handle.db, pull!.id, { expected: 1 });
+    await waitForRunTrace(pg.handle.db, started.runs[0]!.run_id);
     const trace = (
       await app.inject({ url: `/runs/${started.runs[0]!.run_id}/trace` })
     ).json();
