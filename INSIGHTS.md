@@ -141,3 +141,25 @@ says which file a finding goes in.
   (2026-10-23, the extension of the eligibility entry) and
   [`reviewer-core/LEARNINGS.md`](reviewer-core/LEARNINGS.md#codebase-patterns--tool--library-notes)
   (what OpenRouter documents).
+
+- **2026-10-23 — HW2 integration review: two chains merged, one held.** Each
+  approved chain was reviewed as one change, on its merge with the current
+  `main`, and the trees CI tested were checked against the tested ones.
+  - **Test outcomes cannot show a test that writes to the development
+    database.** With the setup file and the guard of #38/#42 removed, the full
+    server suite still passed, while connecting 459 times to a decoy database
+    loaded from a decoy `server/.env`. With them, it made 0 connections and
+    opened no decoy key file (an inotify watch). Prove isolation with a decoy
+    that counts contacts, not with a green run.
+  - **The accounting chain (#37/#40/#43) was held.** Two stacks could both be
+    authorized against the same remaining envelope. The fix and its
+    `server/LEARNINGS.md` entry are in draft #45.
+  - **A rule set scored on its own design probes is overfitted.** Expected-
+    finding rules v2 scored 19/19 on the probes it was written against, but
+    18/22 on 22 probes written afterwards (v1: 19/22). Narrowing v1's
+    number-to-string keyword had added a miss. Judge a rule set only on probes
+    written after it.
+
+  Evidence: `~/.devdigest/hw2-experiments/integration-20261023c/`
+  (`validation-log.md`, `logs/iso-mutation-S2c.log`,
+  `rules/heldout-probes.md`).
