@@ -62,7 +62,7 @@ describe("Agent Skills tab", () => {
   it("lists every skill with a link toggle and its category label", () => {
     renderTab();
     for (const [id, name, on] of [["s1", "Alpha", true], ["s2", "Beta off", true], ["s3", "Gamma", true], ["s4", "Delta", false]] as const) {
-      expect(screen.getByRole("switch", { name: `${name} attached to this agent` })).toHaveAttribute("aria-checked", String(on));
+      expect(screen.getByRole("switch", { name: `Attach ${name} to this agent` })).toHaveAttribute("aria-checked", String(on));
       expect(row(id)).toHaveTextContent("rubric");
     }
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -70,9 +70,9 @@ describe("Agent Skills tab", () => {
 
   it("the toggle links and unlinks a skill", () => {
     renderTab();
-    fireEvent.click(screen.getByRole("switch", { name: "Delta attached to this agent" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Attach Delta to this agent" }));
     expect(mutate).toHaveBeenLastCalledWith({ agentId: "ag1", skillIds: ["s1", "s2", "s3", "s4"] }, expect.anything());
-    fireEvent.click(screen.getByRole("switch", { name: "Alpha attached to this agent" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Attach Alpha to this agent" }));
     expect(mutate).toHaveBeenCalledTimes(2);
   });
 
@@ -96,7 +96,7 @@ describe("Agent Skills tab", () => {
     linksData = buildLinks();
     renderTab();
     expect(screen.getByRole("switch", { name: "Use Gamma in this agent's reviews" })).toHaveAttribute("aria-checked", "false");
-    expect(row("s3")).toHaveTextContent("off for this agent");
+    expect(row("s3")).toHaveTextContent("Off for this agent");
     expect(row("s3")).toHaveAttribute("draggable", "false");
     expect(row("s1")).toHaveAttribute("draggable", "true");
     dragOnto("s1", "s3");
@@ -105,6 +105,41 @@ describe("Agent Skills tab", () => {
     // Switching it back on asks for enabled: true.
     fireEvent.click(screen.getByRole("switch", { name: "Use Gamma in this agent's reviews" }));
     expect(mutateEnabled).toHaveBeenCalledWith({ agentId: "ag1", skillId: "s3", enabled: true });
+  });
+
+  it("explains both switches once, above the list, and labels their columns", () => {
+    renderTab();
+    const legend = screen.getAllByRole("definition")[0]!.closest("dl")!;
+    expect(legend).toHaveAccessibleName("What the controls do");
+    expect(legend).toHaveTextContent("AttachedLinks the skill to this agent (up to 4). Switching it off detaches the skill from this agent only.");
+    expect(legend).toHaveTextContent(/Enabled for this agent.*part of this agent's review prompt/);
+    expect(legend).toHaveTextContent(/without detaching it, losing its place in the order, or switching it off for other agents/);
+    expect(legend).toHaveTextContent("Off for this agent");
+    expect(legend).toHaveTextContent("drag an enabled skill to reorder");
+    for (const heading of ["Attached", "Skill", "Enabled for this agent", "Type", "Order"]) {
+      expect(screen.getAllByText(heading).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("gives every switch an accessible name and a tooltip that says what it does", () => {
+    renderTab();
+    for (const control of screen.getAllByRole("switch")) expect(control).toHaveAccessibleName();
+    const attach = screen.getByRole("switch", { name: "Attach Gamma to this agent" }).closest("label")!;
+    expect(attach).toHaveAttribute("title", expect.stringMatching(/^Attached to agent: .*detach it from this agent only/));
+    const enabled = screen.getByRole("switch", { name: "Use Gamma in this agent's reviews" }).closest("label")!;
+    expect(enabled).toHaveAttribute("title", expect.stringMatching(/^Enabled for this agent: .*stays attached.*stays on for other agents/));
+  });
+
+  it("shows the per-agent state in words, and explains the off state where it appears", () => {
+    linkOff = new Set(["s3"]);
+    linksData = buildLinks();
+    renderTab();
+    expect(row("s1")).toHaveTextContent("On");
+    expect(row("s3")).toHaveTextContent("Off");
+    expect(screen.getByText("Off for this agent").closest("[title]")).toHaveAttribute("title", expect.stringMatching(/left out of this agent's review prompt/));
+    expect(screen.getByText("Disabled globally").closest("[title]")).toHaveAttribute("title", expect.stringMatching(/no agent uses it/));
+    // An unattached skill has no per-agent switch, only a hint to attach it first.
+    expect(row("s4").querySelector('[title="Attach the skill first."]')).not.toBeNull();
   });
 
   it("only linked, globally enabled skills are draggable", () => {

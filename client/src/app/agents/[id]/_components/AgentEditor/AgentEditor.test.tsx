@@ -79,6 +79,6 @@ describe("A2 Agent Editor (smoke)", () => {
     expect(screen.getByText("2 / 4 attached")).toBeInTheDocument();
     expect(screen.getByText("Behavioral Coverage")).toBeInTheDocument();
     expect(screen.getByText("Isolation")).toBeInTheDocument();
-    expect(screen.getByText("disabled globally")).toBeInTheDocument();
+    expect(screen.getByText("Disabled globally")).toBeInTheDocument();
   });
 });
