@@ -73,6 +73,23 @@ server/src/vendor/shared/contracts/platform.ts:178.
 
 ## Recurring Errors & Fixes
 
+- **2026-10-25 — A relink silently resets per-agent switches and order the
+  operator set.** `writeAgentSkills` keeps the `enabled` flag only for links
+  that survive a write. The HW2 runner and the free condition preview relinked
+  the reviewer to the condition's skills and then wrote back the original ids
+  only. That brought removed links back switched on, and a condition slot left
+  the reviewer relinked. Either one would have undone the operator's
+  drag-and-drop arrangement before the trace-evidence slot that depends on it,
+  and spent a paid slot on the wrong prompt. Snapshot `{skill_id, link_enabled}`
+  before any relink and restore the ids *and* every switch afterwards. Read the
+  snapshot before the ledger reservation, so a failed read costs nothing. Guard
+  the operator-links slot with a free preview whose Skill fingerprint must
+  equal the one recorded at preflight. Evidence:
+  `server/src/modules/_shared/agent-skill-links.ts` (`writeAgentSkills`),
+  `server/src/experiments/hw2/runner.ts` (`linkSnapshot`, `restoreLinks`),
+  `server/src/experiments/hw2/cli.ts` (`conditionPreview`),
+  `server/test/hw2-runner.test.ts`; commit `e78fe0b`.
+
 ## Session Notes
 
 ## Open Questions
