@@ -6,6 +6,16 @@
 
 ## What Doesn't Work
 
+- **2026-10-25** — Extension of the 2026-10-17 `agent-browser drag` entry in
+  `LEARNINGS.md`: a real-pointer `left_click_drag` from the Claude desktop
+  built-in browser also starts no native HTML5 drag. Dragging the
+  `deprecation-policy` handle onto the first linked row on the L02 walkthrough
+  stack left `agent_skills.order` unchanged. Drag-and-drop acceptance (L02
+  rows 13, 14, 31) therefore needs a person's mouse; automation can only check
+  eligibility (`draggable` per row) and dispatch synthetic `DragEvent`s.
+  Evidence: `docs/homework/L02/evidence/api-sql-transcript.md` (rows 13, 31,
+  37).
+
 ## Codebase Patterns & Tool / Library Notes
 
 ## Decisions
