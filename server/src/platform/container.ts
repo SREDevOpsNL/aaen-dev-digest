@@ -13,6 +13,7 @@ import { JobRunner } from './jobs.js';
 import { runBus, type RunBus } from './sse.js';
 import { LocalSecretsProvider } from '../adapters/secrets/local.js';
 import { ExperimentGuardedProvider, ExperimentSpendGate } from './experiment-spend-gate.js';
+import { ExperimentArms } from './experiment-arms.js';
 import { LocalNoAuthProvider } from '../adapters/auth/local.js';
 import { OctokitGitHubClient } from '../adapters/github/octokit.js';
 import { SimpleGitClient } from '../adapters/git/simple-git.js';
@@ -170,6 +171,8 @@ export class Container {
 
   /** HW2 experiment mode: the one door to paid generation (see experiment-spend-gate.ts). */
   readonly experimentSpendGate = new ExperimentSpendGate();
+  /** HW2: the slot armed for one Run Review click on the PR page (experiment mode only). */
+  readonly experimentArms = new ExperimentArms();
 
   /**
    * Resolve an LLM provider by id; constructs from the secret key, cached. In

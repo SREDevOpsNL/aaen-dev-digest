@@ -14,6 +14,8 @@ import { ExperimentsService } from './service.js';
  *   POST /experiments/preview         → a slot's checks, fingerprints and preflight, no model request
  *   POST /experiments/runs            → start one scheduled slot (needs the x-hw2-capability token)
  *   GET  /experiments/slots/:slotId   → runs recorded for a slot (reconciliation)
+ *   POST /experiments/slots/:slotId/arm   → arm a slot for one Run Review click on the PR page (capability token)
+ *   DELETE /experiments/slots/:slotId/arm → disarm a slot that was not clicked (capability token)
  */
 const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const StartBody = z.object({
@@ -29,6 +31,7 @@ const StartBody = z.object({
   expected_non_skill_fingerprint: Sha256.nullable(),
 });
 const PreviewBody = StartBody.omit({ slot_id: true, manifest_fingerprint: true, expected_non_skill_fingerprint: true });
+const ArmBody = StartBody.omit({ slot_id: true });
 /** The operator's spending capability token (see `cli.ts authorize`); required by every slot. */
 const CAPABILITY_HEADER = 'x-hw2-capability';
 const SlotParams = z.object({ slotId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,80}$/) });
@@ -70,6 +73,22 @@ export default async function experimentsRoutes(appBase: FastifyInstance) {
   app.post('/experiments/preview', { schema: { body: PreviewBody } }, async (request) => {
     const { workspaceId } = await getContext(app.container, request);
     return service.preview(workspaceId, request.body);
+  });
+
+  app.post(
+    '/experiments/slots/:slotId/arm',
+    { schema: { params: SlotParams, body: ArmBody }, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (request) => {
+      const { workspaceId } = await getContext(app.container, request);
+      const header = request.headers[CAPABILITY_HEADER];
+      return service.arm(workspaceId, { ...request.body, slot_id: request.params.slotId }, typeof header === 'string' ? header : undefined);
+    },
+  );
+
+  app.delete('/experiments/slots/:slotId/arm', { schema: { params: SlotParams } }, async (request) => {
+    await getContext(app.container, request);
+    const header = request.headers[CAPABILITY_HEADER];
+    return service.disarm(request.params.slotId, typeof header === 'string' ? header : undefined);
   });
 
   app.get('/experiments/slots/:slotId', { schema: { params: SlotParams } }, async (request) => {

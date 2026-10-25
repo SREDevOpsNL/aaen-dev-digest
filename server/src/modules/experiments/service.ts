@@ -7,6 +7,7 @@ import { AppError, ConflictError, NotFoundError, ValidationError } from '../../p
 import { assertDisposableDatabase, isDisposableDatabaseName } from '../../db/disposable.js';
 import { ReviewService } from '../reviews/service.js';
 import type { Logger } from '../reviews/run-executor.js';
+import type { AgentRow } from '../../db/rows.js';
 import {
   EXPERIMENT_CAPS,
   PHASE_SLOT_PREFIX,
@@ -25,6 +26,9 @@ const FIXTURE_PULLS = [501, 502];
 const FORBIDDEN_PULL = 3;
 
 
+/** One slot's dispatch request, as `POST /experiments/runs` and the arm route receive it. */
+export type SlotInput = ExperimentRunRequest & { pr_id: string; agent_id: string };
+
 export interface ExperimentIdentity {
   stack_id: string;
   database: string;
@@ -42,6 +46,8 @@ export interface ExperimentIdentity {
   prices: ExperimentConfig['prices'];
   generation_lookup: ExperimentConfig['generationLookup'];
   in_flight_slot: string | null;
+  /** A slot armed for a Run Review click on the PR page, if any. */
+  armed_slot: string | null;
   /** The dedicated experiment key file, and whether it holds an OpenRouter key (never the key). */
   secrets_path: string;
   openrouter_key_configured: boolean;
@@ -90,17 +96,106 @@ export class ExperimentsService {
       prices: config.prices,
       generation_lookup: config.generationLookup,
       in_flight_slot: this.container.experimentSpendGate.current,
+      armed_slot: this.container.experimentArms.armedSlot,
       secrets_path: this.container.config.secretsPath,
       openrouter_key_configured: Boolean(await this.container.secrets.get('OPENROUTER_API_KEY')),
     };
   }
 
+  /** Start one slot directly (`POST /experiments/runs`): admit it, then dispatch it. */
   async start(
     workspaceId: string,
-    input: ExperimentRunRequest & { pr_id: string; agent_id: string },
+    input: SlotInput,
     capabilityToken: string | undefined,
     logger?: Logger,
   ): Promise<{ run_id: string; slot_id: string }> {
+    const capability = await this.admit(workspaceId, input, capabilityToken);
+    const gate = this.container.experimentSpendGate;
+    let handedOff = false;
+    try {
+      await this.checkBudget(workspaceId, input, capability);
+      const targets = await this.reviews.resolveTargets(workspaceId, { agentId: input.agent_id });
+      const runId = await this.dispatch(workspaceId, input, targets, logger);
+      handedOff = true;
+      return { run_id: runId, slot_id: input.slot_id };
+    } finally {
+      // Until the executor owns the run, a failure here must release the gate.
+      if (!handedOff) gate.close(input.slot_id);
+    }
+  }
+
+  /**
+   * Arm one slot for a Run Review click on the PR page
+   * (`POST /experiments/slots/:slotId/arm`). Every check of a direct start
+   * runs first and the spend gate opens for this slot; the click then
+   * dispatches it through the same path. An arm that is not clicked expires
+   * and never dispatches.
+   */
+  async arm(workspaceId: string, input: SlotInput, capabilityToken: string | undefined): Promise<{ slot_id: string; armed_until: string }> {
+    const capability = await this.admit(workspaceId, input, capabilityToken);
+    const gate = this.container.experimentSpendGate;
+    try {
+      await this.checkBudget(workspaceId, input, capability);
+      const targets = await this.reviews.resolveTargets(workspaceId, { agentId: input.agent_id });
+      if (targets.length !== 1) throw new ValidationError('An armed slot needs exactly one agent');
+      const { expires_at } = this.container.experimentArms.arm(
+        { slotId: input.slot_id, workspaceId, prId: input.pr_id, agentId: input.agent_id, request: input },
+        () => gate.close(input.slot_id),
+      );
+      return { slot_id: input.slot_id, armed_until: expires_at };
+    } catch (err) {
+      gate.close(input.slot_id);
+      throw err;
+    }
+  }
+
+  /** Disarm a slot that has not been clicked (`DELETE /experiments/slots/:slotId/arm`). */
+  disarm(slotId: string, capabilityToken: string | undefined): { slot_id: string; state: string } {
+    const config = this.config();
+    const capability = this.readCapability(config.capabilityPath);
+    const armedPhase = slotId.startsWith(PHASE_SLOT_PREFIX.confirmatory) ? 'confirmatory' : 'exploration';
+    const problem = capabilityProblem(capability, { stackId: config.stackId, phase: armedPhase, token: capabilityToken, now: new Date() });
+    if (problem) throw new AppError('experiment_not_authorized', `Disarm refused: ${problem}`, 403);
+    this.container.experimentArms.disarm(slotId);
+    return { slot_id: slotId, state: this.container.experimentArms.stateOf(slotId)?.state ?? 'unknown' };
+  }
+
+  /**
+   * A Run Review click in experiment mode. When a slot is armed for this PR and
+   * the click targets exactly its agent, the click dispatches that slot (once)
+   * and returns its run id. With no matching armed slot it returns null: the
+   * ordinary review then runs and the spend gate refuses its model call, as
+   * for any review in experiment mode. A click for another agent while a slot
+   * is armed for this PR is refused outright, so it cannot be mistaken for the
+   * slot.
+   */
+  async reviewFromArmedSlot(workspaceId: string, prId: string, targets: AgentRow[], logger?: Logger): Promise<{ run_id: string; slot_id: string } | null> {
+    if (!this.container.config.experiment) return null;
+    const arms = this.container.experimentArms;
+    const armed = arms.take(workspaceId, prId, targets.map((t) => t.id));
+    if (!armed) {
+      if (arms.armedFor(workspaceId, prId)) {
+        throw new ConflictError(`Experiment slot ${arms.armedSlot} is armed for another agent on this PR; run that agent's review, or disarm the slot`);
+      }
+      return null;
+    }
+    const input = armed.request as SlotInput;
+    try {
+      const runId = await this.dispatch(workspaceId, input, targets, logger);
+      return { run_id: runId, slot_id: input.slot_id };
+    } catch (err) {
+      this.container.experimentSpendGate.close(input.slot_id);
+      throw err;
+    }
+  }
+
+  /**
+   * Every check before a slot may spend: the capability for this stack and
+   * phase, the slot id's phase, isolation, and that the slot id was never
+   * used. Ends with the spend gate open for this slot (one slot in flight);
+   * the caller closes it if it does not hand the slot to the executor.
+   */
+  private async admit(workspaceId: string, input: SlotInput, capabilityToken: string | undefined): Promise<ExperimentCapability> {
     const config = this.config();
     // The spending capability is checked here, independently of any client:
     // a direct request without the operator's token for this stack and phase
@@ -127,42 +222,52 @@ export class ExperimentsService {
     // One slot at a time: opening the spend gate is also the in-flight check.
     const gate = this.container.experimentSpendGate;
     if (!gate.tryOpen(input.slot_id)) throw new ConflictError(`Experiment slot ${gate.current} is still in flight`);
-    let handedOff = false;
     try {
       if ((await this.repo.runsForSlot(workspaceId, input.slot_id)).length > 0) {
         throw new ConflictError(`Experiment slot ${input.slot_id} was already used; slots are never replayed`);
       }
-      // Server-side budget, recomputed from the stored runs (known cost, zero
-      // for refusals, the full reservation for anything unknown).
-      const charged = await this.charged(workspaceId, config.stackId);
-      const phaseLimit = Math.min(EXPERIMENT_CAPS[input.phase], (capability as ExperimentCapability).budget_usd);
-      if (charged[input.phase] + input.reservation_usd > phaseLimit + 1e-12) {
-        throw new ConflictError(`${input.phase} budget: $${charged[input.phase].toFixed(6)} charged + $${input.reservation_usd} > $${phaseLimit}`);
+      if (this.container.experimentArms.stateOf(input.slot_id)) {
+        throw new ConflictError(`Experiment slot ${input.slot_id} was already armed; slots are never replayed`);
       }
-      if (charged.total + input.reservation_usd > EXPERIMENT_CAPS.total + 1e-12) {
-        throw new ConflictError(`total budget: $${charged.total.toFixed(6)} charged + $${input.reservation_usd} > $${EXPERIMENT_CAPS.total}`);
-      }
-      const targets = await this.reviews.resolveTargets(workspaceId, { agentId: input.agent_id });
-      const { runs } = await this.reviews.runReview(workspaceId, input.pr_id, targets, logger, {
-        config,
-        request: {
-          slot_id: input.slot_id,
-          experiment: input.experiment,
-          condition: input.condition,
-          phase: input.phase,
-          expected_non_skill_fingerprint: input.expected_non_skill_fingerprint,
-          manifest_fingerprint: input.manifest_fingerprint,
-          reservation_usd: input.reservation_usd,
-          expected_diff_sha256: input.expected_diff_sha256,
-        },
-        onSettled: () => gate.close(input.slot_id),
-      });
-      handedOff = true;
-      return { run_id: runs[0]!.run_id, slot_id: input.slot_id };
-    } finally {
-      // Until the executor owns the run, a failure here must release the gate.
-      if (!handedOff) gate.close(input.slot_id);
+    } catch (err) {
+      gate.close(input.slot_id);
+      throw err;
     }
+    return capability as ExperimentCapability;
+  }
+
+  /** Server-side budget, recomputed from the stored runs (known cost, zero for refusals, the full reservation for anything unknown). */
+  private async checkBudget(workspaceId: string, input: SlotInput, capability: ExperimentCapability): Promise<void> {
+    const config = this.config();
+    const charged = await this.charged(workspaceId, config.stackId);
+    const phaseLimit = Math.min(EXPERIMENT_CAPS[input.phase], capability.budget_usd);
+    if (charged[input.phase] + input.reservation_usd > phaseLimit + 1e-12) {
+      throw new ConflictError(`${input.phase} budget: $${charged[input.phase].toFixed(6)} charged + $${input.reservation_usd} > $${phaseLimit}`);
+    }
+    if (charged.total + input.reservation_usd > EXPERIMENT_CAPS.total + 1e-12) {
+      throw new ConflictError(`total budget: $${charged.total.toFixed(6)} charged + $${input.reservation_usd} > $${EXPERIMENT_CAPS.total}`);
+    }
+  }
+
+  /** Hand one admitted slot to the review executor; the gate closes when its run settles. */
+  private async dispatch(workspaceId: string, input: SlotInput, targets: AgentRow[], logger?: Logger): Promise<string> {
+    const config = this.config();
+    const gate = this.container.experimentSpendGate;
+    const { runs } = await this.reviews.runReview(workspaceId, input.pr_id, targets, logger, {
+      config,
+      request: {
+        slot_id: input.slot_id,
+        experiment: input.experiment,
+        condition: input.condition,
+        phase: input.phase,
+        expected_non_skill_fingerprint: input.expected_non_skill_fingerprint,
+        manifest_fingerprint: input.manifest_fingerprint,
+        reservation_usd: input.reservation_usd,
+        expected_diff_sha256: input.expected_diff_sha256,
+      },
+      onSettled: () => gate.close(input.slot_id),
+    });
+    return runs[0]!.run_id;
   }
 
   /**
@@ -235,6 +340,8 @@ export class ExperimentsService {
     const runs = await this.repo.runsForSlot(workspaceId, slotId);
     return {
       slot_id: slotId,
+      // Set when the slot was armed for a Run Review click: armed, consumed, expired or disarmed.
+      arm: this.container.experimentArms.stateOf(slotId),
       runs: runs.map((run) => ({
         run_id: run.runId,
         status: run.status,

@@ -475,6 +475,99 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     expect(lookup.runs[0].experiment).toMatchObject({ condition: 'with', phase: 'exploration' });
   });
 
+  describe('Run Review on the PR page dispatches an armed slot (criteria 17–18)', () => {
+    async function armBody(patch: Record<string, unknown> = {}) {
+      return {
+        pr_id: pr502,
+        agent_id: apiAgent,
+        experiment: '18',
+        condition: 'with',
+        manifest_fingerprint: 'a'.repeat(64),
+        reservation_usd: 0.05,
+        expected_diff_sha256: await fixtureDiffSha(502),
+        phase: 'exploration',
+        expected_non_skill_fingerprint: null,
+        ...patch,
+      };
+    }
+    const arm = async (slot: string, patch: Record<string, unknown> = {}, headers: Record<string, string> | null = null) =>
+      app.inject({ method: 'POST', url: `/experiments/slots/${slot}/arm`, headers: headers ?? { 'x-hw2-capability': token }, payload: await armBody(patch) });
+    const click = (agentId: string, prId = pr502) => app.inject({ method: 'POST', url: `/pulls/${prId}/review`, payload: { agentId } });
+    const lookup = async (slot: string) => (await app.inject({ url: `/experiments/slots/${slot}` })).json();
+    const identity = async () => (await app.inject({ url: '/experiments/identity' })).json();
+
+    it('the click for the armed agent dispatches the slot once, through the experiment path', async () => {
+      const slot = nextSlot();
+      const armed = await arm(slot);
+      expect(armed.statusCode).toBe(200);
+      expect(armed.json()).toMatchObject({ slot_id: slot });
+      expect((await identity()).armed_slot).toBe(slot);
+      const before = modelCalls();
+
+      const clicked = await click(apiAgent);
+      expect(clicked.statusCode).toBe(200);
+      const runId = clicked.json().runs[0].run_id;
+      const { trace } = await settledTrace(runId);
+      expect(trace.experiment).toMatchObject({ slot_id: slot, condition: 'with', phase: 'exploration', dispatch_state: 'completed' });
+      expect(modelCalls()).toBe(before + 1);
+      expect((await lookup(slot)).arm).toMatchObject({ state: 'consumed' });
+      expect((await identity()).armed_slot).toBeNull();
+
+      // A second click is an ordinary review: the spend gate refuses its model call.
+      await click(apiAgent);
+      await vi.waitFor(async () => expect((await identity()).in_flight_slot).toBeNull());
+      expect(modelCalls()).toBe(before + 1);
+      expect((await lookup(slot)).runs).toHaveLength(1);
+      // The slot id is spent: neither a direct start nor a new arm can reuse it.
+      expect((await start({ slot_id: slot })).statusCode).toBe(409);
+      expect((await arm(slot)).statusCode).toBe(409);
+    });
+
+    it('refuses a click for another agent and an arm without the capability; a disarmed slot never dispatches', async () => {
+      const slot = nextSlot();
+      expect((await arm(slot, {}, {})).statusCode).toBe(403);
+      expect((await lookup(slot)).arm).toBeNull();
+
+      expect((await arm(slot)).statusCode).toBe(200);
+      const before = modelCalls();
+      const wrong = await click(tqrAgent);
+      expect(wrong.statusCode).toBe(409);
+      expect(wrong.json().error.message).toMatch(/armed for another agent/);
+      expect((await identity()).armed_slot).toBe(slot); // still armed for its own agent
+
+      expect((await app.inject({ method: 'DELETE', url: `/experiments/slots/${slot}/arm` })).statusCode).toBe(403);
+      const disarmed = await app.inject({ method: 'DELETE', url: `/experiments/slots/${slot}/arm`, headers: { 'x-hw2-capability': token } });
+      expect(disarmed.json()).toMatchObject({ slot_id: slot, state: 'disarmed' });
+      expect((await identity())).toMatchObject({ armed_slot: null, in_flight_slot: null });
+
+      await click(apiAgent);
+      await vi.waitFor(async () => expect((await identity()).in_flight_slot).toBeNull());
+      expect(modelCalls()).toBe(before);
+      expect((await lookup(slot)).runs).toHaveLength(0);
+    });
+
+    it('an armed slot that is not clicked expires, never dispatches, and frees the gate', async () => {
+      const arms = app.container.experimentArms;
+      const ttl = arms.ttlMs;
+      arms.ttlMs = 50;
+      try {
+        const slot = nextSlot();
+        expect((await arm(slot)).statusCode).toBe(200);
+        // Another slot cannot start or arm while this one holds the gate.
+        expect((await start()).statusCode).toBe(409);
+        await vi.waitFor(async () => expect((await lookup(slot)).arm).toMatchObject({ state: 'expired' }));
+        expect((await identity())).toMatchObject({ armed_slot: null, in_flight_slot: null });
+        const before = modelCalls();
+        await click(apiAgent);
+        await vi.waitFor(async () => expect((await identity()).in_flight_slot).toBeNull());
+        expect(modelCalls()).toBe(before);
+        expect((await lookup(slot)).runs).toHaveLength(0);
+      } finally {
+        arms.ttlMs = ttl;
+      }
+    });
+  });
+
   it('refuses a direct request without a valid capability for this stack and phase (no run created)', async () => {
     const runsBefore = (await pg.handle.db.select().from(t.agentRuns)).length;
     const refused = [

@@ -6,6 +6,7 @@ import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
+import { ExperimentsService } from '../experiments/service.js';
 
 /**
  * reviews module.
@@ -34,6 +35,12 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
       ...(body.agentId !== undefined ? { agentId: body.agentId } : {}),
       ...(body.all !== undefined ? { all: body.all } : {}),
     });
+    // HW2 experiment mode: a Run Review click for the agent of an armed slot
+    // dispatches that slot (criteria 17–18: "PR page → Run Review").
+    if (container.config.experiment) {
+      const armed = await new ExperimentsService(container).reviewFromArmedSlot(workspaceId, req.params.id, targets, req.log);
+      if (armed) return { pr_id: req.params.id, runs: [{ run_id: armed.run_id, agent_id: targets[0]!.id, agent_name: targets[0]!.name }], reviews: [] };
+    }
     const { runs, reviews } = await service.runReview(
       workspaceId,
       req.params.id,
