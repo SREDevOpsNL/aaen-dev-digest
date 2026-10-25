@@ -172,6 +172,35 @@ reserved each, a $0.06 cumulative ceiling, `deepseek/deepseek-v4-flash` via
 | 20:44 | capability expired; not extended | — |
 | 21:29 | **Spending-guard check** (below) | $0.00 |
 | 21:31 | expired capability revoked; fresh capability, same scope (budget $0.05, ceiling $0.06, charged before $0), expires 00:31 | — |
+| 21:51 | a second unarmed Run Review → Test Quality Reviewer click, refused the same way (`agent_runs` `3cb44f72-…`) | $0.00 |
+| 21:53–21:56 | **`x-17-with-3` completed** via Run Review → Test Quality Reviewer (run `684002a0-…`) | **$0.00055998** |
+
+### Slot results
+
+**`x-17-with-3`** (experiment 17, *with* `Edge Cases and Error Paths`; first
+intended slot):
+
+| Item | Value |
+| --- | --- |
+| Outcome | completed, one attempt, `valid` structured output, finish reason `stop`, 97.8 s |
+| Provenance (OpenRouter generation metadata) | provider **DeepInfra**, model `deepseek/deepseek-v4-flash-20260423`, routing `only`/`order` = `deepinfra/fp8`, fallbacks off |
+| Tokens (generation metadata) | 1139 prompt, 2235 completion. The router reported 1142 / 2540 |
+| Cost | $0.00055998, provider-reported; reservation $0.01, preflight worst case $0.0056 |
+| Fingerprints | Skill `18efa866…` and non-Skill `e89e033b…`, both equal to the preflight; diff `8e0ba133…` equal to the frozen fixture |
+| Verdict | request_changes, 10 findings |
+
+Findings against the pre-stated rule ("a finding cites the uncovered error
+branch **and** the expiry-boundary edge case"):
+- **Error branch: yes.** CRITICAL "No test for unknown coupon code" and
+  CRITICAL "No test for expired coupon".
+- **Expiry boundary: no.** No finding names the boundary
+  `now >= coupon.expiresAt` (a coupon used exactly at its expiry instant).
+  "No test for expired coupon" asks only for an expired-coupon test. The
+  "hardcoded future date" finding reasons about the test date, not about the
+  boundary, and its rationale contradicts itself.
+- **Result for this slot: not flagged under the rule** (half met). It is one
+  exploratory sample. It is not evidence for or against criterion 17, which
+  needs the comparison.
 
 Both refused slots stay in the ledger unchanged, and their ids are never
 reused. `x-17-with-3` is the owner-approved replacement for the first
