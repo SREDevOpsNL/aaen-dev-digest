@@ -157,4 +157,37 @@ That spend is part of the dedicated key's opening usage here.
 
 ## Results
 
-Not run yet.
+Paid Phase 1 was authorized on 2026-10-25: five exploratory slots, $0.01
+reserved each, a $0.06 cumulative ceiling, `deepseek/deepseek-v4-flash` via
+`deepinfra/fp8`, no retries, no fallback, and no confirmatory runs. Stack
+`hw2f-7d16304f`. Nothing has been generated yet.
+
+### Phase 1 log (in order)
+
+| When (UTC) | Event | Charged |
+| --- | --- | --- |
+| 17:44 | capability (exploration, Gate 3, budget $0.05, ceiling $0.06) | — |
+| 17:44–17:54 | `x-17-with-1` armed; **refused**: the arm expired, no review request reached the API | $0.00 |
+| 19:14–19:24 | `x-17-with-2` (owner-approved replacement) armed; **refused**: same, no review request (Run Review is a dropdown; the agent must be picked in it) | $0.00 |
+| 20:44 | capability expired; not extended | — |
+| 21:29 | **Spending-guard check** (below) | $0.00 |
+| 21:31 | expired capability revoked; fresh capability, same scope (budget $0.05, ceiling $0.06, charged before $0), expires 00:31 | — |
+
+Both refused slots stay in the ledger unchanged, and their ids are never
+reused. `x-17-with-3` is the owner-approved replacement for the first
+intended slot.
+
+### Spending-guard check (not experiment evidence)
+
+The owner chose **Run Review → Test Quality Reviewer** on PR #501 while no
+slot was armed. The server refused the generation before any provider call:
+
+- the run ended `failed`, with the error "Refused in experiment mode: an
+  ordinary structured call (no experiment slot). Paid generation only runs
+  through an authorized experiment slot.";
+- the run is `agent_runs` `40bdd305-…`, with no cost;
+- the ledger was unchanged (4 lines, no new slot);
+- the key's usage was unchanged at $0.00040788.
+
+This shows that an unarmed click cannot spend. It says nothing about
+criterion 17.
