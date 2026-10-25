@@ -9,7 +9,7 @@
     { "cmd": ["wait", "--url", "tab=config"], "label": "agent editor reached" },
     { "cmd": ["eval", "location.assign(location.pathname + '?tab=skills')"], "label": "switch to the Skills tab" },
     { "cmd": ["wait", "--text", "3 / 4 attached"], "label": "three of four skills are attached" },
-    { "cmd": ["eval", "[...document.querySelectorAll('[data-testid^=agent-skill-]')].filter((r) => r.querySelector('[role=switch]')?.getAttribute('aria-checked') === 'true').map((r) => r.querySelector('label > span').textContent).join('|')"], "assert": { "stdoutIncludes": "breaking-change|response-schema|semver-discipline" }, "label": "the attached skills, in link order" },
+    { "cmd": ["eval", "[...document.querySelectorAll('[data-testid^=agent-skill-]')].filter((r) => r.querySelector('[role=switch]')?.getAttribute('aria-checked') === 'true').map((r) => r.querySelector('[data-testid=skill-row-name]').textContent).join('|')"], "assert": { "stdoutIncludes": "breaking-change|response-schema|semver-discipline" }, "label": "the attached skills, in link order" },
     { "cmd": ["open", "{BASE}/skills"], "label": "load the Skills page" },
     { "cmd": ["wait", "--load", "networkidle"], "label": "skills fetch settles" },
     { "cmd": ["wait", "--text", "semver-discipline"], "label": "seeded API Contract skills are listed" },

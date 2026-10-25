@@ -22,6 +22,20 @@
 
 ## Recurring Errors & Fixes
 
+- **2026-10-25: Read flow data through test ids, not DOM shape, and never
+  reuse a row id's prefix.** Flow 13 took a skill's name from `label > span`.
+  When the Skills tab's attach switch got its own `<label>` with a hidden
+  "Attach {name} to this agent" span, the selector silently returned that
+  text, and the flow failed only in CI. The fix's first test id,
+  `agent-skill-name`, broke flow 12 and a unit test the other way: both
+  select rows with `[data-testid^=agent-skill-]`, so every name span counted
+  as an extra row. A value a flow reads needs a test id outside every prefix
+  that is used for matching (`skill-row-name`). Run the whole hermetic suite,
+  not only the flow that names the component. Evidence:
+  `e2e/specs/13-api-contract-reviewer.flow.json`,
+  `e2e/specs/12-agent-skills.flow.json`, `SkillsTab.test.tsx`; CI run
+  40215740455.
+
 - **2026-10-24** — `wait --url /pulls` does not mean the PR list has
   rendered: a `find text "<PR title>" click` right after it races
   `GET /repos/:id/pulls` and fails intermittently. On the L01 baseline the

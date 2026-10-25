@@ -74,4 +74,7 @@ Test Isolation and Determinism draggable=false [Attach Test Isolation and Determ
 - **the per-agent state in words, and the off state explained where it
   appears**.
 
-Client: typecheck, lint and 118 of 118 tests pass.
+Client: typecheck, lint and 118 of 118 tests pass. Hermetic browser flows:
+14 of 14 pass (`scripts/e2e.sh`). Flow 13 now reads each skill's name from
+`[data-testid=skill-row-name]`. Its old `label > span` selector matched the
+new hidden switch label instead; CI caught that on `dc97807`.

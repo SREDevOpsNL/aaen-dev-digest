@@ -196,7 +196,7 @@ export function SkillsTab({ agent }: { agent: Agent }) {
               {/* Only the name and description dim for a skill left out of the prompt; its status and controls stay readable. */}
               <div style={cols.skill}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 600, opacity: dimmed ? 0.6 : 1 }}>{skill.name}</span>
+                  <span data-testid="skill-row-name" style={{ fontWeight: 600, opacity: dimmed ? 0.6 : 1 }}>{skill.name}</span>
                   {linked && !onForAgent && (
                     <span title={t("skills.disabledForAgentTooltip")}>
                       <Badge color="var(--text-muted)">{t("skills.disabledForAgent")}</Badge>
