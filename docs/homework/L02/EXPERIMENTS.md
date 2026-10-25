@@ -174,6 +174,7 @@ reserved each, a $0.06 cumulative ceiling, `deepseek/deepseek-v4-flash` via
 | 21:31 | expired capability revoked; fresh capability, same scope (budget $0.05, ceiling $0.06, charged before $0), expires 00:31 | — |
 | 21:51 | a second unarmed Run Review → Test Quality Reviewer click, refused the same way (`agent_runs` `3cb44f72-…`) | $0.00 |
 | 21:53–21:56 | **`x-17-with-3` completed** via Run Review → Test Quality Reviewer (run `684002a0-…`) | **$0.00055998** |
+| 22:01–22:02 | **`x-17-without-1` failed**: HTTP 429 from DeepInfra (origin `upstream_provider`, limit source `upstream_provider_shared_pool`, no retry-after) after 343 ms, one attempt, not retried (run `9c3f6d04-…`; Skill fingerprint `4f53cda1…` = none, non-Skill `e89e033b…`) | cost unknown to the run, so the ledger charges the full $0.01 reservation; key usage afterwards $0.00096786 = opening + confirmed, so nothing was billed |
 
 ### Slot results
 
