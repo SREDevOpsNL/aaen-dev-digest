@@ -1,5 +1,44 @@
 # Free experiment preflight (no generation)
 
+## Current: rerun at `e78fe0b` (2026-10-25, stack `hw2f-7d16304f`)
+
+This run supersedes the one at `968edbd` below, which is kept as it was
+recorded. Same pilot values, no capability, no generation.
+
+| Check | Result |
+| --- | --- |
+| `check` | PR #501 diff `8e0ba133…`, PR #502 diff `db6475df…` (unchanged); implementation fingerprint `16481ec6817ab607…`; isolation checks passed |
+| `endpoints` | exactly 1 endpoint tagged `deepinfra/fp8`, pricing 9e-8 / 1.8e-7 USD per token, equal to the configured prices |
+| `phase0-check` over the 4 condition previews | pass |
+
+| Slot | Links | Prompt skills | Skill fingerprint | Non-Skill fingerprint | Input bound | Worst case | Reservation |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `x-17-with-1` | condition | Edge Cases and Error Paths | `18efa8660db5…` | `e89e033babd0…` | 9475 | $0.00560 | $0.01 |
+| `x-17-without-1` | condition | — | `4f53cda18c2b…` | `e89e033babd0…` | 8968 | $0.00553 | $0.01 |
+| `x-18-with-1` | condition | breaking-change | `03214820cdbc…` | `baa2505e57b9…` | 10922 | $0.00579 | $0.01 |
+| `x-18-without-1` | condition | — | `4f53cda18c2b…` | `baa2505e57b9…` | 8880 | $0.00552 | $0.01 |
+| `x-18-with-2` (trace-only) | operator, before the drag | breaking-change, response-schema, semver-discipline | `f6808b43eaf7…` | `baa2505e57b9…` | 14420 | $0.00627 | $0.01 |
+
+- The fingerprints of the four comparison slots equal the `968edbd` run's.
+- `x-18-with-2` is the `--keep-links` slot: recorded `purpose: trace-evidence`,
+  excluded from experiment 18's comparison ([EXPERIMENTS.md](../EXPERIMENTS.md#the-trace-evidence-slot-is-trace-only)).
+  Its row above is the arrangement before the physical drag. The post-drag
+  preview, whose fingerprint `run --keep-links --expect-skill-fingerprint`
+  must match, is added after the drag.
+- The pre-drag fingerprint `f6808b43…` was also computed independently from
+  the skill bodies on the stack; it matches.
+- The previews restored the reviewer's links and switches: order
+  breaking-change, response-schema, semver-discipline, all on.
+- Key (free `GET /api/v1/key`): usage $0.00040788, limit $2, remaining
+  $1.99959212, equal to the recorded opening.
+- Shared ledger absent, no `runner.lock` or `authorize.lock`, no
+  `capability.json` anywhere under `~/.devdigest`. Leftover `capability.token`
+  files (main's stacks `hw2f-39febf41` and `hw2f-f53ed971`, and simulation
+  homes under `integration-20261024b/sim/`) have no capability beside them and
+  authorize nothing.
+
+## Superseded: run at `968edbd`
+
 Stack `hw2f-d3a2fb37` started from `968edbd` with `scripts/e2e.sh --serve` and the pilot values DEVDIGEST_EXPERIMENT_PROVIDER=deepinfra/fp8, MODEL=deepseek/deepseek-v4-flash, MAX_OUTPUT_TOKENS=16000, PRICE_INPUT=0.00000009, PRICE_OUTPUT=0.00000018 (USD per token). No capability exists, so no generation is possible.
 
 ## Stack identity and isolation
