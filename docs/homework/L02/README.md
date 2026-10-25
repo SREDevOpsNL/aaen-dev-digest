@@ -57,7 +57,7 @@ Also on the branch, as prerequisites:
 
 See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md). Still open:
 - the paid experiments, which need the owner's authorization;
-- a physical drag-and-drop for rows 13, 14 and 31;
+- the run trace after the owner's physical drag (row 14; the drag itself is verified for rows 13 and 31);
 - the headless `pr-self-review` session (row 21);
 - original-source verification of the rubric, which was a recovered English translation.
 

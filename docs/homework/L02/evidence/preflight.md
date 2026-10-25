@@ -18,6 +18,13 @@ recorded. Same pilot values, no capability, no generation.
 | `x-18-with-1` | condition | breaking-change | `03214820cdbc…` | `baa2505e57b9…` | 10922 | $0.00579 | $0.01 |
 | `x-18-without-1` | condition | — | `4f53cda18c2b…` | `baa2505e57b9…` | 8880 | $0.00552 | $0.01 |
 | `x-18-with-2` (trace-only) | operator, before the drag | breaking-change, response-schema, semver-discipline | `f6808b43eaf7…` | `baa2505e57b9…` | 14420 | $0.00627 | $0.01 |
+| `x-18-with-2` (trace-only) | **operator, after the drag** (response-schema off for this agent) | semver-discipline, breaking-change | **`b4978ce07152…`** | `baa2505e57b9…` | 12589 | $0.00602 | $0.01 |
+
+The post-drag fingerprint `b4978ce07152b569aab7d82c2ea2290af54833c2312fa8157377f8f1a49fa0d6`
+is the `--expect-skill-fingerprint` for `x-18-with-2`. The full check is in
+[drag-verification.md](drag-verification.md). The later Skills-tab UX commit
+`a4bbdde` changes only `client/`, which is outside the implementation
+fingerprint: `check` still reports `16481ec6817ab607…`.
 
 - The fingerprints of the four comparison slots equal the `968edbd` run's.
 - `x-18-with-2` is the `--keep-links` slot: recorded `purpose: trace-evidence`,

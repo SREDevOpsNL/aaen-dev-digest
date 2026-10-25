@@ -54,15 +54,26 @@ a diff that touches both `client/` and `server/` loads both skill sets.
    agent (21).
 2. Open **API Contract Reviewer**. It has exactly two tabs, Config (19) and
    Skills (14).
-3. **Skills tab:**
+3. **Skills tab** (33). A legend above the list explains the controls. The
+   columns are headed Attached, Skill, Enabled for this agent, Type and Order.
+   - **Attached** (left switch) links a skill to this agent, up to 4.
+   - **Enabled for this agent** (right switch, attached skills only) decides
+     whether the skill goes into this agent's review prompt. Switching it off
+     keeps the skill attached and in its place, and leaves it on for other
+     agents.
+
+   Steps:
    - Filter by name (15).
    - Link `deprecation-policy` (4 / 4 attached) (16). The card count updates
      without a reload (17).
-   - Switch one linked skill off for this agent (18). It stays attached,
-     shows "off for this agent", and can no longer be dragged.
-4. **Drag** a linked skill above another with the mouse. The order is saved
-   and survives a reload. A browser-automation tool cannot do this: it has to
-   be a real pointer drag.
+   - Switch one attached skill's **Enabled for this agent** off (18). It
+     stays attached, reads "Off" and "Off for this agent", and can no longer
+     be dragged. Switch it back on to include it again.
+4. **Drag** an enabled skill above another by its ≡ handle with the mouse.
+   The order is saved and survives a reload. It has to be a real pointer drag;
+   a browser-automation tool cannot do it. The owner's drag on the evidence
+   stack (32) is verified through the API, SQL, the server's request log and
+   the prompt fingerprint in [drag-verification.md](evidence/drag-verification.md).
 5. **Paid** (row 14, criteria 19 and 20): after the drag, run a review of a
    PR with this agent. Then open **PR → Agent runs → the run's trace**. The
    Skills block shows the enabled skills in the dragged order, leaves out the
