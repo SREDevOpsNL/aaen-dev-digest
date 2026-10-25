@@ -15,8 +15,12 @@ export interface SlotRun {
   slot: Slot;
   prId: string;
   agentId: string;
-  /** Skill ids linked for this condition (target only, or none). */
-  skillIds: string[];
+  /**
+   * Skill ids linked for this condition (target only, or none). Null keeps the
+   * links the operator arranged in the UI (exploration only: the trace-evidence
+   * slot for criteria 14, 19 and 20, whose order is set by drag-and-drop).
+   */
+  skillIds: string[] | null;
   manifestFingerprint: string;
   expectedDiffSha256: string;
   reservationUsd: number;
@@ -166,12 +170,18 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
     reservation_usd: run.reservationUsd,
     ...(deps.stackId ? { stack_id: deps.stackId } : {}),
   };
-  deps.ledger.append({ ...base, state: 'reserved', detail: { condition: run.slot.condition, experiment: run.slot.experiment, via: deps.viaUi ? 'run_review' : 'api' } });
+  deps.ledger.append({
+    ...base,
+    state: 'reserved',
+    detail: { condition: run.slot.condition, experiment: run.slot.experiment, via: deps.viaUi ? 'run_review' : 'api', links: run.skillIds === null ? 'operator' : 'condition' },
+  });
 
-  await deps.api.post(`/agents/${run.agentId}/skills`, { skill_ids: run.skillIds });
-  // A relink keeps each link's per-agent switch, so a target skill switched
-  // off for this agent earlier would silently drop out: switch every one on.
-  for (const skillId of run.skillIds) await deps.api.patch(`/agents/${run.agentId}/skills/${skillId}`, { enabled: true });
+  if (run.skillIds !== null) {
+    await deps.api.post(`/agents/${run.agentId}/skills`, { skill_ids: run.skillIds });
+    // A relink keeps each link's per-agent switch, so a target skill switched
+    // off for this agent earlier would silently drop out: switch every one on.
+    for (const skillId of run.skillIds) await deps.api.patch(`/agents/${run.agentId}/skills/${skillId}`, { enabled: true });
+  }
   const dispatched = deps.viaUi ? await dispatchViaRunReview(deps, run, base) : await dispatchDirect(deps, run, base);
   if ('result' in dispatched) return dispatched.result;
   const runId = dispatched.runId;

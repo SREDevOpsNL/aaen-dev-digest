@@ -114,6 +114,13 @@ describe('runner: Run Review mode (fake stack API, no network)', () => {
     expect(ledger.slots().get('x-18-with-1')!.events.every((e) => e.stack_id === 'hw2f-ui')).toBe(true);
   });
 
+  it('with operator links (trace-evidence slot) it changes no link and records that the operator arranged them', async () => {
+    const result = await runSlot(deps, { ...slotRun('x-18-with-5'), skillIds: null });
+    expect(result.state).toBe('completed');
+    expect(api.calls.some((c) => c.path.startsWith('/agents/'))).toBe(false);
+    expect(ledger.slots().get('x-18-with-5')!.events[0]!.detail).toMatchObject({ links: 'operator', via: 'run_review' });
+  });
+
   it('without a click before its deadline it disarms and records the slot refused at zero cost', async () => {
     api.clickAfterPolls = null;
     const result = await runSlot(deps, slotRun());

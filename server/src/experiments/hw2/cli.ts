@@ -502,7 +502,7 @@ async function currentManifest(flags: Flags, stack: Stack, root: string): Promis
   });
 }
 
-async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, reservationUsd: number, fingerprint: string): Promise<SlotRun[]> {
+async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, reservationUsd: number, fingerprint: string, keepLinks = false): Promise<SlotRun[]> {
   const { prId, agents, skills } = await lookupIds(stack.api);
   return Promise.all(
     slots.map(async (slot) => {
@@ -517,7 +517,7 @@ async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, re
         agentId: agent.id,
         agentName: agent.name,
         prNumber: fixture.number,
-        skillIds: slot.condition === 'with' ? [target.id] : [],
+        skillIds: keepLinks ? null : slot.condition === 'with' ? [target.id] : [],
         manifestFingerprint: fingerprint,
         expectedDiffSha256: frozen?.fixtures.find((f) => f.number === fixture.number)?.diff_sha256 ?? (await fixtureDiffSha(fixture)),
         reservationUsd,
@@ -705,7 +705,8 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
             const id = slotId('exploration', experiment, condition, trial);
             if (!taken.includes(id)) slots.push({ slot_id: id, index: slots.length, phase, experiment, condition, trial });
           }
-          runs = await slotRuns(stack, slots, null, Number(need(flags, 'reservation')), 'e'.repeat(64));
+          // --keep-links: run with the links arranged in the UI (the trace-evidence slot).
+          runs = await slotRuns(stack, slots, null, Number(need(flags, 'reservation')), 'e'.repeat(64), flags['keep-links'] === true);
         }
         const { stopped } = await runSchedule(deps, runs);
         const all = [...ledger.slots().values()];
