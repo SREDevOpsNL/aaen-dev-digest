@@ -244,6 +244,8 @@ class FakeApi extends ExperimentApi {
   calls: Array<{ method: string; path: string; body?: unknown; headers?: Record<string, string> }> = [];
   slots = new Map<string, unknown>();
   postError: Error | null = null;
+  /** The agent's links as the operator left them (GET /agents/agent/skills). */
+  operatorLinks: Array<{ skill_id: string; enabled: boolean; link_enabled: boolean }> = [];
   settle: (slotId: string, runId: string) => unknown = (slotId, runId) => ({
     runs: [{ run_id: runId, status: 'done', cost_usd: 0.0003, experiment: { slot_id: slotId, dispatch_state: 'completed', usage_known: true, attempts: [{ outcome: 'valid' }] } }],
   });
@@ -262,6 +264,7 @@ class FakeApi extends ExperimentApi {
     if (method === 'GET' && path.startsWith('/experiments/slots/')) {
       return (this.slots.get(path.split('/').pop()!) ?? { runs: [] }) as T;
     }
+    if (method === 'GET' && path === '/agents/agent/skills') return this.operatorLinks as T;
     return {} as T;
   }
 }
@@ -300,8 +303,32 @@ describe('runner orchestration (fake API, no network)', () => {
     expect(result).toMatchObject({ state: 'completed', costUsd: 0.0003, infraFailure: false });
     expect(ledger.slots().get('c-18-with-1')!.events.map((e) => e.state)).toEqual(['reserved', 'dispatched', 'completed']);
     const order = api.calls.filter((c) => c.method === 'POST').map((c) => c.path);
-    expect(order).toEqual(['/agents/agent/skills', '/experiments/runs']);
-    expect(api.calls.find((c) => c.path === '/agents/agent/skills')!.body).toEqual({ skill_ids: ['skill'] });
+    expect(order).toEqual(['/agents/agent/skills', '/experiments/runs', '/agents/agent/skills']);
+    expect(api.calls.find((c) => c.method === 'POST' && c.path === '/agents/agent/skills')!.body).toEqual({ skill_ids: ['skill'] });
+  });
+
+  it('puts the operator arrangement back after a condition slot, order and per-agent switches, whatever the outcome', async () => {
+    api.operatorLinks = [
+      { skill_id: 'other', enabled: true, link_enabled: true },
+      { skill_id: 'skill', enabled: true, link_enabled: false },
+    ];
+    api.postError = new ApiError(422, null, 'refused');
+    expect(await runSlot(deps, slotRun('c-18-with-1'))).toMatchObject({ state: 'refused' });
+    const writes = api.calls.filter((c) => c.method !== 'GET' && c.path.startsWith('/agents/')).map((c) => `${c.method} ${c.path} ${JSON.stringify(c.body)}`);
+    expect(writes).toEqual([
+      'POST /agents/agent/skills {"skill_ids":["skill"]}',
+      'PATCH /agents/agent/skills/skill {"enabled":true}',
+      'POST /agents/agent/skills {"skill_ids":["other","skill"]}',
+      'PATCH /agents/agent/skills/other {"enabled":true}',
+      'PATCH /agents/agent/skills/skill {"enabled":false}',
+    ]);
+  });
+
+  it('records a condition slot as a comparison and refuses operator links outside exploration', async () => {
+    await runSlot(deps, slotRun('c-18-with-1'));
+    expect(ledger.slots().get('c-18-with-1')!.events[0]!.detail).toMatchObject({ links: 'condition', purpose: 'comparison' });
+    await expect(runSlot(deps, { ...slotRun('c-18-with-2'), skillIds: null })).rejects.toThrow(/exploration only/);
+    expect(ledger.slots().has('c-18-with-2')).toBe(false);
   });
 
   it('never replays a slot already in the ledger', async () => {
@@ -614,6 +641,10 @@ class FakePreviewApi extends ExperimentApi {
     ['api', ['s-break']],
   ]);
   previews: Array<{ condition: string; links: string[] }> = [];
+  /** `agent:skill` links switched off for that agent. */
+  off = new Set<string>();
+  patches: string[] = [];
+  linkWrites = 0;
   mode: 'faithful' | 'ignore-link-writes' | 'skill-always' | 'wrong-skill' | 'throw' = 'faithful';
   static readonly skills = [
     { id: 's-behavior', name: 'Behavioral Coverage', body: 'b' },
@@ -623,8 +654,9 @@ class FakePreviewApi extends ExperimentApi {
   constructor() {
     super('http://127.0.0.1:1');
   }
-  override async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<T> {
+  override async request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
     const reply = (value: unknown) => value as T;
+    if (method !== 'GET' && path.startsWith('/agents/')) this.linkWrites++;
     if (method === 'GET' && path === '/repos') return reply([{ id: 'repo', full_name: 'acme/payments-api' }]);
     if (method === 'GET' && path === '/repos/repo/pulls') return reply([{ id: 'pr501', number: 501 }, { id: 'pr502', number: 502 }]);
     if (method === 'GET' && path === '/agents') {
@@ -635,16 +667,30 @@ class FakePreviewApi extends ExperimentApi {
     }
     if (method === 'GET' && path === '/skills') return reply(FakePreviewApi.skills);
     const linksPath = /^\/agents\/([^/]+)\/skills$/.exec(path);
-    if (linksPath && method === 'GET') return reply((this.links.get(linksPath[1]!) ?? []).map((id) => ({ skill_id: id })));
+    if (linksPath && method === 'GET') {
+      return reply((this.links.get(linksPath[1]!) ?? []).map((id) => ({ skill_id: id, enabled: true, link_enabled: !this.off.has(`${linksPath[1]}:${id}`) })));
+    }
     if (linksPath && method === 'POST') {
       const ids = (body as { skill_ids: string[] }).skill_ids;
       const restoring = ids.length > 1 || this.previews.length > 0;
-      if (this.mode !== 'ignore-link-writes' || restoring) this.links.set(linksPath[1]!, [...ids]);
+      if (this.mode !== 'ignore-link-writes' || restoring) {
+        // As the server does: a removed link loses its per-agent switch.
+        for (const id of this.links.get(linksPath[1]!) ?? []) if (!ids.includes(id)) this.off.delete(`${linksPath[1]}:${id}`);
+        this.links.set(linksPath[1]!, [...ids]);
+      }
       return reply([]);
+    }
+    const linkPath = /^\/agents\/([^/]+)\/skills\/([^/]+)$/.exec(path);
+    if (linkPath && method === 'PATCH') {
+      const key = `${linkPath[1]}:${linkPath[2]}`;
+      if ((body as { enabled: boolean }).enabled) this.off.delete(key);
+      else this.off.add(key);
+      this.patches.push(`${key}=${(body as { enabled: boolean }).enabled}`);
+      return reply({});
     }
     if (method === 'POST' && path === '/experiments/preview') {
       const { agent_id, condition } = body as { agent_id: string; condition: string };
-      const current = this.links.get(agent_id) ?? [];
+      const current = (this.links.get(agent_id) ?? []).filter((id) => !this.off.has(`${agent_id}:${id}`));
       this.previews.push({ condition, links: current });
       if (this.mode === 'throw') throw new ApiError(500, null, 'preview failed');
       // The server hashes the linked skills' prompt blocks (requestFingerprints).
@@ -718,6 +764,45 @@ describe('condition-faithful preview (runner `preview` command, fake API)', () =
     const arbitrary = await conditionPreview(forced, { experiment: '18', condition: 'with', reservationUsd: 0.02 });
     expect(arbitrary.ok).toBe(false);
     expect(arbitrary.problems).toContain('the Skill fingerprint is not that of breaking-change alone');
+  });
+
+  it('switches the target on for the preview, as a slot does, and restores every per-agent switch after', async () => {
+    const api = new FakePreviewApi();
+    api.off.add('tqr:s-edge'); // the target, switched off for this agent
+    api.off.add('tqr:s-behavior');
+    const result = await conditionPreview(api, { experiment: '17', condition: 'with', reservationUsd: 0.02 });
+    expect(result.ok).toBe(true);
+    expect(api.previews).toEqual([{ condition: 'with', links: ['s-edge'] }]);
+    expect(api.links.get('tqr')).toEqual(['s-behavior', 's-edge']);
+    // s-behavior's link was removed for the preview and came back on: its switch is put back off.
+    expect([...api.off].sort()).toEqual(['tqr:s-behavior', 'tqr:s-edge']);
+  });
+
+  it('--keep-links previews the operator arrangement without writing a link: the on links, in order', async () => {
+    const api = new FakePreviewApi();
+    api.links.set('api', ['s-edge', 's-break', 's-behavior']);
+    api.off.add('api:s-behavior');
+    const result = await conditionPreview(api, { experiment: '18', condition: 'with', reservationUsd: 0.01, keepLinks: true });
+    expect(api.linkWrites).toBe(0);
+    expect(result).toMatchObject({ ok: true, links: 'operator', prompted_skills: ['Edge Cases and Error Paths', 'breaking-change'] });
+    const blocks = ['s-edge', 's-break'].map((id) => toSkillPromptBlock(FakePreviewApi.skills.find((s) => s.id === id)!));
+    expect(result.skill_fingerprint).toBe(sha256(canonicalJson(blocks)));
+    expect(result.expected_skill_fingerprint).toBe(result.skill_fingerprint);
+    // Another order is another fingerprint: the preview pins the dragged order.
+    const reversed = ['s-break', 's-edge'].map((id) => toSkillPromptBlock(FakePreviewApi.skills.find((s) => s.id === id)!));
+    expect(result.skill_fingerprint).not.toBe(sha256(canonicalJson(reversed)));
+  });
+
+  it('--keep-links fails closed when the target skill is not on, and is refused for without or confirmatory', async () => {
+    const api = new FakePreviewApi();
+    api.links.set('api', ['s-edge', 's-break']);
+    api.off.add('api:s-break');
+    const result = await conditionPreview(api, { experiment: '18', condition: 'with', reservationUsd: 0.01, keepLinks: true });
+    expect(result.ok).toBe(false);
+    expect(result.problems).toContain('breaking-change is not linked and on for API Contract Reviewer');
+    await expect(conditionPreview(api, { experiment: '18', condition: 'without', reservationUsd: 0.01, keepLinks: true })).rejects.toThrow(/exploration with slot/);
+    await expect(conditionPreview(api, { experiment: '18', condition: 'with', reservationUsd: 0.01, keepLinks: true, phase: 'confirmatory' })).rejects.toThrow(/exploration with slot/);
+    expect(api.linkWrites).toBe(0);
   });
 
   it('rejects an unknown condition or experiment before touching any link', async () => {

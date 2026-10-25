@@ -64,6 +64,10 @@ describe('stack API requests are bounded', () => {
         res.writeHead(req.url === '/experiments/runs' ? 202 : 200, { 'content-type': 'application/json' });
         res.end(JSON.stringify(req.url === '/experiments/runs' ? { run_id: 'run-1' } : {}));
       }
+      if (req.method === 'GET' && req.url === '/agents/agent/skills') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('[]');
+      }
       // every poll hangs
     });
     const dir = mkdtempSync(join(tmpdir(), 'hw2-api-timeout-'));
@@ -94,6 +98,11 @@ describe('stack API requests are bounded', () => {
         posts.push(req.url ?? '');
         res.writeHead(req.url === '/experiments/runs' ? 202 : 200, { 'content-type': 'application/json' });
         res.end(JSON.stringify(req.url === '/experiments/runs' ? { run_id: 'run-1' } : {}));
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/agents/agent/skills') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('[]');
         return;
       }
       // Every poll hangs.

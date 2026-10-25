@@ -301,6 +301,10 @@ export interface ConditionPreview {
   reviewer: string;
   target_skill: string;
   linked_skills: string[];
+  /** The linked skills with both switches on, in order: what the prompt carries. */
+  prompted_skills: string[];
+  /** `operator`: the links as arranged in the UI (--keep-links); `condition`: relinked for the condition. */
+  links: 'operator' | 'condition';
   refusal_reason: string | null;
   input_upper_bound: number | null;
   output_cap: number | null;
@@ -323,10 +327,11 @@ export interface ConditionPreview {
  */
 export async function conditionPreview(
   api: ExperimentApi,
-  args: { experiment: string; condition: string; reservationUsd: number; phase?: Phase },
+  args: { experiment: string; condition: string; reservationUsd: number; phase?: Phase; keepLinks?: boolean },
 ): Promise<ConditionPreview> {
   if (args.condition !== 'with' && args.condition !== 'without') throw new Error('--condition must be with or without');
   if (!(args.experiment in EXPERIMENT_FIXTURE)) throw new Error(`--experiment must be one of ${Object.keys(EXPERIMENT_FIXTURE).join(', ')}`);
+  if (args.keepLinks && (args.condition !== 'with' || args.phase === 'confirmatory')) throw new Error('--keep-links previews only an exploration with slot');
   const condition = args.condition;
   const fixture = fixtureFor(args.experiment);
   const { prId, agents, skills } = await lookupIds(api);
@@ -334,13 +339,22 @@ export async function conditionPreview(
   const target = skills.find((s) => s.name === fixture.targetSkill);
   const pr = prId(fixture.number);
   if (!agent || !target || !pr) throw new Error(`Experiment ${args.experiment}: reviewer, target skill or PR missing`);
-  const intended = condition === 'with' ? [target.id] : [];
-  const linksOf = async () => (await api.get<Array<{ skill_id: string }>>(`/agents/${agent.id}/skills`)).map((l) => l.skill_id);
+  const detailsOf = () => api.get<Array<{ skill_id: string; enabled: boolean; link_enabled: boolean }>>(`/agents/${agent.id}/skills`);
+  const linksOf = async () => (await detailsOf()).map((l) => l.skill_id);
   const nameOf = (id: string) => skills.find((s) => s.id === id)?.name ?? id;
 
-  const original = await linksOf();
+  const originalDetails = await detailsOf();
+  const original = originalDetails.map((l) => l.skill_id);
+  // --keep-links (the trace-evidence slot): preview the links as the operator
+  // arranged them; what reaches the prompt is every link with both switches on, in order.
+  const intended = args.keepLinks ? original : condition === 'with' ? [target.id] : [];
+  const prompted = args.keepLinks ? originalDetails.filter((l) => l.enabled && l.link_enabled).map((l) => l.skill_id) : intended;
   try {
-    await api.post(`/agents/${agent.id}/skills`, { skill_ids: intended });
+    if (!args.keepLinks) {
+      // Exactly what a slot of this condition does (`runSlot`): relink, then switch the target on.
+      await api.post(`/agents/${agent.id}/skills`, { skill_ids: intended });
+      for (const skillId of intended) await api.patch(`/agents/${agent.id}/skills/${skillId}`, { enabled: true });
+    }
     const linked = await linksOf();
     const preview = await api.post<{
       ok: boolean;
@@ -372,9 +386,18 @@ export async function conditionPreview(
     if (linked.join(',') !== intended.join(',')) {
       problems.push(`linked skills are [${linked.map(nameOf).join(', ')}], expected [${intended.map(nameOf).join(', ')}]`);
     }
-    const expectedSkill = expectedSkillFingerprint(condition, target);
+    if (args.keepLinks && !prompted.includes(target.id)) problems.push(`${target.name} is not linked and on for ${fixture.reviewer}`);
+    const expectedSkill = args.keepLinks
+      ? sha256(canonicalJson(prompted.map((id) => toSkillPromptBlock(skills.find((s) => s.id === id)!))))
+      : expectedSkillFingerprint(condition, target);
     if (skillFingerprint !== expectedSkill) {
-      problems.push(condition === 'without' ? 'a without preview carried a Skill' : `the Skill fingerprint is not that of ${target.name} alone`);
+      problems.push(
+        args.keepLinks
+          ? `the Skill fingerprint is not that of [${prompted.map(nameOf).join(', ')}] in that order`
+          : condition === 'without'
+            ? 'a without preview carried a Skill'
+            : `the Skill fingerprint is not that of ${target.name} alone`,
+      );
     }
     const flight = preview.block.preflight;
     return {
@@ -385,6 +408,8 @@ export async function conditionPreview(
       reviewer: fixture.reviewer,
       target_skill: target.name,
       linked_skills: linked.map(nameOf),
+      prompted_skills: prompted.map(nameOf),
+      links: args.keepLinks ? 'operator' : 'condition',
       refusal_reason: preview.reason,
       input_upper_bound: flight?.input_upper_bound ?? null,
       output_cap: flight?.output_cap ?? null,
@@ -398,10 +423,15 @@ export async function conditionPreview(
       expected_skill_fingerprint: expectedSkill,
     };
   } finally {
-    await api.post(`/agents/${agent.id}/skills`, { skill_ids: original });
-    const restored = await linksOf();
-    if (restored.join(',') !== original.join(',')) {
-      throw new Error(`Could not restore ${fixture.reviewer}'s links: now [${restored.map(nameOf).join(', ')}]`);
+    if (!args.keepLinks) {
+      // A relink drops removed links' per-agent switches, so restore them too.
+      await api.post(`/agents/${agent.id}/skills`, { skill_ids: original });
+      for (const link of originalDetails) await api.patch(`/agents/${agent.id}/skills/${link.skill_id}`, { enabled: link.link_enabled });
+    }
+    const restored = await detailsOf();
+    const shape = (links: typeof originalDetails) => links.map((l) => `${l.skill_id}:${l.link_enabled}`).join(',');
+    if (shape(restored) !== shape(originalDetails)) {
+      throw new Error(`Could not restore ${fixture.reviewer}'s links: now [${restored.map((l) => `${nameOf(l.skill_id)}${l.link_enabled ? '' : ' (off)'}`).join(', ')}]`);
     }
   }
 }
@@ -541,6 +571,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
         condition: need(flags, 'condition'),
         reservationUsd: Number(need(flags, 'reservation')),
         ...(flags.phase === 'confirmatory' ? { phase: 'confirmatory' as const } : {}),
+        keepLinks: flags['keep-links'] === true,
       });
       log(JSON.stringify(result, null, 2));
       if (!result.ok) throw new Error(`Preview does not reflect its condition or was refused: ${result.problems.join('; ')}`);
@@ -705,8 +736,20 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
             const id = slotId('exploration', experiment, condition, trial);
             if (!taken.includes(id)) slots.push({ slot_id: id, index: slots.length, phase, experiment, condition, trial });
           }
-          // --keep-links: run with the links arranged in the UI (the trace-evidence slot).
-          runs = await slotRuns(stack, slots, null, Number(need(flags, 'reservation')), 'e'.repeat(64), flags['keep-links'] === true);
+          // --keep-links: run with the links arranged in the UI (the trace-evidence
+          // slot, trace-only). A free preview must first show exactly the previewed
+          // arrangement, so a slot is never spent on links that changed since.
+          const keepLinks = flags['keep-links'] === true;
+          if (keepLinks) {
+            if (count !== 1 || condition !== 'with') throw new Error('--keep-links runs exactly one with slot');
+            const expected = need(flags, 'expect-skill-fingerprint');
+            const check = await conditionPreview(stack.api, { experiment, condition, reservationUsd: Number(need(flags, 'reservation')), keepLinks: true });
+            if (!check.ok || check.skill_fingerprint !== expected) {
+              throw new Error(`The links are not the previewed arrangement (Skill fingerprint ${check.skill_fingerprint}, expected ${expected}; ${check.problems.join('; ') || 'no other problem'})`);
+            }
+            log(`trace-evidence slot: prompt skills [${check.prompted_skills.join(', ')}], Skill fingerprint ${expected.slice(0, 12)}… as previewed`);
+          }
+          runs = await slotRuns(stack, slots, null, Number(need(flags, 'reservation')), 'e'.repeat(64), keepLinks);
         }
         const { stopped } = await runSchedule(deps, runs);
         const all = [...ledger.slots().values()];

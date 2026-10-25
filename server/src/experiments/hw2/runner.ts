@@ -161,6 +161,7 @@ export const DEFAULT_POLL_TIMEOUT_MS = 480_000;
 export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResult> {
   const existing = deps.ledger.slots().get(run.slot.slot_id);
   if (existing) throw new Error(`Slot ${run.slot.slot_id} is already in the ledger (${existing.state}); slots are never replayed`);
+  if (run.skillIds === null && run.slot.phase !== 'exploration') throw new Error(`Slot ${run.slot.slot_id}: operator links (trace-evidence) are exploration only`);
   const budget = fits([...deps.ledger.slots().values()], run.slot.phase, run.reservationUsd);
   if (!budget.ok) return { state: 'refused', runId: null, costUsd: 0, reason: budget.reason, infraFailure: false };
 
@@ -170,18 +171,54 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
     reservation_usd: run.reservationUsd,
     ...(deps.stackId ? { stack_id: deps.stackId } : {}),
   };
+  // Read before the reservation: a stack that cannot list the links costs nothing.
+  const before = run.skillIds === null ? null : await linkSnapshot(deps, run.agentId);
   deps.ledger.append({
     ...base,
     state: 'reserved',
-    detail: { condition: run.slot.condition, experiment: run.slot.experiment, via: deps.viaUi ? 'run_review' : 'api', links: run.skillIds === null ? 'operator' : 'condition' },
+    detail: {
+      condition: run.slot.condition,
+      experiment: run.slot.experiment,
+      via: deps.viaUi ? 'run_review' : 'api',
+      links: run.skillIds === null ? 'operator' : 'condition',
+      // Operator links make a trace-only run: evidence for criteria 14, 19 and
+      // 20, never part of an experiment's with/without comparison.
+      purpose: run.skillIds === null ? 'trace-evidence' : 'comparison',
+    },
   });
 
-  if (run.skillIds !== null) {
+  if (run.skillIds === null || before === null) return dispatchAndFollow(deps, run, base);
+  // The operator's arrangement (order and per-agent switches) is put back after
+  // the slot, so a later trace-evidence slot runs with the links as dragged.
+  try {
     await deps.api.post(`/agents/${run.agentId}/skills`, { skill_ids: run.skillIds });
     // A relink keeps each link's per-agent switch, so a target skill switched
     // off for this agent earlier would silently drop out: switch every one on.
     for (const skillId of run.skillIds) await deps.api.patch(`/agents/${run.agentId}/skills/${skillId}`, { enabled: true });
+    return await dispatchAndFollow(deps, run, base);
+  } finally {
+    await restoreLinks(deps, run.agentId, before);
   }
+}
+
+type LinkSnapshot = Array<{ skill_id: string; link_enabled: boolean }>;
+
+async function linkSnapshot(deps: RunnerDeps, agentId: string): Promise<LinkSnapshot> {
+  const links = await deps.api.get<LinkSnapshot>(`/agents/${agentId}/skills`);
+  return Array.isArray(links) ? links.map((l) => ({ skill_id: l.skill_id, link_enabled: l.link_enabled })) : [];
+}
+
+/** Best effort: a failed restore is reported, never turned into a slot outcome. */
+async function restoreLinks(deps: RunnerDeps, agentId: string, before: LinkSnapshot): Promise<void> {
+  try {
+    await deps.api.post(`/agents/${agentId}/skills`, { skill_ids: before.map((l) => l.skill_id) });
+    for (const link of before) await deps.api.patch(`/agents/${agentId}/skills/${link.skill_id}`, { enabled: link.link_enabled });
+  } catch (err) {
+    deps.log(`WARNING: could not restore the agent's skill links: ${(err as Error).message}; re-arrange them before a trace-evidence slot`);
+  }
+}
+
+async function dispatchAndFollow(deps: RunnerDeps, run: SlotRun, base: LedgerBase): Promise<SlotResult> {
   const dispatched = deps.viaUi ? await dispatchViaRunReview(deps, run, base) : await dispatchDirect(deps, run, base);
   if ('result' in dispatched) return dispatched.result;
   const runId = dispatched.runId;

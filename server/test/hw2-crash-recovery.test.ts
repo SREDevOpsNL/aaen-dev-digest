@@ -80,6 +80,7 @@ async function fakeStack(opts: { holdLinks?: boolean } = {}) {
         return send(200, []);
       }
       if (req.method === 'PATCH') return send(200, []);
+      if (req.method === 'GET' && /\/agents\/[^/]+\/skills$/.test(req.url!)) return send(200, []);
       if (req.method === 'POST' && req.url === '/experiments/runs') {
         state.dispatches++;
         return send(202, { run_id: 'run-crash', slot_id: JSON.parse(body).slot_id });

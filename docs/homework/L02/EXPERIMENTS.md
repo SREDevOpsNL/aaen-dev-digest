@@ -61,6 +61,27 @@ Fixtures are seeded only into a disposable database
    the reviewer must be single-pass with repo intel off, no fixture clone may
    exist, the live endpoint must match, and the worst case must fit the
    reservation.
+4. **Links put back.** After a condition slot, whatever its outcome, the
+   runner restores the reviewer's links as they were before it: their order
+   and each per-agent switch.
+
+### The trace-evidence slot is trace-only
+
+`run --keep-links` runs one exploration `with` slot on the links as the
+operator arranged them in the UI (dragged order, one skill switched off). It
+exists only to produce a run trace for rows 14, 19 and 20. **It is not part of
+either experiment's with/without comparison**, even though its id has the
+`with` shape (for example `x-18-with-2`):
+- its ledger record says `links: "operator"`, `purpose: "trace-evidence"`
+  (a condition slot says `links: "condition"`, `purpose: "comparison"`);
+- its prompt carries more than the target skill, so its Skill fingerprint is
+  not the `with` condition's, and its findings are never counted for row 18;
+- the runner refuses operator links outside exploration, so it can never be
+  a confirmatory slot, and `report` reads only the pre-registered `c-` slots.
+
+Before it reserves anything, `run --keep-links` makes a free preview and
+refuses unless the Skill fingerprint equals `--expect-skill-fingerprint`, the
+one recorded at preflight. So it never spends on links that changed since.
 
 Implementation: `server/src/modules/experiments/`,
 `server/src/modules/reviews/experiment-run.ts`,
@@ -100,7 +121,8 @@ are placeholders until the approved phase fixes them.
    every command below as `--api … --stack … --database … --container …`.
 2. **Free checks:** `pnpm exec tsx src/experiments/hw2/cli.ts check …`, then
    `endpoints`, then `preview --experiment 18 --condition with --reservation 0.01 …`
-   for each condition.
+   for each condition, and `preview … --keep-links` for the trace-evidence
+   slot after the drag.
 3. **Opening key usage**, once, before the first paid slot:
    `cli.ts key-usage --opening`.
 4. **Authorize the approved phase:**
