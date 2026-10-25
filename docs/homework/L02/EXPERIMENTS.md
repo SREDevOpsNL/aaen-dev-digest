@@ -175,6 +175,7 @@ reserved each, a $0.06 cumulative ceiling, `deepseek/deepseek-v4-flash` via
 | 21:51 | a second unarmed Run Review → Test Quality Reviewer click, refused the same way (`agent_runs` `3cb44f72-…`) | $0.00 |
 | 21:53–21:56 | **`x-17-with-3` completed** via Run Review → Test Quality Reviewer (run `684002a0-…`) | **$0.00055998** |
 | 22:01–22:02 | **`x-17-without-1` failed**: HTTP 429 from DeepInfra (origin `upstream_provider`, limit source `upstream_provider_shared_pool`, no retry-after) after 343 ms, one attempt, not retried (run `9c3f6d04-…`; Skill fingerprint `4f53cda1…` = none, non-Skill `e89e033b…`) | cost unknown to the run, so the ledger charges the full $0.01 reservation; key usage afterwards $0.00096786 = opening + confirmed, so nothing was billed |
+| 22:06–22:07 | **`x-18-with-1` completed** via Run Review → API Contract Reviewer (run `4ce7d791-…`); the reviewer's operator links were restored afterwards (semver-discipline, breaking-change, response-schema off) | **$0.00020691** |
 
 ### Slot results
 
@@ -202,6 +203,30 @@ branch **and** the expiry-boundary edge case"):
 - **Result for this slot: not flagged under the rule** (half met). It is one
   exploratory sample. It is not evidence for or against criterion 17, which
   needs the comparison.
+
+**`x-17-without-1`**: failed with an upstream 429 before any output, so it
+gives no data. By the owner's decision it was not replaced. Experiment 17
+therefore has no *without* sample in Phase 1.
+
+**`x-18-with-1`** (experiment 18, *with* `breaking-change`):
+
+| Item | Value |
+| --- | --- |
+| Outcome | completed, one attempt, `valid`, finish reason `stop`, 33.5 s |
+| Provenance | provider **DeepInfra**, model `deepseek/deepseek-v4-flash-20260423`, pinned `deepinfra/fp8`, fallbacks off |
+| Tokens (generation metadata) | 1501 prompt, 412 completion. The router reported 1373 / 463 |
+| Cost | $0.00020691, provider-reported |
+| Fingerprints | Skill `03214820…` and non-Skill `baa2505e…`, equal to the preflight; diff `db6475df…` |
+| Verdict | request_changes, 1 finding |
+
+Against the rule ("a finding names the breaking change to `GET /v1/payments/:id`
+at the changed route"):
+- **Flagged: yes.** CRITICAL "Renamed path parameter on existing v1 route
+  breaks all existing clients", at `src/api/payments.ts` lines 13–14. That
+  overlaps the expected anchor 12–13, and the finding names the
+  `GET /v1/payments/:id` route and the `:id` → `:reference` change.
+- This is one *with* sample. Whether the skill made the difference needs
+  the *without* run.
 
 Both refused slots stay in the ledger unchanged, and their ids are never
 reused. `x-17-with-3` is the owner-approved replacement for the first
