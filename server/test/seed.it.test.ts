@@ -132,7 +132,7 @@ d('seed: API Contract Reviewer and HW2 experiment fixtures', () => {
 
     expect(llm.calls.filter((call) => call.method === 'completeStructured')).toHaveLength(1);
     expect(trace.prompt_assembly.user).toContain('src/api/payments.ts'); // reviewed from the stored patch
-    expect(trace.prompt_assembly.user).toContain('amount: (payment.amountCents / 100).toFixed(2)');
+    expect(trace.prompt_assembly.user).toContain("app.get('/v1/payments/:reference'");
     expect(trace.prompt_assembly.user).not.toContain('src/config.ts'); // not the mock git diff
     expect(trace.prompt_assembly.skills).toContain('breaking-change');
     await app.close();

@@ -9,7 +9,7 @@ naming the slots, model, provider and maximum spend.
 | Criterion | Reviewer | PR (seeded, disposable stack only) | Target skill | "Flagged" means |
 | --- | --- | --- | --- | --- |
 | 17 | Test Quality Reviewer | #501: coupon discounts with one happy-path test | `Edge Cases and Error Paths` | a finding cites the uncovered error branch (unknown / expired coupon) **and** the expiry-boundary edge case |
-| 18 | API Contract Reviewer | #502, to be replaced by a route-signature change (see [Fixtures](#fixtures)) | `breaking-change` | a finding names the breaking change at the changed route |
+| 18 | API Contract Reviewer | #502: a v1 route's path parameter changes meaning (route signature) | `breaking-change` | a finding names the breaking change to `GET /v1/payments/:id` at the changed route |
 
 Each experiment compares the **same PR and reviewer** without and with the
 target skill linked. Everything else the model receives is held fixed and
@@ -25,12 +25,18 @@ enabled skill present, a skill switched off absent.
 
 - **#501** (`server/src/db/seed-fixtures.ts`): `applyDiscount` throws for an
   unknown or expired coupon; the only test covers a valid coupon.
-- **#502** changes a v1 *response field* (`amount_cents` → `amount`, a string).
-  The recovered rubric asks for a PR that **changes a route signature**, and on
-  `main` the reviewer flagged #502 even without the skill (one exploratory pair,
-  see [Earlier record](#earlier-record-on-main)). A route-signature fixture
-  will be written, checked offline and piloted **before** the pre-registration;
-  #502 stays only as history.
+- **#502** (redesigned on this branch): `GET /v1/payments/:id` becomes
+  `GET /v1/payments/:reference` and looks payments up by their public
+  reference. The URL shape is unchanged, so existing clients still reach the
+  route, but an id now returns 404: a breaking route-signature change on a
+  published v1 route, made in place with no new version or deprecation. The PR
+  presents it as a link-sharing improvement and adds a lookup helper, so the
+  break is not announced. Expected anchor: `src/api/payments.ts` lines 12–13
+  (both added lines).
+- The earlier #502 changed a v1 *response field* (`amount_cents` →
+  `amount`); the recovered rubric asks for a route-signature change, and on
+  `main` the reviewer flagged that version even without the skill (see
+  [Earlier record](#earlier-record-on-main)). It is replaced, not run here.
 
 Fixtures are seeded only into a disposable database
 (`DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1`, refused on `devdigest`).

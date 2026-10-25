@@ -16,7 +16,7 @@
     { "cmd": ["eval", "(() => { const t = document.body.innerText; return t.includes('breaking-change') && t.includes('response-schema') && !t.includes('deprecation-policy'); })()"], "assert": { "stdoutIncludes": "true" }, "label": "deprecation-policy is not seeded" },
     { "cmd": ["open", "{BASE}/"], "label": "load the seeded repository's PR list" },
     { "cmd": ["wait", "--load", "networkidle"], "label": "PR list settles" },
-    { "cmd": ["wait", "--text", "Return payment amounts as decimal strings"], "label": "fixture PR #502 is listed" },
+    { "cmd": ["wait", "--text", "Look up payments by public reference"], "label": "fixture PR #502 is listed" },
     { "cmd": ["wait", "--text", "Add coupon discounts to checkout totals"], "label": "fixture PR #501 is listed" }
   ]
 }

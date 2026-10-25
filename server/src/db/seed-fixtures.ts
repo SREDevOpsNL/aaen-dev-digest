@@ -92,36 +92,51 @@ export const EXPERIMENT_FIXTURES: readonly ExperimentFixture[] = [
     ],
   },
   {
+    // Route-signature change (criterion 18): the v1 route keeps its URL shape
+    // but its path parameter now means a public reference, not the payment id.
     number: 502,
-    title: 'Return payment amounts as decimal strings',
+    title: 'Look up payments by public reference',
     author: 'priya.nair',
-    branch: 'feat/decimal-amounts',
-    headSha: 'b502dec1a502',
-    body: 'Returns payment amounts as decimal strings so the dashboard can display them without converting from cents.',
-    commitMessage: 'Return payment amounts as decimal strings',
+    branch: 'feat/payment-reference-lookup',
+    headSha: 'b502ref0c502',
+    body: 'Looks up payments by their public reference so the dashboard can share payment links without exposing internal ids.',
+    commitMessage: 'Look up payments by public reference',
     files: [
       {
         path: 'src/api/payments.ts',
-        patch: `@@ -12,11 +12,11 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
-   app.get('/v1/payments/:id', async (request, reply) => {
-     const payment = await findPayment(request.params.id);
+        patch: `@@ -12,11 +12,12 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
+-  app.get('/v1/payments/:id', async (request, reply) => {
+-    const payment = await findPayment(request.params.id);
++  app.get('/v1/payments/:reference', async (request, reply) => {
++    const payment = await findPaymentByReference(request.params.reference);
      if (!payment) return reply.code(404).send({ error: 'not_found' });
      return {
        id: payment.id,
++      reference: payment.reference,
        status: payment.status,
--      amount_cents: payment.amountCents,
-+      amount: (payment.amountCents / 100).toFixed(2),
+       amount_cents: payment.amountCents,
        currency: payment.currency,
        created_at: payment.createdAt.toISOString(),
      };
    });`,
       },
+      {
+        path: 'src/payments/store.ts',
+        patch: `@@ -8,2 +8,7 @@ export async function findPayment(id: string): Promise<Payment | null> {
+   return db.payments.findOne({ id });
+ }
++
++/** Payments carry a public reference (pay_...) that is safe to share in links. */
++export async function findPaymentByReference(reference: string): Promise<Payment | null> {
++  return db.payments.findOne({ reference });
++}`,
+      },
     ],
     reviewer: 'API Contract Reviewer',
     targetSkill: 'breaking-change',
     expectedDefect:
-      'The published v1 response field amount_cents (number) is renamed to amount (string) in place, with no new version or deprecation, which breaks existing clients.',
-    expectedAnchors: [{ file: 'src/api/payments.ts', start_line: 18, end_line: 18 }],
+      'The published v1 route GET /v1/payments/:id now resolves its path parameter as a public reference instead of the payment id, in place, with no new version or deprecation: existing clients that call it with an id get 404.',
+    expectedAnchors: [{ file: 'src/api/payments.ts', start_line: 12, end_line: 13 }],
   },
 ];
 
