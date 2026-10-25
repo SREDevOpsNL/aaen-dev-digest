@@ -10,7 +10,7 @@ import type {
   Skill,
   SkillType,
 } from '@devdigest/shared';
-import { SkillLimitError, ValidationError } from '../../platform/errors.js';
+import { NotFoundError, SkillLimitError, ValidationError } from '../../platform/errors.js';
 import { AgentsRepository, type SetSkillsResult } from './repository.js';
 import { toAgentDto, toAgentVersionDto } from './helpers.js';
 
@@ -141,11 +141,12 @@ export class AgentsService {
   /** Linked skills with their resolved config, in deterministic link order. */
   async skillLinks(agentId: string): Promise<AgentSkillDetail[]> {
     const links = await this.repo.linkedSkills(agentId);
-    return links.map(({ skill, order }) => ({
+    return links.map(({ skill, order, linkEnabled }) => ({
       agent_id: agentId,
       skill_id: skill.id,
       order,
       enabled: skill.enabled,
+      link_enabled: linkEnabled,
       skill: {
         id: skill.id,
         name: skill.name,
@@ -180,6 +181,22 @@ export class AgentsService {
     order?: number,
   ): Promise<AgentSkillDetail[] | undefined> {
     return this.linksOrThrow(agentId, await this.repo.linkSkill(workspaceId, agentId, skillId, order));
+  }
+
+  /**
+   * Turn one linked skill on or off for this agent only. Undefined when the
+   * agent is not in the workspace; NotFoundError when the skill is not linked.
+   */
+  async setSkillEnabled(
+    workspaceId: string,
+    agentId: string,
+    skillId: string,
+    enabled: boolean,
+  ): Promise<AgentSkillDetail[] | undefined> {
+    const result = await this.repo.setSkillEnabled(workspaceId, agentId, skillId, enabled);
+    if (result.kind === 'agent_not_found') return undefined;
+    if (result.kind === 'link_not_found') throw new NotFoundError('Skill is not linked to this agent');
+    return this.skillLinks(agentId);
   }
 
   private async linksOrThrow(agentId: string, result: SetSkillsResult): Promise<AgentSkillDetail[] | undefined> {

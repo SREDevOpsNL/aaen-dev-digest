@@ -67,6 +67,19 @@ export async function missingWorkspaceSkills(tx: Tx, workspaceId: string, skillI
 }
 
 /**
+ * Turn one existing link's per-agent switch on or off. The caller holds the
+ * agent lock. Returns false when the skill is not linked to the agent.
+ */
+export async function setAgentSkillEnabled(tx: Tx, agentId: string, skillId: string, enabled: boolean): Promise<boolean> {
+  const rows = await tx
+    .update(t.agentSkills)
+    .set({ enabled })
+    .where(and(eq(t.agentSkills.agentId, agentId), eq(t.agentSkills.skillId, skillId)))
+    .returning({ skillId: t.agentSkills.skillId });
+  return rows.length > 0;
+}
+
+/**
  * Replace the agent's links with `next` (order = index). When the list
  * changes, bump the agent version and snapshot its config with the new skill
  * list. The caller holds the agent lock and has validated `next`.
@@ -80,9 +93,18 @@ export async function writeAgentSkills(
   const changed = previous.length !== next.length || previous.some((id, index) => id !== next[index]);
   if (!changed) return;
 
+  // Relinking rewrites the rows; a skill that stays linked keeps its per-agent
+  // switch, and a newly linked skill starts enabled.
+  const disabledRows = await tx
+    .select({ skillId: t.agentSkills.skillId })
+    .from(t.agentSkills)
+    .where(and(eq(t.agentSkills.agentId, agent.id), eq(t.agentSkills.enabled, false)));
+  const disabled = new Set(disabledRows.map((row) => row.skillId));
   await tx.delete(t.agentSkills).where(eq(t.agentSkills.agentId, agent.id));
   if (next.length > 0) {
-    await tx.insert(t.agentSkills).values(next.map((skillId, order) => ({ agentId: agent.id, skillId, order })));
+    await tx.insert(t.agentSkills).values(
+      next.map((skillId, order) => ({ agentId: agent.id, skillId, order, enabled: !disabled.has(skillId) })),
+    );
   }
   const nextVersion = agent.version + 1;
   await tx

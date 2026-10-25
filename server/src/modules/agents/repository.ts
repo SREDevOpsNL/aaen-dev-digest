@@ -11,6 +11,7 @@ import {
   lockAgent,
   MAX_AGENT_SKILLS,
   missingWorkspaceSkills,
+  setAgentSkillEnabled,
   writeAgentSkills,
 } from '../_shared/agent-skill-links.js';
 
@@ -55,6 +56,8 @@ export interface UpdateAgent {
 export interface LinkedSkillRow {
   skill: typeof t.skills.$inferSelect;
   order: number;
+  /** The per-agent switch on the link (agent_skills.enabled). */
+  linkEnabled: boolean;
 }
 
 /** An agent with the number of skills linked to it. */
@@ -68,6 +71,8 @@ export type SetSkillsResult =
   | { kind: 'agent_not_found' }
   | { kind: 'skills_not_found'; skillIds: string[] }
   | { kind: 'limit_exceeded'; max: number };
+
+export type SetSkillEnabledResult = { kind: 'ok' } | { kind: 'agent_not_found' } | { kind: 'link_not_found' };
 
 export class AgentsRepository {
   constructor(private db: Db) {}
@@ -233,18 +238,18 @@ export class AgentsRepository {
   /** Skills linked to an agent, in `order` ascending. */
   async linkedSkills(agentId: string): Promise<LinkedSkillRow[]> {
     const rows = await this.db
-      .select({ skill: t.skills, order: t.agentSkills.order })
+      .select({ skill: t.skills, order: t.agentSkills.order, linkEnabled: t.agentSkills.enabled })
       .from(t.agentSkills)
       .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
       .where(eq(t.agentSkills.agentId, agentId))
       .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
-    return rows.map((r) => ({ skill: r.skill, order: r.order }));
+    return rows.map((r) => ({ skill: r.skill, order: r.order, linkEnabled: r.linkEnabled }));
   }
 
   /** Enabled skill bodies used by the review prompt, in deterministic link order. */
   async enabledSkillsForPrompt(agentId: string): Promise<LinkedSkillRow[]> {
     const rows = await this.db
-      .select({ skill: t.skills, order: t.agentSkills.order })
+      .select({ skill: t.skills, order: t.agentSkills.order, linkEnabled: t.agentSkills.enabled })
       .from(t.agentSkills)
       .innerJoin(t.agents, eq(t.agentSkills.agentId, t.agents.id))
       .innerJoin(
@@ -254,9 +259,10 @@ export class AgentsRepository {
           eq(t.skills.workspaceId, t.agents.workspaceId),
         ),
       )
-      .where(and(eq(t.agentSkills.agentId, agentId), eq(t.skills.enabled, true)))
+      // Both switches must be on: the skill's own (global) and the link's (per agent).
+      .where(and(eq(t.agentSkills.agentId, agentId), eq(t.skills.enabled, true), eq(t.agentSkills.enabled, true)))
       .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
-    return rows.map((row) => ({ skill: row.skill, order: row.order }));
+    return rows.map((row) => ({ skill: row.skill, order: row.order, linkEnabled: row.linkEnabled }));
   }
 
   async skillIdsForAgent(agentId: string): Promise<string[]> {
@@ -292,6 +298,23 @@ export class AgentsRepository {
     return this.relink(workspaceId, agentId, (previous) => insertSkillAt(previous, skillId, order));
   }
 
+  /**
+   * Turn the per-agent switch of one linked skill on or off, under the same
+   * agent row lock as every other link write.
+   */
+  async setSkillEnabled(
+    workspaceId: string,
+    agentId: string,
+    skillId: string,
+    enabled: boolean,
+  ): Promise<SetSkillEnabledResult> {
+    return this.db.transaction(async (tx) => {
+      const agent = await lockAgent(tx, workspaceId, agentId);
+      if (!agent) return { kind: 'agent_not_found' };
+      return (await setAgentSkillEnabled(tx, agentId, skillId, enabled)) ? { kind: 'ok' } : { kind: 'link_not_found' };
+    });
+  }
+
   /** Lock the agent, compute the next links from the current ones, validate, write. */
   private async relink(
     workspaceId: string,
@@ -311,14 +334,14 @@ export class AgentsRepository {
       await writeAgentSkills(tx, agent, previous, next);
 
       const links = await tx
-        .select({ skill: t.skills, order: t.agentSkills.order })
+        .select({ skill: t.skills, order: t.agentSkills.order, linkEnabled: t.agentSkills.enabled })
         .from(t.agentSkills)
         .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
         .where(eq(t.agentSkills.agentId, agentId))
         .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
       return {
         kind: 'ok',
-        links: links.map((row) => ({ skill: row.skill, order: row.order })),
+        links: links.map((row) => ({ skill: row.skill, order: row.order, linkEnabled: row.linkEnabled })),
       };
     });
   }

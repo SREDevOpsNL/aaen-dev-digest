@@ -268,8 +268,11 @@ export type AgentSkillLink = z.infer<typeof AgentSkillLink>;
 
 /** Ordered agent-skill link with the resolved workspace-owned skill. */
 export const AgentSkillDetail = AgentSkillLink.extend({
-  // `agent_skills` has no per-link switch. This mirrors `skill.enabled`.
+  // Mirrors `skill.enabled`, the skill's own (global) switch.
   enabled: z.boolean(),
+  // The per-agent switch on this link (`agent_skills.enabled`). A skill reaches
+  // the agent's review prompt only when both switches are on.
+  link_enabled: z.boolean(),
   skill: Skill,
 });
 export type AgentSkillDetail = z.infer<typeof AgentSkillDetail>;

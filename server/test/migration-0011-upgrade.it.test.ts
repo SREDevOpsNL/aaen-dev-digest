@@ -85,6 +85,16 @@ d('migration 0011: upgrade from 0010 with existing conventions (Testcontainers p
       SELECT id, workspace_id, repo_id, rule, evidence_path, evidence_snippet, confidence, accepted
       FROM conventions ORDER BY id`;
 
+    // An agent-skill link made before 0012 added the per-agent switch.
+    const [agent] = await sql`
+      INSERT INTO agents (workspace_id, name, provider, model, system_prompt)
+      VALUES (${ws!.id}, 'Upgrade Agent', 'openai', 'gpt-4o-mini', 'Review.') RETURNING id`;
+    const [skill] = await sql`
+      INSERT INTO skills (workspace_id, name, description, type, source, body)
+      VALUES (${ws!.id}, 'Upgrade Skill', '', 'rubric', 'manual', 'Check it.') RETURNING id`;
+    await sql`INSERT INTO agent_skills (agent_id, skill_id, "order") VALUES (${agent!.id}, ${skill!.id}, 0)`;
+    ids.link = `${agent!.id}/${skill!.id}`;
+
     // Now the real upgrade, through the same entry point `pnpm db:migrate` uses.
     await runMigrations(url);
   }, 120_000);
@@ -158,13 +168,19 @@ d('migration 0011: upgrade from 0010 with existing conventions (Testcontainers p
     });
   });
 
-  it('keeps the journal strictly ordered, ending at 0011', () => {
+  it('keeps the journal strictly ordered, with 0011 at index 11', () => {
     const entries = journal.entries;
     entries.forEach((entry, i) => {
       expect(entry.idx).toBe(i);
       if (i > 0) expect(entry.when).toBeGreaterThan(entries[i - 1]!.when);
     });
-    expect(entries.at(-1)!.tag).toBe('0011_add_convention_evidence');
+    expect(entries[11]!.tag).toBe('0011_add_convention_evidence');
+  });
+
+  it('keeps a pre-existing agent-skill link enabled once 0012 adds the per-agent switch', async () => {
+    const [agentId, skillId] = ids.link!.split('/');
+    const [link] = await sql`SELECT "order", enabled FROM agent_skills WHERE agent_id = ${agentId!} AND skill_id = ${skillId!}`;
+    expect(link).toEqual({ order: 0, enabled: true });
   });
 
   it('is a no-op when migrated again', async () => {
