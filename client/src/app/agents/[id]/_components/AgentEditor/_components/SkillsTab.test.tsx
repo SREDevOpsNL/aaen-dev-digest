@@ -5,19 +5,26 @@ import type { Agent, SkillSummary } from "@devdigest/shared";
 import messages from "../../../../../../../messages/en/agents.json";
 
 const mutate = vi.fn();
+const mutateEnabled = vi.fn();
 let pending = false;
+let linkOff = new Set<string>();
 
 const skill = (id: string, name: string, enabled = true): SkillSummary => ({
   id, name, description: `${name} guidance`, type: "rubric", source: "manual", body: "b", enabled, version: 1, evidence_files: null, agent_count: 1, used_by_count: 1,
 });
 const SKILLS = [skill("s1", "Alpha"), skill("s2", "Beta off", false), skill("s3", "Gamma"), skill("s4", "Delta")];
-const LINKS = ["s1", "s2", "s3"].map((id, order) => ({ agent_id: "ag1", skill_id: id, order, enabled: id !== "s2", skill: { id } }));
+const buildLinks = () =>
+  ["s1", "s2", "s3"].map((id, order) => ({ agent_id: "ag1", skill_id: id, order, enabled: id !== "s2", link_enabled: !linkOff.has(id), skill: { id } }));
+// One stable array per test, as react-query returns: a new array on every
+// render would re-run the tab's links effect forever.
+let linksData = buildLinks();
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/hooks/skills", () => ({
   useSkills: () => ({ data: SKILLS, isLoading: false, isError: false, refetch: vi.fn() }),
-  useAgentSkills: () => ({ data: LINKS, isLoading: false, isError: false, refetch: vi.fn() }),
+  useAgentSkills: () => ({ data: linksData, isLoading: false, isError: false, refetch: vi.fn() }),
   useSetAgentSkills: () => ({ mutate, isPending: pending }),
+  useSetAgentSkillEnabled: () => ({ mutate: mutateEnabled, isPending: false }),
 }));
 
 import { SkillsTab } from "./SkillsTab";
@@ -44,7 +51,10 @@ function dragOnto(fromId: string, toId: string) {
 
 beforeEach(() => {
   mutate.mockReset();
+  mutateEnabled.mockReset();
   pending = false;
+  linkOff = new Set();
+  linksData = buildLinks();
 });
 afterEach(cleanup);
 
@@ -64,6 +74,37 @@ describe("Agent Skills tab", () => {
     expect(mutate).toHaveBeenLastCalledWith({ agentId: "ag1", skillIds: ["s1", "s2", "s3", "s4"] }, expect.anything());
     fireEvent.click(screen.getByRole("switch", { name: "Alpha attached to this agent" }));
     expect(mutate).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives each linked skill a per-agent enabled switch, and unlinked skills none", () => {
+    renderTab();
+    for (const name of ["Alpha", "Beta off", "Gamma"]) {
+      expect(screen.getByRole("switch", { name: `Use ${name} in this agent's reviews` })).toHaveAttribute("aria-checked", "true");
+    }
+    expect(screen.queryByRole("switch", { name: "Use Delta in this agent's reviews" })).not.toBeInTheDocument();
+  });
+
+  it("the per-agent switch updates only that link and never relinks", () => {
+    renderTab();
+    fireEvent.click(screen.getByRole("switch", { name: "Use Gamma in this agent's reviews" }));
+    expect(mutateEnabled).toHaveBeenCalledWith({ agentId: "ag1", skillId: "s3", enabled: false });
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("a skill switched off for this agent is marked, not draggable, and takes no drop", () => {
+    linkOff = new Set(["s3"]);
+    linksData = buildLinks();
+    renderTab();
+    expect(screen.getByRole("switch", { name: "Use Gamma in this agent's reviews" })).toHaveAttribute("aria-checked", "false");
+    expect(row("s3")).toHaveTextContent("off for this agent");
+    expect(row("s3")).toHaveAttribute("draggable", "false");
+    expect(row("s1")).toHaveAttribute("draggable", "true");
+    dragOnto("s1", "s3");
+    dragOnto("s3", "s1");
+    expect(mutate).not.toHaveBeenCalled();
+    // Switching it back on asks for enabled: true.
+    fireEvent.click(screen.getByRole("switch", { name: "Use Gamma in this agent's reviews" }));
+    expect(mutateEnabled).toHaveBeenCalledWith({ agentId: "ag1", skillId: "s3", enabled: true });
   });
 
   it("only linked, globally enabled skills are draggable", () => {

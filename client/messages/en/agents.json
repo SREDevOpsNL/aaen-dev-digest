@@ -93,7 +93,7 @@
     "enabledCount": "{linked} of {total} enabled",
     "attachedCount": "{linked} / {max} attached",
     "filterPlaceholder": "Filter skills…",
-    "orderHint": "Attach up to {max} skills. Earlier skills appear earlier in the assembled prompt: drag an enabled skill to reorder, or use the arrows.",
+    "orderHint": "Attach up to {max} skills. Earlier skills appear earlier in the assembled prompt: drag an enabled skill to reorder, or use the arrows. A skill switched off for this agent stays attached but is left out of its prompt.",
     "limitReached": "This agent already has the maximum of {max} skills attached.",
     "loadError": "Could not load skills.",
     "emptyTitle": "No skills yet",
@@ -103,6 +103,7 @@
     "saving": "Saving…",
     "autoSaved": "Changes save automatically.",
     "disabledGlobally": "disabled globally",
+    "disabledForAgent": "off for this agent",
     "moveUp": "Move {name} up",
     "moveDown": "Move {name} down",
     "type": {
@@ -112,7 +113,8 @@
       "custom": "custom"
     },
     "dragHint": "Drag to reorder",
-    "linkLabel": "attached to this agent"
+    "linkLabel": "attached to this agent",
+    "enabledLabel": "Use {name} in this agent's reviews"
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."

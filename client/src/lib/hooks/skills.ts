@@ -125,6 +125,18 @@ export function useAgentSkills(agentId: string) {
   });
 }
 
+/** Turn one linked skill on or off for one agent (the per-agent switch). */
+export function useSetAgentSkillEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, skillId, enabled }: { agentId: string; skillId: string; enabled: boolean }) =>
+      api.patch<AgentSkillDetail[]>(`/agents/${agentId}/skills/${skillId}`, { enabled }),
+    onSuccess: (links, variables) => {
+      queryClient.setQueryData(["agent-skills", variables.agentId], links);
+    },
+  });
+}
+
 export function useSetAgentSkills() {
   const queryClient = useQueryClient();
   return useMutation({

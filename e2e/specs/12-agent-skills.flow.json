@@ -1,6 +1,6 @@
 {
   "name": "Agent Skills tab: link toggles, category labels and drag handles",
-  "description": "Read-only: opens the seeded Test Quality Reviewer's Skills tab and checks that every skill has a link toggle (role switch) and a category label, that the four linked, enabled skills are draggable while unlinked ones are not, and that the arrow buttons remain. Nothing is dragged, linked or saved, and no model is called.",
+  "description": "Read-only: opens the seeded Test Quality Reviewer's Skills tab and checks that every skill has a link toggle (role switch) and a category label, that each linked skill also has a per-agent enabled switch, that the four linked, enabled skills are draggable while unlinked ones are not, and that the arrow buttons remain. Nothing is dragged, linked or saved, and no model is called.",
   "steps": [
     { "cmd": ["open", "{BASE}/agents"], "label": "load the Agents page" },
     { "cmd": ["wait", "--load", "networkidle"], "label": "agents fetch settles" },
@@ -10,6 +10,7 @@
     { "cmd": ["wait", "--text", "4 / 4 attached"], "label": "four skills are attached" },
     { "cmd": ["wait", "--text", "drag an enabled skill to reorder"], "label": "the hint mentions drag-and-drop" },
     { "cmd": ["eval", "(() => { const rows = [...document.querySelectorAll('[data-testid^=agent-skill-]')]; const on = rows.filter((r) => r.querySelector('[role=switch]')?.getAttribute('aria-checked') === 'true'); return rows.length >= 4 && rows.every((r) => r.querySelector('[role=switch]')) && on.length === 4 && on.every((r) => r.getAttribute('draggable') === 'true') && rows.filter((r) => !on.includes(r)).every((r) => r.getAttribute('draggable') === 'false') && !document.querySelector('input[type=checkbox]'); })()"], "assert": { "stdoutIncludes": "true" }, "label": "every skill has a toggle; exactly the linked, enabled ones are draggable" },
+    { "cmd": ["eval", "(() => { const rows = [...document.querySelectorAll('[data-testid^=agent-skill-]')]; const linked = rows.filter((r) => r.querySelector('[role=switch]')?.getAttribute('aria-checked') === 'true'); const perAgent = (r) => [...r.querySelectorAll('[role=switch]')].slice(1); return linked.length === 4 && linked.every((r) => perAgent(r).length === 1 && perAgent(r)[0].getAttribute('aria-checked') === 'true') && rows.filter((r) => !linked.includes(r)).every((r) => perAgent(r).length === 0); })()"], "label": "each linked skill also has its per-agent enabled switch, on; unlinked skills have none", "assert": { "stdoutIncludes": "true" } },
     { "cmd": ["wait", "--text", "rubric"], "label": "category labels render" },
     { "cmd": ["find", "role", "button", "hover", "--name", "Move Behavioral Coverage down"], "label": "arrow buttons remain for keyboard reordering" }
   ]

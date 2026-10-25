@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Badge, Button, EmptyState, ErrorState, Icon, Skeleton, Toggle } from "@devdigest/ui";
 import type { Agent, SkillSummary } from "@devdigest/shared";
-import { useAgentSkills, useSetAgentSkills, useSkills } from "@/lib/hooks/skills";
+import { useAgentSkills, useSetAgentSkillEnabled, useSetAgentSkills, useSkills } from "@/lib/hooks/skills";
 import { MAX_AGENT_SKILLS, SKILL_TYPE_COLORS } from "@/app/skills/constants";
 import { skillStyles as s } from "@/app/skills/styles";
 import { moveLinkedSkill } from "../helpers";
@@ -26,6 +26,8 @@ export function SkillsTab({ agent }: { agent: Agent }) {
   const skills = useSkills();
   const links = useAgentSkills(agent.id);
   const save = useSetAgentSkills();
+  const setEnabled = useSetAgentSkillEnabled();
+  const busy = save.isPending || setEnabled.isPending;
   const [query, setQuery] = React.useState("");
   const [linkedIds, setLinkedIds] = React.useState<string[]>([]);
   const [limitReached, setLimitReached] = React.useState(false);
@@ -48,7 +50,7 @@ export function SkillsTab({ agent }: { agent: Agent }) {
   };
 
   const toggle = (id: string, checked: boolean) => {
-    if (save.isPending) return;
+    if (busy) return;
     if (!checked) return persist(linkedIds.filter((linkedId) => linkedId !== id));
     if (linkedIds.length >= MAX_AGENT_SKILLS) {
       setLimitReached(true);
@@ -58,7 +60,7 @@ export function SkillsTab({ agent }: { agent: Agent }) {
   };
 
   const move = (id: string, direction: -1 | 1) => {
-    if (save.isPending) return;
+    if (busy) return;
     const from = linkedIds.indexOf(id);
     const to = from + direction;
     if (from < 0 || to < 0 || to >= linkedIds.length) return;
@@ -72,7 +74,7 @@ export function SkillsTab({ agent }: { agent: Agent }) {
     const fromId = dragId;
     setDragId(undefined);
     setOverId(undefined);
-    if (!fromId || save.isPending) return;
+    if (!fromId || busy) return;
     const next = moveLinkedSkill(linkedIds, fromId, targetId);
     if (next !== linkedIds) persist([...next]);
   };
@@ -85,6 +87,8 @@ export function SkillsTab({ agent }: { agent: Agent }) {
     return <EmptyState icon="Sparkles" title={t("skills.emptyTitle")} body={t("skills.emptyBody")} cta={t("skills.emptyCta")} onCta={() => router.push("/skills")} />;
   }
 
+  // The per-agent switch of each link; a skill linked a moment ago starts on.
+  const linkEnabled = new Map((links.data ?? []).map((link) => [link.skill_id, link.link_enabled]));
   const normalized = query.trim().toLowerCase();
   const rows = orderedSkills(skills.data, linkedIds).filter((skill) =>
     !normalized || skill.name.toLowerCase().includes(normalized) || skill.description.toLowerCase().includes(normalized),
@@ -106,9 +110,11 @@ export function SkillsTab({ agent }: { agent: Agent }) {
         {rows.map((skill) => {
           const linked = linkedIds.includes(skill.id);
           const index = linkedIds.indexOf(skill.id);
-          // Only a linked, globally enabled skill takes part in drag-and-drop;
-          // the arrows stay available for every linked skill (keyboard).
-          const draggable = linked && skill.enabled && !save.isPending;
+          const onForAgent = linked && (linkEnabled.get(skill.id) ?? true);
+          // Only a skill that is linked and enabled — both its own switch and this
+          // agent's — takes part in drag-and-drop; the arrows stay available for
+          // every linked skill (keyboard).
+          const draggable = onForAgent && skill.enabled && !busy;
           return (
             <div
               key={skill.id}
@@ -129,7 +135,7 @@ export function SkillsTab({ agent }: { agent: Agent }) {
               onDragEnd={() => { setDragId(undefined); setOverId(undefined); }}
               style={{
                 ...s.row,
-                opacity: skill.enabled ? (dragId === skill.id ? 0.5 : 1) : 0.6,
+                opacity: skill.enabled && (!linked || onForAgent) ? (dragId === skill.id ? 0.5 : 1) : 0.6,
                 cursor: draggable ? "grab" : undefined,
                 outline: overId === skill.id && dragId !== skill.id ? "2px dashed var(--accent)" : undefined,
               }}
@@ -143,12 +149,23 @@ export function SkillsTab({ agent }: { agent: Agent }) {
                 <span style={s.visuallyHidden}>{t("skills.linkLabel")}</span>
               </label>
               <span style={{ flex: 1, color: "var(--text-muted)", fontSize: 12 }}>{skill.description}</span>
+              {linked && (
+                <label style={{ display: "flex", alignItems: "center" }} title={t("skills.enabledLabel", { name: skill.name })}>
+                  <Toggle
+                    on={onForAgent}
+                    onChange={(on) => { if (!busy) setEnabled.mutate({ agentId: agent.id, skillId: skill.id, enabled: on }); }}
+                    size={12}
+                  />
+                  <span style={s.visuallyHidden}>{t("skills.enabledLabel", { name: skill.name })}</span>
+                </label>
+              )}
+              {linked && !onForAgent && <Badge color="var(--text-muted)">{t("skills.disabledForAgent")}</Badge>}
               {!skill.enabled && <Badge color="var(--text-muted)">{t("skills.disabledGlobally")}</Badge>}
               <Badge color={SKILL_TYPE_COLORS[skill.type]}>{t(`skills.type.${skill.type}`)}</Badge>
               {linked && (
                 <div style={{ display: "flex", gap: 5 }}>
-                  <button style={s.iconButton} disabled={save.isPending || index === 0} aria-label={t("skills.moveUp", { name: skill.name })} onClick={() => move(skill.id, -1)}><Icon.ArrowUp size={13} /></button>
-                  <button style={s.iconButton} disabled={save.isPending || index === linkedIds.length - 1} aria-label={t("skills.moveDown", { name: skill.name })} onClick={() => move(skill.id, 1)}><Icon.ArrowDown size={13} /></button>
+                  <button style={s.iconButton} disabled={busy || index === 0} aria-label={t("skills.moveUp", { name: skill.name })} onClick={() => move(skill.id, -1)}><Icon.ArrowUp size={13} /></button>
+                  <button style={s.iconButton} disabled={busy || index === linkedIds.length - 1} aria-label={t("skills.moveDown", { name: skill.name })} onClick={() => move(skill.id, 1)}><Icon.ArrowDown size={13} /></button>
                 </div>
               )}
             </div>
@@ -157,7 +174,7 @@ export function SkillsTab({ agent }: { agent: Agent }) {
       </div>
       <div style={{ ...s.actions, justifyContent: "space-between" }}>
         <Button kind="secondary" size="sm" icon="Sparkles" onClick={() => router.push("/skills")}>{t("skills.manage")}</Button>
-        <span aria-live="polite" style={s.muted}>{save.isPending ? t("skills.saving") : t("skills.autoSaved")}</span>
+        <span aria-live="polite" style={s.muted}>{busy ? t("skills.saving") : t("skills.autoSaved")}</span>
       </div>
     </div>
   );

@@ -36,6 +36,7 @@ vi.mock("../../../../../lib/hooks/skills", () => ({
     refetch: vi.fn(),
   }),
   useSetAgentSkills: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetAgentSkillEnabled: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 import { AgentEditor } from "./AgentEditor";
