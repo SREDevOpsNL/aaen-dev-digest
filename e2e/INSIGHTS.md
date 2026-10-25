@@ -22,6 +22,19 @@
 
 ## Recurring Errors & Fixes
 
+- **2026-10-25: Two stacks from one checkout share `client/.next`, and the API
+  base is compiled into it.** A hermetic run (`scripts/e2e.sh`, web :3100, API
+  :3101) next to a running `--serve` experiment stack (web :3250, API :3251)
+  recompiled the shared `.next`. The :3250 server then served pages whose
+  inlined `NEXT_PUBLIC_API_BASE` was :3101 ("Cannot reach the DevDigest engine
+  at http://localhost:3101"), even though its own environment said :3251. The
+  fix was to restart only the :3250 `next dev` after removing `client/.next`.
+  `--serve` waits only on the API process, so the API, the database and the
+  ledger were untouched. Run a hermetic suite from a separate worktree while a
+  serve stack is up. Evidence: `/proc/<pid>/environ` showed :3251 while `grep
+  -rl localhost:3101 client/.next` matched compiled pages;
+  `scripts/e2e.sh:84,212`.
+
 - **2026-10-25: Read flow data through test ids, not DOM shape, and never
   reuse a row id's prefix.** Flow 13 took a skill's name from `label > span`.
   When the Skills tab's attach switch got its own `<label>` with a hidden
