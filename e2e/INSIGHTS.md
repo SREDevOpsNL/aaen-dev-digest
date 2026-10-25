@@ -32,7 +32,7 @@
   as an extra row. A value a flow reads needs a test id outside every prefix
   that is used for matching (`skill-row-name`). Run the whole hermetic suite,
   not only the flow that names the component. Evidence:
-  `e2e/specs/13-api-contract-reviewer.flow.json`,
+  `e2e/specs/13-api-contract.flow.json`,
   `e2e/specs/12-agent-skills.flow.json`, `SkillsTab.test.tsx`; CI run
   40215740455.
 
