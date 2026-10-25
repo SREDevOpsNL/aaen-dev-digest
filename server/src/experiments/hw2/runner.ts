@@ -22,9 +22,14 @@ export interface SlotRun {
   reservationUsd: number;
   /** Frozen value in the confirmatory phase; null in exploration (the server then records, not checks). */
   expectedNonSkillFingerprint: string | null;
+  /** For the operator's prompt in Run Review mode. */
+  agentName?: string;
+  prNumber?: number;
 }
 
 interface SlotLookup {
+  /** Set when the slot was armed for a Run Review click. */
+  arm?: { state: 'armed' | 'consumed' | 'expired' | 'disarmed'; expires_at: string } | null;
   runs: Array<{
     run_id: string;
     status: string | null;
@@ -48,6 +53,14 @@ export interface RunnerDeps {
   sleep?: (ms: number) => Promise<void>;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
+  /** Recorded on every ledger event: the ledger is shared by every stack. */
+  stackId?: string;
+  /**
+   * Dispatch through the PR page's Run Review button (criteria 17–18): the
+   * runner arms the slot and the operator clicks Run Review for its agent.
+   * Absent: the runner dispatches with POST /experiments/runs.
+   */
+  viaUi?: { prompt: (message: string) => void; clickTimeoutMs: number };
 }
 
 const wait = (deps: RunnerDeps, ms: number) => (deps.sleep ?? ((t) => new Promise((r) => setTimeout(r, t))))(ms);
@@ -68,6 +81,10 @@ function terminalOf(run: SlotLookup['runs'][number]): { state: SlotState; cost: 
  */
 export async function reconcile(deps: RunnerDeps): Promise<SlotRecord[]> {
   for (const slot of deps.ledger.unresolved()) {
+    // A slot armed for a Run Review click by a runner that died may still be
+    // armed: disarm it first, so no later click can dispatch it (best effort;
+    // it also expires on its own, and the slot stays charged in full).
+    await deps.api.delete(`/experiments/slots/${slot.slot_id}/arm`, { 'x-hw2-capability': deps.capabilityToken }).catch(() => null);
     let lookup: SlotLookup;
     try {
       lookup = await deps.api.get<SlotLookup>(`/experiments/slots/${slot.slot_id}`);
@@ -143,37 +160,21 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
   const budget = fits([...deps.ledger.slots().values()], run.slot.phase, run.reservationUsd);
   if (!budget.ok) return { state: 'refused', runId: null, costUsd: 0, reason: budget.reason, infraFailure: false };
 
-  const base = { slot_id: run.slot.slot_id, phase: run.slot.phase, reservation_usd: run.reservationUsd };
-  deps.ledger.append({ ...base, state: 'reserved', detail: { condition: run.slot.condition, experiment: run.slot.experiment } });
+  const base = {
+    slot_id: run.slot.slot_id,
+    phase: run.slot.phase,
+    reservation_usd: run.reservationUsd,
+    ...(deps.stackId ? { stack_id: deps.stackId } : {}),
+  };
+  deps.ledger.append({ ...base, state: 'reserved', detail: { condition: run.slot.condition, experiment: run.slot.experiment, via: deps.viaUi ? 'run_review' : 'api' } });
 
   await deps.api.post(`/agents/${run.agentId}/skills`, { skill_ids: run.skillIds });
-  let runId: string;
-  try {
-    ({ run_id: runId } = await deps.api.post<{ run_id: string }>(
-      '/experiments/runs',
-      {
-        pr_id: run.prId,
-        agent_id: run.agentId,
-        slot_id: run.slot.slot_id,
-        experiment: run.slot.experiment,
-        condition: run.slot.condition,
-        phase: run.slot.phase,
-        manifest_fingerprint: run.manifestFingerprint,
-        reservation_usd: run.reservationUsd,
-        expected_diff_sha256: run.expectedDiffSha256,
-        expected_non_skill_fingerprint: run.expectedNonSkillFingerprint,
-      },
-      { 'x-hw2-capability': deps.capabilityToken },
-    ));
-  } catch (err) {
-    // 4xx: the server refused before creating a run (nothing dispatched). Anything else is unknown.
-    if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
-      deps.ledger.append({ ...base, state: 'refused', cost_usd: 0, detail: { http_status: err.status, reason: err.message } });
-      return { state: 'refused', runId: null, costUsd: 0, reason: err.message, infraFailure: false };
-    }
-    deps.ledger.append({ ...base, state: 'ambiguous', cost_usd: null, detail: { reason: (err as Error).message } });
-    return { state: 'ambiguous', runId: null, costUsd: null, reason: (err as Error).message, infraFailure: true };
-  }
+  // A relink keeps each link's per-agent switch, so a target skill switched
+  // off for this agent earlier would silently drop out: switch every one on.
+  for (const skillId of run.skillIds) await deps.api.patch(`/agents/${run.agentId}/skills/${skillId}`, { enabled: true });
+  const dispatched = deps.viaUi ? await dispatchViaRunReview(deps, run, base) : await dispatchDirect(deps, run, base);
+  if ('result' in dispatched) return dispatched.result;
+  const runId = dispatched.runId;
   deps.ledger.append({ ...base, state: 'dispatched', run_id: runId });
 
   const deadline = Date.now() + (deps.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS);
@@ -201,6 +202,109 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
   }
   deps.ledger.append({ ...base, state: 'ambiguous', run_id: runId, cost_usd: null, detail: { reason: 'poll timeout' } });
   return { state: 'ambiguous', runId, costUsd: null, reason: 'poll timeout', infraFailure: true };
+}
+
+type LedgerBase = { slot_id: string; phase: SlotRecord['phase']; reservation_usd: number; stack_id?: string };
+
+/** Dispatch with POST /experiments/runs. A 4xx means nothing was dispatched; anything else is unknown. */
+async function dispatchDirect(deps: RunnerDeps, run: SlotRun, base: LedgerBase): Promise<{ runId: string } | { result: SlotResult }> {
+  try {
+    const { run_id: runId } = await deps.api.post<{ run_id: string }>(
+      '/experiments/runs',
+      {
+        pr_id: run.prId,
+        agent_id: run.agentId,
+        slot_id: run.slot.slot_id,
+        experiment: run.slot.experiment,
+        condition: run.slot.condition,
+        phase: run.slot.phase,
+        manifest_fingerprint: run.manifestFingerprint,
+        reservation_usd: run.reservationUsd,
+        expected_diff_sha256: run.expectedDiffSha256,
+        expected_non_skill_fingerprint: run.expectedNonSkillFingerprint,
+      },
+      { 'x-hw2-capability': deps.capabilityToken },
+    );
+    return { runId };
+  } catch (err) {
+    // 4xx: the server refused before creating a run (nothing dispatched). Anything else is unknown.
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+      deps.ledger.append({ ...base, state: 'refused', cost_usd: 0, detail: { http_status: err.status, reason: err.message } });
+      return { result: { state: 'refused', runId: null, costUsd: 0, reason: err.message, infraFailure: false } };
+    }
+    deps.ledger.append({ ...base, state: 'ambiguous', cost_usd: null, detail: { reason: (err as Error).message } });
+    return { result: { state: 'ambiguous', runId: null, costUsd: null, reason: (err as Error).message, infraFailure: true } };
+  }
+}
+
+/**
+ * Run Review mode: arm the slot, ask the operator to click Run Review for its
+ * agent on the PR page, and wait for the run that click starts. A slot that
+ * was never dispatched is `refused` (zero cost) only when the server shows it
+ * can no longer dispatch: no run, and its arm disarmed, expired or never
+ * made. Anything the runner cannot establish is `ambiguous`.
+ */
+async function dispatchViaRunReview(deps: RunnerDeps, run: SlotRun, base: LedgerBase): Promise<{ runId: string } | { result: SlotResult }> {
+  const ui = deps.viaUi!;
+  const slotPath = `/experiments/slots/${run.slot.slot_id}`;
+  const headers = { 'x-hw2-capability': deps.capabilityToken };
+  try {
+    const armed = await deps.api.post<{ armed_until: string }>(
+      `${slotPath}/arm`,
+      {
+        pr_id: run.prId,
+        agent_id: run.agentId,
+        experiment: run.slot.experiment,
+        condition: run.slot.condition,
+        phase: run.slot.phase,
+        manifest_fingerprint: run.manifestFingerprint,
+        reservation_usd: run.reservationUsd,
+        expected_diff_sha256: run.expectedDiffSha256,
+        expected_non_skill_fingerprint: run.expectedNonSkillFingerprint,
+      },
+      headers,
+    );
+    ui.prompt(
+      `Slot ${run.slot.slot_id} is armed until ${armed.armed_until}: open PR #${run.prNumber ?? '?'} and click Run Review for "${run.agentName ?? run.agentId}" once.`,
+    );
+  } catch (err) {
+    // 4xx: the server refused to arm it, so nothing can dispatch.
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+      deps.ledger.append({ ...base, state: 'refused', cost_usd: 0, detail: { http_status: err.status, reason: err.message } });
+      return { result: { state: 'refused', runId: null, costUsd: 0, reason: err.message, infraFailure: false } };
+    }
+    return settleUnclicked(deps, run, base, `arm failed: ${(err as Error).message}`);
+  }
+
+  const deadline = Date.now() + ui.clickTimeoutMs;
+  while (Date.now() < deadline) {
+    await wait(deps, deps.pollIntervalMs ?? 1_000);
+    const lookup = await deps.api.get<SlotLookup>(slotPath, deadline - Date.now()).catch(() => null);
+    const found = lookup?.runs[0];
+    if (found) return { runId: found.run_id };
+    const state = lookup?.arm?.state;
+    if (lookup && (state === 'expired' || state === 'disarmed')) {
+      deps.ledger.append({ ...base, state: 'refused', cost_usd: 0, detail: { reason: `arm ${state} without a Run Review click` } });
+      return { result: { state: 'refused', runId: null, costUsd: 0, reason: `arm ${state} without a Run Review click`, infraFailure: false } };
+    }
+  }
+  return settleUnclicked(deps, run, base, 'no Run Review click before the runner deadline');
+}
+
+/** Disarm, then decide from what the server shows; never assume a slot did not dispatch. */
+async function settleUnclicked(deps: RunnerDeps, run: SlotRun, base: LedgerBase, reason: string): Promise<{ runId: string } | { result: SlotResult }> {
+  const slotPath = `/experiments/slots/${run.slot.slot_id}`;
+  await deps.api.delete(`${slotPath}/arm`, { 'x-hw2-capability': deps.capabilityToken }).catch(() => null);
+  const lookup = await deps.api.get<SlotLookup>(slotPath).catch(() => null);
+  // A click that landed at the last moment started a run: follow it like any other.
+  if (lookup?.runs[0]) return { runId: lookup.runs[0].run_id };
+  const state = lookup?.arm?.state ?? null;
+  if (lookup && lookup.runs.length === 0 && (state === null || state === 'disarmed' || state === 'expired')) {
+    deps.ledger.append({ ...base, state: 'refused', cost_usd: 0, detail: { reason, arm_state: state } });
+    return { result: { state: 'refused', runId: null, costUsd: 0, reason, infraFailure: false } };
+  }
+  deps.ledger.append({ ...base, state: 'ambiguous', cost_usd: null, detail: { reason, arm_state: state, lookup: lookup ? 'ok' : 'failed' } });
+  return { result: { state: 'ambiguous', runId: null, costUsd: null, reason, infraFailure: true } };
 }
 
 export interface StopRules {

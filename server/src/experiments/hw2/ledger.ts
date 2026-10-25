@@ -23,6 +23,8 @@ export interface LedgerEvent {
   /** Provider-reported cost when known; null = unknown. */
   cost_usd?: number | null;
   detail?: Record<string, unknown>;
+  /** The stack that recorded the event (the ledger is shared by every stack). */
+  stack_id?: string;
 }
 
 export interface SlotRecord {

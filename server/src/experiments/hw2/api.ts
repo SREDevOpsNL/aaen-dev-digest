@@ -25,7 +25,7 @@ export class ExperimentApi {
   ) {}
 
   /** `timeoutMs` can only shorten the client's bound, e.g. to what is left of a caller's deadline. */
-  async request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, headers: Record<string, string> = {}, timeoutMs?: number): Promise<T> {
+  async request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown, headers: Record<string, string> = {}, timeoutMs?: number): Promise<T> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
       headers: { ...headers, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
@@ -49,6 +49,9 @@ export class ExperimentApi {
   }
   put<T>(path: string, body: unknown) {
     return this.request<T>('PUT', path, body);
+  }
+  patch<T>(path: string, body: unknown) {
+    return this.request<T>('PATCH', path, body);
   }
   delete<T>(path: string, headers: Record<string, string> = {}) {
     return this.request<T>('DELETE', path, undefined, headers);

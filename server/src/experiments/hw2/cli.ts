@@ -3,7 +3,8 @@
  *
  *   pnpm exec tsx src/experiments/hw2/cli.ts <command> [--flag value …]
  *
- * Unpaid: endpoints · check · plan · manifest · reconcile · report
+ * Unpaid: endpoints · check · plan · manifest · reconcile · report · revoke ·
+ *   key-usage --opening · settle
  * Authorization: authorize (writes the server-side spending capability for one
  *   phase; only after that phase's gate was explicitly authorized)
  * Paid:   run (refuses unless --authorized-gate matches the phase, --confirm-spend
@@ -16,7 +17,7 @@
  * The full procedure is in docs/plans/HW2-experiment-operator-guide.md.
  */
 import { randomBytes } from 'node:crypto';
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -27,6 +28,7 @@ import { ExperimentApi } from './api.js';
 import { CAPS, scheduleFits, spent } from './budget.js';
 import { containerLabels, identityProblems, type StackIdentity } from './identity.js';
 import { Ledger } from './ledger.js';
+import { KeyUsageLog, keyUsageVerdict, readKeyUsage, settleKeyUsage } from './key-usage.js';
 import { EXPERIMENT_FIXTURE, buildManifest, fixtureDiffSha, manifestFingerprint, type Manifest } from './manifest.js';
 import { buildReport, renderReport, type SlotRunData } from './report.js';
 import type { ExpectedRule, FindingLike } from './rules.js';
@@ -69,7 +71,13 @@ export function assertPaidAuthorization(flags: Flags): Phase {
   return phase;
 }
 
-export const experimentDir = (stackId: string, home = homedir()) => join(home, '.devdigest', 'hw2-experiments', stackId);
+/**
+ * Everything the runner keeps lives under one root shared by every stack: the
+ * ledger, the runner lock, the authorization log and the key-usage readings.
+ * The key's budget is shared, so its accounting and its locks are too.
+ */
+export const experimentsRoot = (home = homedir()) => join(home, '.devdigest', 'hw2-experiments');
+export const experimentDir = (stackId: string, home = homedir()) => join(experimentsRoot(home), stackId);
 const tokenFile = (stackId: string, home?: string) => join(experimentDir(stackId, home), 'capability.token');
 
 /** Create `path` exclusively (mode 0600): fails if anything, a symlink included, is already there. */
@@ -110,7 +118,7 @@ function otherLiveCapabilities(stackId: string, home?: string): string[] {
  * - one `authorize` at a time across all stacks (`authorize.lock`, created
  *   exclusively and removed afterwards; a leftover one is refused, not stolen).
  */
-export function writeCapability(args: { stackId: string; phase: Phase; budgetUsd: number; hours: number; home?: string; now?: Date }): ExperimentCapability {
+export function writeCapability(args: { stackId: string; phase: Phase; budgetUsd: number; hours: number; home?: string; now?: Date; ceilingUsd?: number }): ExperimentCapability {
   if (!(args.budgetUsd > 0) || args.budgetUsd > EXPERIMENT_CAPS[args.phase]) {
     throw new Error(`--budget must be positive and at most $${EXPERIMENT_CAPS[args.phase]} for ${args.phase}`);
   }
@@ -131,9 +139,22 @@ export function writeCapability(args: { stackId: string; phase: Phase; budgetUsd
   }
 }
 
-function writeCapabilityLocked(args: { stackId: string; phase: Phase; budgetUsd: number; hours: number; home?: string; now?: Date }, dir: string): ExperimentCapability {
+function writeCapabilityLocked(args: { stackId: string; phase: Phase; budgetUsd: number; hours: number; home?: string; now?: Date; ceilingUsd?: number }, dir: string): ExperimentCapability {
   const others = otherLiveCapabilities(args.stackId, args.home);
   if (others.length > 0) throw new Error(`Another stack holds a live capability (${others.join(', ')}): its spend is in no ledger yet; nothing was authorized`);
+  // The shared ledger: a slot still reserved or dispatched may have spent
+  // already, so nothing new is authorized until it is reconciled.
+  const ledger = new Ledger(experimentsRoot(args.home));
+  const unresolved = ledger.unresolved();
+  if (unresolved.length > 0) {
+    throw new Error(`Reconcile first: ${unresolved.map((slot) => slot.slot_id).join(', ')} are reserved or dispatched; nothing was authorized`);
+  }
+  // The approved ceiling bounds everything charged so far (all stacks, all
+  // phases, unknown costs at their full reservation) plus this budget.
+  const charged = spent(ledger.slots().values());
+  if (args.ceilingUsd !== undefined && charged + args.budgetUsd > args.ceilingUsd + 1e-12) {
+    throw new Error(`Ceiling: $${charged.toFixed(8)} already charged + $${args.budgetUsd} > the approved $${args.ceilingUsd}; nothing was authorized`);
+  }
   const token = randomBytes(32).toString('hex');
   const now = args.now ?? new Date();
   const capability: ExperimentCapability = {
@@ -159,7 +180,54 @@ function writeCapabilityLocked(args: { stackId: string; phase: Phase; budgetUsd:
     rmSync(capPath, { force: true }); // the token was not written: the capability must not stay usable
     throw new Error(`${tokPath} already exists (or is a symlink): keep the old token first (guide, X2 step 4); nothing was authorized`);
   }
+  appendAuthorizationLog(args.home, { event: 'authorized', stack_id: args.stackId, phase: args.phase, budget_usd: args.budgetUsd, ceiling_usd: args.ceilingUsd ?? null, charged_before_usd: charged, expires_at: capability.expires_at });
   return capability;
+}
+
+/** Append-only record of every authorization and revocation (fsync per line). */
+function appendAuthorizationLog(home: string | undefined, entry: Record<string, unknown>): void {
+  const root = experimentsRoot(home);
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const fd = openSync(join(root, 'authorizations.jsonl'), 'a', 0o600);
+  try {
+    writeSync(fd, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Revoke a stack's capability (both files). Refused while the shared ledger
+ * holds a reserved or dispatched slot, which may still be spending: reconcile
+ * first. A capability authorized just before a crash, with no slot reserved
+ * under it, can always be revoked.
+ */
+export function revokeCapability(args: { stackId: string; home?: string }): { removed: string[] } {
+  const unresolved = new Ledger(experimentsRoot(args.home)).unresolved();
+  if (unresolved.length > 0) {
+    throw new Error(`Reconcile first: ${unresolved.map((slot) => slot.slot_id).join(', ')} are reserved or dispatched; the capability stays`);
+  }
+  const removed: string[] = [];
+  for (const path of [join(experimentDir(args.stackId, args.home), 'capability.json'), tokenFile(args.stackId, args.home)]) {
+    try {
+      lstatSync(path);
+      rmSync(path, { force: true });
+      removed.push(path);
+    } catch {
+      /* not present */
+    }
+  }
+  appendAuthorizationLog(args.home, { event: 'revoked', stack_id: args.stackId, removed: removed.length });
+  return { removed };
+}
+
+/** The dedicated experiment key, read from its file only (never from the environment, never printed). */
+function experimentKey(flags: Flags): string {
+  const path = typeof flags.secrets === 'string' ? flags.secrets : join(experimentsRoot(), 'secrets.json');
+  const key = (JSON.parse(readFileSync(path, 'utf8')) as { OPENROUTER_API_KEY?: unknown }).OPENROUTER_API_KEY;
+  if (typeof key !== 'string' || !key) throw new Error(`No OPENROUTER_API_KEY in ${path}`);
+  return key;
 }
 
 interface Stack {
@@ -447,6 +515,8 @@ async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, re
         slot,
         prId: pr,
         agentId: agent.id,
+        agentName: agent.name,
+        prNumber: fixture.number,
         skillIds: slot.condition === 'with' ? [target.id] : [],
         manifestFingerprint: fingerprint,
         expectedDiffSha256: frozen?.fixtures.find((f) => f.number === fixture.number)?.diff_sha256 ?? (await fixtureDiffSha(fixture)),
@@ -526,16 +596,66 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
     case 'authorize': {
       const phase = assertPaidAuthorization(flags);
       const stack = await verifiedStack(flags);
-      const capability = writeCapability({ stackId: stack.stackId, phase, budgetUsd: Number(need(flags, 'budget')), hours: Number(flags.hours ?? 12) });
+      const capability = writeCapability({
+        stackId: stack.stackId,
+        phase,
+        budgetUsd: Number(need(flags, 'budget')),
+        hours: Number(flags.hours ?? 12),
+        // The approved cumulative ceiling (USD) for everything charged so far plus this budget.
+        ceilingUsd: Number(need(flags, 'ceiling')),
+      });
       log(`capability for ${phase} (Gate ${capability.gate}) on ${stack.stackId}: budget $${capability.budget_usd}, expires ${capability.expires_at}`);
+      return;
+    }
+    case 'revoke': {
+      const { removed } = revokeCapability({ stackId: need(flags, 'stack') });
+      log(`revoked ${need(flags, 'stack')}: removed ${removed.length} file(s)`);
+      return;
+    }
+    case 'key-usage': {
+      if (!flags.opening) throw new Error('key-usage records only the opening reading: pass --opening');
+      const usage = new KeyUsageLog(experimentsRoot());
+      if (usage.opening()) throw new Error(`An opening reading is already recorded in ${usage.file}`);
+      if (new Ledger(experimentsRoot()).slots().size > 0) throw new Error('The ledger already holds slots: the opening reading must come before the first paid slot');
+      const reading = await readKeyUsage(experimentKey(flags));
+      usage.append({ kind: 'opening', ...reading });
+      log(`opening key usage $${reading.usage.toFixed(8)} (limit ${reading.limit ?? 'none'}, remaining ${reading.limit_remaining ?? 'n/a'})`);
+      return;
+    }
+    case 'settle': {
+      const usage = new KeyUsageLog(experimentsRoot());
+      const opening = usage.opening();
+      if (!opening) throw new Error('No opening key-usage reading: nothing to settle against');
+      const slots = [...new Ledger(experimentsRoot()).slots().values()];
+      const confirmed = slots.reduce((sum, slot) => sum + (slot.cost_usd ?? 0), 0);
+      const conservative = spent(slots);
+      const key = experimentKey(flags);
+      const result = await settleKeyUsage({
+        read: () => readKeyUsage(key),
+        stableReads: Number(flags.reads ?? 3),
+        intervalMs: Number(flags['interval-s'] ?? 30) * 1000,
+        windowMs: Number(flags['window-s'] ?? 600) * 1000,
+      });
+      if (result.state === 'pending' || !result.reading) {
+        usage.append({ kind: 'settlement', usage: result.reading?.usage ?? NaN, limit: result.reading?.limit ?? null, limit_remaining: result.reading?.limit_remaining ?? null, detail: { state: 'pending', confirmed, conservative } });
+        log(`PENDING: key usage did not settle within the window (${result.reads} reads); not a pass`);
+        process.exitCode = 3;
+        return;
+      }
+      const verdict = keyUsageVerdict({ opening: opening.usage, observed: result.reading.usage, confirmed, conservative });
+      usage.append({ kind: 'settlement', ...result.reading, detail: { state: verdict.ok ? 'pass' : 'fail', confirmed, conservative, reason: verdict.reason } });
+      log(`${verdict.ok ? 'PASS' : 'FAIL'}: ${verdict.reason}`);
+      if (!verdict.ok) process.exitCode = 2;
       return;
     }
     case 'reconcile': {
       const stack = await verifiedStack(flags);
-      const ledger = new Ledger(experimentDir(stack.stackId));
+      const ledger = new Ledger(experimentsRoot());
       ledger.acquire({ pid: process.pid, stackId: stack.stackId });
       try {
-        await reconcile({ api: stack.api, ledger, log, capabilityToken: '' });
+        // The token, when kept, lets reconciliation disarm a slot a dead runner left armed.
+        const token = existsSync(tokenFile(stack.stackId)) ? readFileSync(tokenFile(stack.stackId), 'utf8').trim() : '';
+        await reconcile({ api: stack.api, ledger, log, capabilityToken: token, stackId: stack.stackId });
       } finally {
         ledger.release();
       }
@@ -549,10 +669,21 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       }
       if (!existsSync(tokenFile(stack.stackId))) throw new Error(`No spending capability for ${stack.stackId}; run \`authorize\` after the gate is authorized`);
       const capabilityToken = readFileSync(tokenFile(stack.stackId), 'utf8').trim();
-      const ledger = new Ledger(experimentDir(stack.stackId));
+      if (!new KeyUsageLog(experimentsRoot()).opening()) {
+        throw new Error('No opening key-usage reading: run `key-usage --opening` before the first paid slot');
+      }
+      const ledger = new Ledger(experimentsRoot());
       ledger.acquire({ pid: process.pid, stackId: stack.stackId });
       try {
-        const deps = { api: stack.api, ledger, log, capabilityToken };
+        const deps = {
+          api: stack.api,
+          ledger,
+          log,
+          capabilityToken,
+          stackId: stack.stackId,
+          // --via-ui: dispatch through the PR page's Run Review button (criteria 17–18).
+          ...(flags['via-ui'] ? { viaUi: { prompt: log, clickTimeoutMs: Number(flags['click-timeout-s'] ?? 540) * 1000 } } : {}),
+        };
         await reconcile(deps);
         let runs: SlotRun[];
         if (phase === 'confirmatory') {
@@ -591,7 +722,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       const frozen = preregisteredManifest<Manifest>(need(flags, 'prereg'), root);
       if (!frozen.stack.providerName) throw new Error('The pre-registration has no frozen serving-provider name');
       if (!frozen.stack.servedModel) throw new Error('The pre-registration has no frozen served model');
-      const ledger = new Ledger(experimentDir(stack.stackId));
+      const ledger = new Ledger(experimentsRoot());
       const { prId } = await lookupIds(stack.api);
       const runs = new Map<string, SlotRunData | null>();
       for (const slot of frozen.schedule.slots) {

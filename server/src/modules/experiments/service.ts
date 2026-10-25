@@ -139,7 +139,7 @@ export class ExperimentsService {
       const targets = await this.reviews.resolveTargets(workspaceId, { agentId: input.agent_id });
       if (targets.length !== 1) throw new ValidationError('An armed slot needs exactly one agent');
       const { expires_at } = this.container.experimentArms.arm(
-        { slotId: input.slot_id, workspaceId, prId: input.pr_id, agentId: input.agent_id, request: input },
+        { slotId: input.slot_id, workspaceId, prId: input.pr_id, agentId: input.agent_id, request: { input, capabilityToken } },
         () => gate.close(input.slot_id),
       );
       return { slot_id: input.slot_id, armed_until: expires_at };
@@ -179,8 +179,18 @@ export class ExperimentsService {
       }
       return null;
     }
-    const input = armed.request as SlotInput;
+    const { input, capabilityToken } = armed.request as { input: SlotInput; capabilityToken: string | undefined };
     try {
+      // The capability is checked again at the click: one revoked or expired
+      // since the slot was armed refuses the dispatch.
+      const config = this.config();
+      const problem = capabilityProblem(this.readCapability(config.capabilityPath), {
+        stackId: config.stackId,
+        phase: input.phase,
+        token: capabilityToken,
+        now: new Date(),
+      });
+      if (problem) throw new AppError('experiment_not_authorized', `Armed slot ${input.slot_id} refused at the click: ${problem}`, 403);
       const runId = await this.dispatch(workspaceId, input, targets, logger);
       return { run_id: runId, slot_id: input.slot_id };
     } catch (err) {

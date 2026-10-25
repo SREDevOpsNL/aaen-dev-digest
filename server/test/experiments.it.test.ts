@@ -546,6 +546,24 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
       expect((await lookup(slot)).runs).toHaveLength(0);
     });
 
+    it('re-checks the capability at the click: one revoked after arming refuses the dispatch', async () => {
+      const slot = nextSlot();
+      expect((await arm(slot)).statusCode).toBe(200);
+      const capDir = join(capHome, '.devdigest', 'hw2-experiments', 'hw2f-itest1');
+      rmSync(join(capDir, 'capability.json'), { force: true }); // revoked by the operator
+      const before = modelCalls();
+      try {
+        const clicked = await click(apiAgent);
+        expect(clicked.statusCode).toBe(403);
+        expect(clicked.json().error.message).toMatch(/refused at the click/);
+        expect(modelCalls()).toBe(before);
+        expect((await identity())).toMatchObject({ armed_slot: null, in_flight_slot: null });
+        expect((await lookup(slot)).runs).toHaveLength(0);
+      } finally {
+        authorize('exploration');
+      }
+    });
+
     it('an armed slot that is not clicked expires, never dispatches, and frees the gate', async () => {
       const arms = app.container.experimentArms;
       const ttl = arms.ttlMs;
