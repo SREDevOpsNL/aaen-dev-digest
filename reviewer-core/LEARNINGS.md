@@ -101,7 +101,7 @@ correction. Genuinely cross-package findings belong in
   Poll the lookup and the key with a bounded timeout and reconcile against the
   previous total plus the ledger charge. Treat a 429 without a generation id
   as unknown cost: never retry it, and read the attempt's `errorDetail`
-  instead. Evidence: `docs/plans/HW2-gate3-plan.md` (Execution log), and the
+  instead. Evidence: `docs/plans/HW2-gate3-plan.md` on `main` (Execution log), and the
   stack's evidence outside the repository
   (`~/.devdigest/hw2-experiments/hw2f-f53ed971/gate3-slot1/`, `gate3-slot2/`).
 

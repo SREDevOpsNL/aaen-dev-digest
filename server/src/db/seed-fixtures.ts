@@ -7,7 +7,7 @@
  * keyword and do not hint at the defect.
  *
  * The content is a draft until the experiment pre-registration freezes it
- * (docs/plans/HW2-experiment-preregistration.md). Demo PR #3 and PR #482 are
+ * (see docs/homework/L02/EXPERIMENTS.md). Demo PR #3 and PR #482 are
  * not touched.
  */
 export interface FixtureFile {

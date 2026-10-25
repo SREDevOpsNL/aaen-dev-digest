@@ -68,7 +68,7 @@ export type AppConfig = {
   /**
    * HW2 controlled-experiment mode, or null (the default). Set only on a
    * disposable experiment stack (`scripts/e2e.sh --serve`); see
-   * `docs/plans/HW2-experiment-operator-guide.md`.
+   * `docs/homework/L02/EXPERIMENTS.md`.
    */
   experiment: ExperimentConfig | null;
 };

@@ -154,7 +154,7 @@ correction. Repo-intel remains server-scoped;
   - Check the corrected block against the runner's own fold as an oracle: one
     `Ledger(dir).slots()` per stack, then `spent()`.
 
-  Evidence: `docs/plans/HW2-experiment-operator-guide.md` ("If stack E stops
+  Evidence: `docs/plans/HW2-experiment-operator-guide.md` on `main` ("If stack E stops
   unexpectedly", step 3), `server/src/experiments/hw2/ledger.ts`
   (`Ledger.slots`), and a hermetic check of 23 assertions over every ledger
   order. It ran on synthetic ledgers and on read-only copies of the real ones,

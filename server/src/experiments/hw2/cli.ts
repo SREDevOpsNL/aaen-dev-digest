@@ -14,7 +14,7 @@
  *   manifest equals the one recomputed now). The server checks the capability,
  *   phase and budget again on every slot.
  *
- * The full procedure is in docs/plans/HW2-experiment-operator-guide.md.
+ * The full procedure is in docs/homework/L02/EXPERIMENTS.md.
  */
 import { randomBytes } from 'node:crypto';
 import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
@@ -790,7 +790,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       return;
     }
     default:
-      log('commands: endpoints | check | preview | phase0-check | plan | manifest | authorize | reconcile | run | report (see docs/plans/HW2-experiment-operator-guide.md)');
+      log('commands: endpoints | check | preview | phase0-check | plan | manifest | authorize | revoke | key-usage | settle | reconcile | run | report (see docs/homework/L02/EXPERIMENTS.md)');
   }
 }
 

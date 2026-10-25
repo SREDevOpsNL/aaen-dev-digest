@@ -106,7 +106,7 @@ says which file a finding goes in.
 
   Details: [`server/LEARNINGS.md`](server/LEARNINGS.md#codebase-patterns--tool--library-notes)
   (2026-10-22, both entries) and
-  [`HW2-gate3-plan.md`](docs/plans/HW2-gate3-plan.md#gate-3-status-and-remaining-work).
+  `docs/plans/HW2-gate3-plan.md` on `main`.
 
 - **2026-10-23 — HW2 Gate 4 provenance blocker: two causes, one draft fix.**
   Applying the eligibility rule to the generation records that Gate 3 read

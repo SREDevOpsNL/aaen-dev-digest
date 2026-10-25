@@ -1,0 +1,132 @@
+# L02 controlled experiments (criteria 17–20)
+
+**Status: not run on this branch yet.** No result below is a claim until it
+appears in [Results](#results). Each paid phase needs its own written approval
+naming the slots, model, provider and maximum spend.
+
+## What is measured
+
+| Criterion | Reviewer | PR (seeded, disposable stack only) | Target skill | "Flagged" means |
+| --- | --- | --- | --- | --- |
+| 17 | Test Quality Reviewer | #501: coupon discounts with one happy-path test | `Edge Cases and Error Paths` | a finding cites the uncovered error branch (unknown / expired coupon) **and** the expiry-boundary edge case |
+| 18 | API Contract Reviewer | #502, to be replaced by a route-signature change (see [Fixtures](#fixtures)) | `breaking-change` | a finding names the breaking change at the changed route |
+
+Each experiment compares the **same PR and reviewer** without and with the
+target skill linked. Everything else the model receives is held fixed and
+fingerprinted: the system prompt, PR description, diff and prompt order (the
+"non-Skill fingerprint", identical across conditions). The Skills block is the
+only difference (the "Skill fingerprint").
+
+Rows 19 and 20 are read from the run traces of these runs on the PR page
+(**Agent runs → run trace**): the Skills block with its own token count, the
+enabled skill present, a skill switched off absent.
+
+## Fixtures
+
+- **#501** (`server/src/db/seed-fixtures.ts`): `applyDiscount` throws for an
+  unknown or expired coupon; the only test covers a valid coupon.
+- **#502** changes a v1 *response field* (`amount_cents` → `amount`, a string).
+  The recovered rubric asks for a PR that **changes a route signature**, and on
+  `main` the reviewer flagged #502 even without the skill (one exploratory pair,
+  see [Earlier record](#earlier-record-on-main)). A route-signature fixture
+  will be written, checked offline and piloted **before** the pre-registration;
+  #502 stays only as history.
+
+Fixtures are seeded only into a disposable database
+(`DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1`, refused on `devdigest`).
+
+## How a slot runs
+
+1. **Dispatch through the PR page.** `cli.ts run --via-ui` reserves the slot
+   in the ledger, links the condition's skills (and switches each one on for
+   the agent), and **arms** the slot on the server. The operator then opens
+   the PR and clicks **Run Review** for that agent once. The click dispatches
+   the armed slot through the experiment path. Arming runs every check a
+   direct dispatch runs, and the capability is checked again at the click. An
+   arm that is not clicked expires after 10 minutes and can never dispatch.
+2. **One request, pinned.** Experiment mode sends exactly one HTTP request:
+   - no SDK retry, no reprompt;
+   - routed to one frozen OpenRouter provider endpoint, fallbacks off;
+   - output capped, 360 s deadline for the whole request.
+
+   Provenance (served provider and model, generation id, tokens, cost) comes
+   only from OpenRouter's metadata. Errors are recorded sanitized.
+3. **Fail-closed preflight.** The diff hash must equal the frozen fixture hash,
+   the reviewer must be single-pass with repo intel off, no fixture clone may
+   exist, the live endpoint must match, and the worst case must fit the
+   reservation.
+
+Implementation: `server/src/modules/experiments/`,
+`server/src/modules/reviews/experiment-run.ts`,
+`server/src/platform/experiment-spend-gate.ts`,
+`server/src/platform/experiment-arms.ts`, `server/src/experiments/hw2/`,
+`reviewer-core/src/llm/openrouter.ts`.
+
+## Spending safety
+
+| Rule | Mechanism |
+| --- | --- |
+| Nothing spends without an approved phase | A capability written by `authorize` (phase, budget, expiry, token hash); the server checks it on every arm, dispatch and click |
+| One ceiling over everything | `authorize --ceiling`: everything charged so far on every stack (unknown costs at their full reservation) plus the new budget must fit the approved ceiling |
+| No overlapping paid work on the key | One shared runner lock; an `authorize` lock; no new capability while another stack holds a live one; the server's spend gate admits one slot at a time |
+| Reservation before any request | The slot is fsynced to `~/.devdigest/hw2-experiments/ledger.jsonl` as `reserved` before the request leaves |
+| Crash after reservation or dispatch | The slot stays unresolved: no authorization or revocation until `reconcile`; reconciliation disarms it and records it `ambiguous`, charged at its full reservation |
+| Never replay | A slot id is used once, on any stack; a late provider answer does not change the ledger |
+| Independent check | `key-usage --opening` before the first paid slot; `settle` after each phase reads the key's own usage until it is stable and checks opening + confirmed ≤ observed ≤ opening + conservative (`PENDING` while it keeps moving, never a pass) |
+| Isolation | Loopback-only stack, disposable database, dedicated key file (never the environment); server tests never reach the dev database or real keys |
+
+Tests: `server/test/experiments.it.test.ts`, `hw2-runner.test.ts`,
+`hw2-runner-run-review.test.ts`, `hw2-crash-recovery.test.ts` (real processes
+killed with SIGKILL), `hw2-key-usage.test.ts`, `hw2-authorize-guard.test.ts`.
+
+## Operator procedure
+
+Everything runs in WSL from the worktree's `server/`. Values marked EXAMPLE
+are placeholders until the approved phase fixes them.
+
+1. **Start the stack** (keyless until the dedicated key file exists):
+   ```bash
+   export DEVDIGEST_EXPERIMENT_PROVIDER=deepinfra/fp8 DEVDIGEST_EXPERIMENT_MODEL=deepseek/deepseek-v4-flash \
+     DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS=16000 DEVDIGEST_EXPERIMENT_PRICE_INPUT=0.00000009 DEVDIGEST_EXPERIMENT_PRICE_OUTPUT=0.00000018   # EXAMPLE values
+   ../scripts/e2e.sh --serve
+   ```
+   It prints the stack id, database, container, API and web URLs. Pass them to
+   every command below as `--api … --stack … --database … --container …`.
+2. **Free checks:** `pnpm exec tsx src/experiments/hw2/cli.ts check …`, then
+   `endpoints`, then `preview --experiment 18 --condition with --reservation 0.01 …`
+   for each condition.
+3. **Opening key usage**, once, before the first paid slot:
+   `cli.ts key-usage --opening`.
+4. **Authorize the approved phase:**
+   ```bash
+   cli.ts authorize --phase exploration --authorized-gate 3 --confirm-spend --budget 0.02 --ceiling 0.04 --hours 2 …   # EXAMPLE amounts
+   ```
+5. **Run one slot through the PR page:**
+   ```bash
+   cli.ts run --phase exploration --authorized-gate 3 --confirm-spend --via-ui --experiment 18 --condition without --count 1 --reservation 0.01 …
+   ```
+   When it prints "armed", open the PR in the stack's web UI and click
+   **Run Review** for the named agent once.
+6. **After the phase:** `cli.ts revoke --stack …`, then
+   `cli.ts settle` (key usage against the ledger).
+7. **Confirmatory phase:** commit the pre-registration, which holds the rules,
+   n per condition, seed, fixture and skill hashes and the manifest.
+   `run --phase confirmatory --authorized-gate 4 --prereg <path>` refuses any
+   mismatch, and any uncommitted change, in the fingerprinted implementation
+   (`server/src`, `reviewer-core/src`, lockfiles, `scripts/e2e.sh`).
+   `cli.ts report` builds the result table from the stored traces.
+
+## Earlier record on main
+
+Reference only, not evidence for this branch. On `main`, 4 exploratory
+dispatches ran:
+- 2 completed, both experiment 18. Both conditions flagged the breaking
+  change.
+- 2 failed with HTTP 429 from DeepInfra's shared pool.
+- Confirmed spend $0.00040788; conservative $0.02040788.
+
+That spend is part of the dedicated key's opening usage here.
+
+## Results
+
+Not run yet.

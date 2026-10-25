@@ -26,7 +26,7 @@ cd "$ROOT"
 # fresh stack id, a database and container named after it, Docker labels the
 # experiment runner checks, an empty per-stack clone directory, and the server
 # in experiment mode (DEVDIGEST_EXPERIMENT_* must be set by the operator; see
-# docs/plans/HW2-experiment-operator-guide.md). It blocks until Ctrl-C, then
+# docs/homework/L02/EXPERIMENTS.md). It blocks until Ctrl-C, then
 # tears down like a normal run. No model is called by this script.
 SERVE=0
 for arg in "$@"; do
@@ -64,7 +64,7 @@ if [ "$SERVE" -eq 1 ]; then
   WEB_HOST_ARGS=(-H 127.0.0.1)
   for var in DEVDIGEST_EXPERIMENT_PROVIDER DEVDIGEST_EXPERIMENT_MODEL DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS \
              DEVDIGEST_EXPERIMENT_PRICE_INPUT DEVDIGEST_EXPERIMENT_PRICE_OUTPUT; do
-    [ -n "${!var:-}" ] || { echo "--serve needs $var (see docs/plans/HW2-experiment-operator-guide.md)"; exit 2; }
+    [ -n "${!var:-}" ] || { echo "--serve needs $var (see docs/homework/L02/EXPERIMENTS.md)"; exit 2; }
   done
   export DEVDIGEST_EXPERIMENT_STACK_ID="$STACK_ID"
   # Empty per-stack clone directory: a clone would replace the frozen fixture patches.
@@ -234,7 +234,7 @@ if [ "$SERVE" -eq 1 ]; then
   api        http://127.0.0.1:${API_PORT}
   web        http://localhost:${WEB_PORT}
   clones     ${DEVDIGEST_CLONE_DIR}
-  ledger     ${EXPERIMENT_DIR}
+  ledger     ${HOME}/.devdigest/hw2-experiments/ledger.jsonl (shared by every stack)
   key file   ${HOME}/.devdigest/hw2-experiments/secrets.json
 IDENTITY
   wait "$SERVER_PID"
