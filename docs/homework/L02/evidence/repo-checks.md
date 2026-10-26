@@ -83,7 +83,7 @@ metadata:
 
 # PR Self Review
 
-A **Workflow skill**: it owns no review rules itself. It dispatches each slice of the diff to the skills that do, then combines their findings with deterministic checks into one verdict. Design rationale, severity policy and the deferred hook/CI phases are in [PLAN.md](PLAN.md).
+A **Workflow skill**: it owns no review rules itself. It dispatches each slice of the diff to the skills that do, then combines their findings with deterministic checks into one verdict. Design rationale, severity policy and the deferred hook/CI phases are in [PLAN.md](../../../../.claude/skills/pr-self-review/PLAN.md).
 $ node --test .claude/skills/pr-self-review/scripts/route-diff.test.mjs
 ok 1 - client-only change loads only frontend skills
 ok 2 - server-only change loads only backend skills
