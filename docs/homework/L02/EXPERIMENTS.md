@@ -1,7 +1,9 @@
 # L02 controlled experiments (criteria 17–20)
 
-**Status: not run on this branch yet.** No result below is a claim until it
-appears in [Results](#results). Each paid phase needs its own written approval
+**Status: Paid Phase 1 (exploratory pilot) ran on 2026-10-25/26; no
+confirmatory runs.** Neither experiment is a pass: experiment 17 is
+incomplete and experiment 18 showed no detection difference. See the
+[Phase 1 summary](#phase-1-summary). Each paid phase needs its own written approval
 naming the slots, model, provider and maximum spend.
 
 ## What is measured
@@ -175,8 +177,12 @@ reserved each, a $0.06 cumulative ceiling, `deepseek/deepseek-v4-flash` via
 | 21:51 | a second unarmed Run Review → Test Quality Reviewer click, refused the same way (`agent_runs` `3cb44f72-…`) | $0.00 |
 | 21:53–21:56 | **`x-17-with-3` completed** via Run Review → Test Quality Reviewer (run `684002a0-…`) | **$0.00055998** |
 | 22:01–22:02 | **`x-17-without-1` failed**: HTTP 429 from DeepInfra (origin `upstream_provider`, limit source `upstream_provider_shared_pool`, no retry-after) after 343 ms, one attempt, not retried (run `9c3f6d04-…`; Skill fingerprint `4f53cda1…` = none, non-Skill `e89e033b…`) | cost unknown to the run, so the ledger charges the full $0.01 reservation; key usage afterwards $0.00096786 = opening + confirmed, so nothing was billed |
-| 23:13–23:15 | **`x-18-without-1` completed** via Run Review → API Contract Reviewer (run `1a016790-…`); operator links restored afterwards | **$0.00016083** |
 | 22:06–22:07 | **`x-18-with-1` completed** via Run Review → API Contract Reviewer (run `4ce7d791-…`); the reviewer's operator links were restored afterwards (semver-discipline, breaking-change, response-schema off) | **$0.00020691** |
+| 23:13–23:15 | **`x-18-without-1` completed** via Run Review → API Contract Reviewer (run `1a016790-…`); operator links restored afterwards | **$0.00016083** |
+| 00:31 | capability expired; not extended | — |
+| 07:57–07:58 (10-26) | expired capability revoked. A $0.01-budget capability was written and revoked unused: the server counts the budget cumulatively, so it would have refused the slot. Rewritten with the owner's approval as a $0.02093 cumulative budget (charged $0.01092772 + one $0.01 slot), ceiling $0.06 | — |
+| 08:03–08:05 (10-26) | **`x-18-with-2` (trace-only) completed** with operator links; a free preview first confirmed Skill fingerprint `b4978ce0…` (run `af19b042-…`) | **$0.00023517** |
+| 08:07 (10-26) | capability revoked; `settle` **PASS**: key usage rose $0.00116289 = confirmed | — |
 
 ### Slot results
 
@@ -255,6 +261,26 @@ the pre-stated rule, so this pair shows **no detection difference**.
 Severity and verdict did differ, but they are not the pre-registered
 outcome. One pair is not a result for criterion 18 either way, and it is
 **not** counted as passing.
+
+**`x-18-with-2`** (trace-only, excluded from the comparison): completed for
+$0.00023517 (DeepInfra, `deepseek/deepseek-v4-flash-20260423`, 1914 / 396
+tokens). Its trace is the evidence for rows 14, 19 and 20:
+[trace-evidence.md](evidence/trace-evidence.md).
+
+### Phase 1 summary
+
+| | |
+| --- | --- |
+| Paid requests sent | 5: `x-17-with-3`, `x-17-without-1` (429), `x-18-with-1`, `x-18-without-1`, `x-18-with-2` |
+| Refused before any request | 2 unclicked arms (`x-17-with-1`, `x-17-with-2`), plus 2 unarmed-click guard refusals |
+| Confirmed spend | **$0.00116289**; the key's own usage rose by exactly that (settlement PASS) |
+| Conservative ledger total | $0.01116289, counting the 429 slot at its full reservation; ceiling $0.06 |
+| Provider | every completed request was served by DeepInfra, `deepseek/deepseek-v4-flash-20260423`. `x-18-without-1`'s provenance comes from the response's router metadata only (generation lookup `not_found`) |
+| Experiment 17 | **incomplete.** *with*: half the rule (error branch yes, expiry boundary no). *without*: no data (429, not replaced by the owner's decision) |
+| Experiment 18 | **no detection difference.** Both *with* and *without* flagged the route change under the rule. *with* was more severe (CRITICAL / request_changes against WARNING / comment), but that is not the pre-registered outcome |
+| Confirmatory runs | none; not authorized |
+
+Neither experiment is a pass for criteria 17 or 18.
 
 Both refused slots stay in the ledger unchanged, and their ids are never
 reused. `x-17-with-3` is the owner-approved replacement for the first

@@ -99,8 +99,17 @@ a diff that touches both `client/` and `server/` loads both skill sets.
 ## 5. Experiments (rows 17–20)
 
 These are paid and need the owner's authorization. The procedure is in
-[EXPERIMENTS.md](EXPERIMENTS.md#operator-procedure). On the PR page, click
-**Run Review** for the named agent when the runner prints "armed".
+[EXPERIMENTS.md](EXPERIMENTS.md#operator-procedure). When the runner prints
+"armed", choose **Run Review → the named agent** on the PR page, once.
+Run Review is a dropdown: the review is sent only when the agent is chosen.
+
+The Phase 1 pilot's results are in
+[EXPERIMENTS.md](EXPERIMENTS.md#phase-1-summary). To see rows 14, 19 and 20
+on the evidence stack, open PR #502 → **Agent runs** → the newest API
+Contract Reviewer run → **Open run trace & logs** → **Prompt assembly**. It
+shows **Skills (dynamic) ~831 tokens**, with semver-discipline, then
+breaking-change, and no response-schema (34;
+[trace-evidence.md](evidence/trace-evidence.md)).
 
 ## Tests
 
