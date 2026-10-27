@@ -103,3 +103,18 @@ See [EXPERIMENTS.md](EXPERIMENTS.md).
   clicking Run Review on the PR page.
 - The runner keeps a shared, fsynced ledger and settles against the key's own
   usage.
+
+## One-use extraction authorization
+
+The isolated conventions experiment reuses the existing extraction endpoint
+and guarded OpenRouter adapter. Before a capability token can be used,
+`authorizeExtraction` fsyncs an `authorization_intent` containing the slot,
+request and capability digests; then it writes the private capability and
+token. A crash leaves an audit trail and a consumed slot rather than an
+unlogged usable grant. Authorization holds the shared runner lock while it
+checks the ledger, and extraction preflight prices only the exact pinned
+provider tag. The endpoint records attempt telemetry and the private raw and
+parsed response before checking provenance; unverified responses do not
+persist candidates. The global ledger remains the spending authority, while
+one-use receipts describe operation progress. See
+[CONVENTIONS-EXTRACTION-PREFLIGHT.md](CONVENTIONS-EXTRACTION-PREFLIGHT.md).

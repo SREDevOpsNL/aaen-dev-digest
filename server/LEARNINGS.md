@@ -340,6 +340,12 @@ correction. Repo-intel remains server-scoped;
   18,000 iterations. A shim that dates every index write into the window
   failed the old test file in 24 of 30 runs and the fixed one in 0 of 30.
 
+- **2026-10-27** — Paid authorization and confirmatory resume must make
+  safety decisions durable across process death; see the two dated
+  [Engineering Insights](INSIGHTS.md#recurring-errors--fixes). Evidence:
+  `server/src/experiments/hw2/conventions-runner.ts:222`
+  (`authorizeExtraction`).
+
 ## Session Notes
 
 ## Open Questions

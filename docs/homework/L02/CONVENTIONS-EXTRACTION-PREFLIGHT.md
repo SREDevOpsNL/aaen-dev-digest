@@ -1,7 +1,7 @@
 # L02 conventions extraction: unpaid preflight and authorization design
 
-**Status:** implementation under verification. This document authorizes no paid
-request. Criteria 38 and 40 remain Implemented until a separately authorized
+**Status:** unpaid verification complete; paid evidence pending. This
+document authorizes no paid request. Criteria 38 and 40 remain Implemented until a separately authorized
 real extraction, candidate evidence, database read-back and restart are shown.
 
 ## Separate public-repository stack
@@ -170,8 +170,8 @@ reservation passes with `problems: []`.
 The unused slot proposed for approval is
 `conv-fastify-20261027-4bff6e22`. The exact complete-request fingerprint
 is `38d6b12f9ffb083846d2fb99e5f43b34bd7afb8d434416e2e6391c79edb83459`;
-the current committed implementation fingerprint after private raw-response
-retention is
+the prior committed implementation fingerprint at `bb05c37`, before the
+security corrections below, was
 `bbac3e4e51d0bef83d9e3f309fd72a006fb30d64a8d65a728c603a27be3a8215`.
 These bindings must be rechecked immediately before any future dispatch.
 
@@ -203,3 +203,38 @@ provider metadata remains unverified.
 
 The current work is confined to an isolated implementation checkout. No paid
 call or new extraction result has been produced.
+
+## Refreshed unpaid preflight after security corrections (2026-10-27)
+
+At source commit `17241a35b0d8bbe691fb9f9ae882044fed54e73d`,
+authorization now fsyncs an intent before a usable token, coordinates with
+the runner lock, requires the exact `deepinfra/fp8` endpoint, and retains
+raw/parsed model output when provenance fails. A real SIGKILL test covers the
+token-write crash window.
+
+Only the extraction API was restarted. The disposable PostgreSQL container
+remained healthy. The free preview returned `ok: true`, `problems: []`,
+the same database `devdigest_hw2f_0671292f`, cluster identifier
+`7701259158859145256`, clean indexed `fastify/fastify` revision
+`5df959f3af698823dd582f1c3661f3e80df0b5da`, 16 sampled files,
+request SHA-256
+`38d6b12f9ffb083846d2fb99e5f43b34bd7afb8d434416e2e6391c79edb83459`,
+and **current implementation fingerprint**
+`5541ac58d3e064246409b0fee48d156179baa9a5b123d34c1ba1b5cb27288764`.
+The conservative input bound remains 96,446 tokens with a 4,000 output cap.
+
+Current free endpoint metadata lists the pinned provider at
+$0.00000009/input token and $0.00000018/output token, with 1,048,576 context
+tokens and 65,536 maximum completion tokens. Worst case remains $0.01410021
+with the 1.5x contingency; the extra 20% margin requires $0.016920252, so
+$0.020 still fits. The dedicated key usage endpoint reported $0.00157077
+used against its $2.00 hard limit, leaving $1.99842923. The global ledger
+remains at $0.01116289 conservative charge, seven terminal slots and no
+unresolved slot. No global lock, capability or receipt exists for the
+proposed unused slot `conv-fastify-20261027-4bff6e22`. The proposed
+cumulative ceiling remains $0.03116289. Recheck all mutable values
+immediately before any separately approved authorization.
+
+No extraction generation has run. Candidate persistence, actual structured
+output and post-generation restart read-back remain unverified for criteria
+38 and 40.

@@ -90,3 +90,29 @@ server typecheck and focused authorization/spend-gate tests passed (17/17); `bas
 passed. The previous full suite and 14/14 hermetic flows remain the last
 broad local runs; GitHub Actions on the new head provide the subsequent
 package and browser gates. No extraction model call was made.
+
+## Full unpaid verification at security checkpoint `17241a3` (2026-10-27)
+
+All commands ran in a detached Ubuntu WSL worktree at
+`/home/dmitri/projects/aaen-dev-digest-l02-verify-17241a3`. Its hermetic
+browser build used ports 5440/3201/3200 and did not alter either live
+evidence stack. No model-generation call was made.
+
+| Check | Result |
+| --- | --- |
+| Focused extraction/experiment safety tests | 148 / 148 passed |
+| reviewer-core typecheck and tests | passed; 102 / 102 |
+| server typecheck and unit tests | passed; 367 / 367 |
+| server DB-backed tests, including migration upgrade | passed; 140 / 140 |
+| client lint, typecheck and tests | passed; 118 / 118 |
+| e2e typecheck and hermetic browser flows | passed; 14 / 14, exit 0 |
+| Agent-instructions checker and self-review router tests | passed; router 10 / 10 |
+| Schema drift | `pnpm db:generate`: no schema changes |
+| L03 changed-path audit against required L01 base | no added L03 paths |
+| Added-line credential-pattern scan | two synthetic key-shaped test literals; neither equals the dedicated private key |
+| `git diff --check` and worktree status | pass; clean at `17241a3` |
+
+The new report labels regex matches as provisional screening. No
+confirmatory outcome is claimed. The refreshed free extraction preview and
+API-only restart are in
+[CONVENTIONS-EXTRACTION-PREFLIGHT.md](CONVENTIONS-EXTRACTION-PREFLIGHT.md).

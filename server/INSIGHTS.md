@@ -90,6 +90,25 @@ server/src/vendor/shared/contracts/platform.ts:178.
   `server/src/experiments/hw2/cli.ts` (`conditionPreview`),
   `server/test/hw2-runner.test.ts`; commit `e78fe0b`.
 
+- **2026-10-27 — A one-use paid capability needs a durable intent before
+  its token can exist.** Writing a valid token before fsyncing the
+  authorization log allowed a crash window with an unlogged usable grant.
+  Sync the intent first, treat a crash as a consumed slot, and exercise the
+  boundary with a real child-process SIGKILL test. Evidence:
+  `server/src/experiments/hw2/conventions-runner.ts:222`
+  (`authorizeExtraction`),
+  `server/test/conventions-experiment.test.ts:327`
+  (`a real SIGKILL after token write`).
+
+- **2026-10-27 — A returned fingerprint failure is not durable evidence.**
+  The confirmatory runner stopped in memory on a mismatch, but a restart
+  could skip the completed known-cost slot and dispatch the next one.
+  Persist the mismatch in the terminal ledger event and reject
+  continuation after resume or reconciliation. Evidence:
+  `server/src/experiments/hw2/runner.ts:259` (`dispatchAndFollow`),
+  `server/test/hw2-runner.test.ts:500`
+  (`stops when a settled run does not reproduce`).
+
 ## Session Notes
 
 ## Open Questions

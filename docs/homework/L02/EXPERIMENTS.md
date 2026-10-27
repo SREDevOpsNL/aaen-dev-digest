@@ -301,3 +301,19 @@ slot was armed. The server refused the generation before any provider call:
 
 This shows that an unarmed click cannot spend. It says nothing about
 criterion 17.
+
+## Prospective safety corrections (unpaid, 2026-10-27)
+
+The original Phase 1 outcomes remain unchanged. For future confirmatory
+slots, the runner stops after the first 429, infrastructure failure,
+ambiguous outcome or unknown cost, including after restart. A mismatch
+against the frozen non-Skill fingerprint is persisted in the terminal
+ledger event and blocks a resumed schedule. Exploratory stop defaults
+remain unchanged.
+
+The anchored-regex matcher is now explicitly provisional screening.
+`cli.ts report` cannot claim final success from those keywords. A sealed,
+condition-blinded technical adjudication protocol is still required before
+a prospective study can be frozen. The outcome rules, four-condition cost
+preflight and separate paid authorization gate are in
+[PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md).
