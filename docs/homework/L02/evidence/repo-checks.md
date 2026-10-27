@@ -245,3 +245,16 @@ $ ls "$(git rev-parse --git-common-dir)/hooks" | grep -v sample || echo "no acti
 no active git hooks
 ```
 The headless session that Reads the routed skills could not run on 2026-10-25: the WSL Claude Code CLI reported "OAuth session expired and could not be refreshed". Open issue for row 21.
+
+On 2026-10-27, the prepared isolated scratch checkout at
+`/home/dmitri/projects/aaen-dev-digest-l02-self-review` held a harmless
+uncommitted client/server diff. Running the router with `--base HEAD` selected
+`frontend-ui-architecture`, `react-best-practices`,
+`typescript-expert`, `next-best-practices`, `onion-architecture`,
+`fastify-best-practices` and `zod`. A real Claude Code 2.1.278 invocation
+of `/pr-self-review --base HEAD` from that checkout stopped before execution:
+`Failed to authenticate: OAuth session expired and could not be refreshed`.
+Its JSON result reported zero input/output tokens, zero tool turns and zero
+model cost. This is evidence of the blocker, **not** evidence that criterion 21
+passed. The owner must sign in to Claude Code, then rerun the manual skill in
+that same scratch checkout and preserve the complete report.

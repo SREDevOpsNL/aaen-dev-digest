@@ -108,6 +108,31 @@ function privateWrite(path: string, text: string): void {
   try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
 }
 
+/** A durable intent exists before either file can make the grant usable. */
+function authorizationSlotUsed(root: string, slotId: string): boolean {
+  const path = join(root, 'authorizations.jsonl');
+  if (!existsSync(path)) return false;
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Unsafe authorization log');
+  return readFileSync(path, 'utf8').split('\n').filter(Boolean)
+    .some((line) => (JSON.parse(line) as { slot_id?: string }).slot_id === slotId);
+}
+
+function appendAuthorizationEvent(root: string, event: Record<string, unknown>): void {
+  const path = join(root, 'authorizations.jsonl');
+  const fd = openSync(path,
+    constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+  const line = JSON.stringify(event) + '\n';
+  try {
+    if (writeSync(fd, line) !== Buffer.byteLength(line)) {
+      throw new Error('Authorization log write was incomplete');
+    }
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+  const dirFd = openSync(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+}
+
 /**
  * Write one version-2 capability under the existing global authorize.lock.
  * Requires a separately approved Gate-3 invocation; this function is never
@@ -118,6 +143,8 @@ export function authorizeExtraction(args: {
   reservationUsd: number; cumulativeCeilingUsd: number;
   keyUsage: { limit_remaining: number | null };
   home?: string; now?: Date;
+  /** Test fault injection at each durable write boundary; never passed by the CLI. */
+  onBoundary?: (boundary: 'intent' | 'capability' | 'token') => void;
 }): { capability: ConventionsCapability; token: string } {
   const root = extractionRoot(args.home);
   if (!SLOT.test(args.slotId)) throw new Error('Invalid extraction slot id');
@@ -135,74 +162,87 @@ export function authorizeExtraction(args: {
   privateWrite(lock, `${process.pid}\n`);
   try {
     const ledger = new Ledger(root);
-    if (ledger.unresolved().length) throw new Error('Unresolved reservations must be reconciled first');
-    if (ledger.slots().has(args.slotId)) throw new Error('Extraction slot id was already used');
-    if (!fits([...ledger.slots().values()], 'exploration', args.reservationUsd).ok ||
-        spent(ledger.slots().values()) + args.reservationUsd > args.cumulativeCeilingUsd + 1e-12) {
-      throw new Error('Global spending ceiling would be exceeded');
-    }
-    const otherCapabilities = readdirSync(root).filter((name) => {
-      if (!name.startsWith('hw2f-')) return false;
-      const path = join(root, name, 'capability.json');
-      try { lstatSync(path); return true; } catch { return false; }
-    });
-    if (otherCapabilities.length) throw new Error(`A live capability already exists: ${otherCapabilities.join(', ')}`);
-    const dir = join(root, args.stack.stackId);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    if (lstatSync(dir).isSymbolicLink() || !lstatSync(dir).isDirectory()) throw new Error('Unsafe capability directory');
-    const token = randomBytes(32).toString('hex');
-    const now = args.now ?? new Date();
-    const capability: ConventionsCapability = {
-      version: 2, operation: 'conventions.extract',
-      capability_id: randomBytes(32).toString('hex'),
-      slot_id: args.slotId,
-      stack_id: args.stack.stackId,
-      database_name: args.preview.database_name,
-      postgres_system_identifier: args.preview.postgres_system_identifier,
-      workspace_id: args.preview.workspace_id,
-      repository_id: args.preview.repository_id,
-      repository_full_name: args.preview.repository_full_name,
-      repository_commit_sha: args.preview.repository_commit_sha,
-      implementation_fingerprint: args.preview.implementation_fingerprint,
-      indexed_paths_sha256: args.preview.indexed_paths_sha256,
-      samples_sha256: args.preview.samples_sha256,
-      request_sha256: args.preview.request_sha256,
-      adapter: 'openrouter', model: args.preview.model,
-      upstream_provider_slug: args.preview.upstream_provider_slug,
-      expected_provider_name: args.preview.expected_provider_name,
-      expected_served_model: args.preview.expected_served_model,
-      reservation_usd: args.reservationUsd,
-      phase: 'exploration', budget_usd: args.reservationUsd,
-      cumulative_ceiling_usd: args.cumulativeCeilingUsd,
-      authorized_at: now.toISOString(),
-      expires_at: new Date(now.getTime() + 15 * 60_000).toISOString(),
-      token_sha256: sha256(token),
-    };
-    const capPath = join(dir, 'capability.json');
-    privateWrite(capPath, `${JSON.stringify(capability, null, 2)}\n`);
+    // Serialize authorization with paid runners before reading the ledger.
+    ledger.acquire({ pid: process.pid, stackId: args.stack.stackId });
     try {
-      privateWrite(join(dir, 'capability.token'), token);
-    } catch (error) {
-      unlinkSync(capPath);
-      throw error;
-    }
-    try {
-      const logFd = openSync(join(root, 'authorizations.jsonl'),
-        constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+      if (ledger.unresolved().length) throw new Error('Unresolved reservations must be reconciled first');
+      if (ledger.slots().has(args.slotId)) throw new Error('Extraction slot id was already used');
+      if (!fits([...ledger.slots().values()], 'exploration', args.reservationUsd).ok ||
+          spent(ledger.slots().values()) + args.reservationUsd > args.cumulativeCeilingUsd + 1e-12) {
+        throw new Error('Global spending ceiling would be exceeded');
+      }
+      const otherCapabilities = readdirSync(root).filter((name) => {
+        if (!name.startsWith('hw2f-')) return false;
+        const path = join(root, name, 'capability.json');
+        try { lstatSync(path); return true; } catch { return false; }
+      });
+      if (otherCapabilities.length) throw new Error(`A live capability already exists: ${otherCapabilities.join(', ')}`);
+      if (authorizationSlotUsed(root, args.slotId)) throw new Error('Extraction slot id was already authorized');
+      const dir = join(root, args.stack.stackId);
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      if (lstatSync(dir).isSymbolicLink() || !lstatSync(dir).isDirectory()) throw new Error('Unsafe capability directory');
+      const token = randomBytes(32).toString('hex');
+      const now = args.now ?? new Date();
+      const capability: ConventionsCapability = {
+        version: 2, operation: 'conventions.extract',
+        capability_id: randomBytes(32).toString('hex'),
+        slot_id: args.slotId,
+        stack_id: args.stack.stackId,
+        database_name: args.preview.database_name,
+        postgres_system_identifier: args.preview.postgres_system_identifier,
+        workspace_id: args.preview.workspace_id,
+        repository_id: args.preview.repository_id,
+        repository_full_name: args.preview.repository_full_name,
+        repository_commit_sha: args.preview.repository_commit_sha,
+        implementation_fingerprint: args.preview.implementation_fingerprint,
+        indexed_paths_sha256: args.preview.indexed_paths_sha256,
+        samples_sha256: args.preview.samples_sha256,
+        request_sha256: args.preview.request_sha256,
+        adapter: 'openrouter', model: args.preview.model,
+        upstream_provider_slug: args.preview.upstream_provider_slug,
+        expected_provider_name: args.preview.expected_provider_name,
+        expected_served_model: args.preview.expected_served_model,
+        reservation_usd: args.reservationUsd,
+        phase: 'exploration', budget_usd: args.reservationUsd,
+        cumulative_ceiling_usd: args.cumulativeCeilingUsd,
+        authorized_at: now.toISOString(),
+        expires_at: new Date(now.getTime() + 15 * 60_000).toISOString(),
+        token_sha256: sha256(token),
+      };
+      const capPath = join(dir, 'capability.json');
+      const intent = {
+        at: now.toISOString(), event: 'authorization_intent', operation: 'conventions.extract',
+        capability_id: capability.capability_id, capability_sha256: sha256(canonicalJson(capability)),
+        request_sha256: capability.request_sha256, implementation_fingerprint: capability.implementation_fingerprint,
+        stack_id: args.stack.stackId, slot_id: args.slotId, budget_usd: args.reservationUsd,
+        ceiling_usd: args.cumulativeCeilingUsd, expires_at: capability.expires_at,
+      };
+      // The intent is fsynced before the token can exist. A crash after this
+      // point leaves an audit trail; the slot may never be reused.
+      appendAuthorizationEvent(root, intent);
+      args.onBoundary?.('intent');
+      privateWrite(capPath, JSON.stringify(capability, null, 2) + '\n');
+      args.onBoundary?.('capability');
       try {
-        writeSync(logFd, `${JSON.stringify({
-          at: now.toISOString(), event: 'authorized', operation: 'conventions.extract',
-          stack_id: args.stack.stackId, slot_id: args.slotId, budget_usd: args.reservationUsd,
-          ceiling_usd: args.cumulativeCeilingUsd, expires_at: capability.expires_at,
-        })}\n`);
-        fsyncSync(logFd);
-      } finally { closeSync(logFd); }
-    } catch (error) {
-      unlinkSync(join(dir, 'capability.token'));
-      unlinkSync(capPath);
-      throw error;
+        privateWrite(join(dir, 'capability.token'), token);
+      } catch (error) {
+        unlinkSync(capPath);
+        throw error;
+      }
+      args.onBoundary?.('token');
+      try {
+        appendAuthorizationEvent(root, {
+          ...intent, event: 'authorized', at: new Date().toISOString(),
+        });
+      } catch (error) {
+        unlinkSync(join(dir, 'capability.token'));
+        unlinkSync(capPath);
+        throw error;
+      }
+      return { capability, token };
+    } finally {
+      ledger.release();
     }
-    return { capability, token };
   } finally {
     unlinkSync(lock);
   }

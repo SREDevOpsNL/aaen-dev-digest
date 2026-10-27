@@ -1,19 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { z } from 'zod';
-import { mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LLMProvider, StructuredRequest, StructuredExperimentOptions } from '@devdigest/shared';
+import type { LLMProvider, StructuredRequest, StructuredExperimentOptions, OpenRouterEndpointInfo } from '@devdigest/shared';
+import type { ExperimentConfig } from '../src/platform/config.js';
+import type { Container } from '../src/platform/container.js';
 import {
   extractionCapabilityProblem, extractionRequestSha256, type ConventionsCapability,
   type ExtractionBinding,
 } from '../src/modules/_shared/conventions-experiment.js';
-import { sha256 } from '../src/modules/_shared/experiment.js';
+import { canonicalJson, sha256 } from '../src/modules/_shared/experiment.js';
 import { ExtractionReceipts } from '../src/platform/experiment-receipts.js';
 import { ExperimentGuardedProvider, ExperimentSpendGate } from '../src/platform/experiment-spend-gate.js';
 import { authorizeExtraction, receiptOutcome, runExtraction, type ExtractionStack } from '../src/experiments/hw2/conventions-runner.js';
 import { Ledger } from '../src/experiments/hw2/ledger.js';
-import type { ExtractionPreview } from '../src/modules/experiments/conventions.js';
+import { ConventionsExperiment, exactConventionsPriceLimits, type ExtractionAdmission, type ExtractionPreview } from '../src/modules/experiments/conventions.js';
+import { ConventionsService } from '../src/modules/conventions/service.js';
+import { ConventionsRepository } from '../src/modules/conventions/repository.js';
 
 const hash = 'a'.repeat(64);
 const binding: ExtractionBinding = {
@@ -176,6 +181,61 @@ describe('durable extraction receipt', () => {
 });
 
 
+describe('failed extraction evidence', () => {
+  it('records raw and parsed model output before rejecting unverified provenance and persists no candidates', async () => {
+    const dir = root();
+    const receipts = new ExtractionReceipts(dir);
+    const identity = { capability_id: hash, slot_id: binding.slot_id, request_sha256: hash };
+    receipts.claim(identity);
+    const raw = JSON.stringify({ candidates: [{ rule: 'real model text' }] });
+    const data = { candidates: [{ rule: 'real model text' }] };
+    const calls: string[] = [];
+    const admission: ExtractionAdmission = {
+      options, timeoutMs: 360_000, onAttempt: vi.fn(),
+      modelResult: (parsed, response) => {
+        calls.push('record');
+        receipts.append(binding.slot_id, {
+          ...identity, state: 'model_result', model_result: parsed, model_raw: response,
+        });
+      },
+      assertVerified: () => {
+        calls.push('verify');
+        throw new Error('Serving provider unverified');
+      },
+      persisted: vi.fn(), failed: vi.fn(), close: vi.fn(),
+    };
+    const fakeContainer = {
+      config: { experiment: {} },
+      llm: async () => ({ completeStructured: async () => ({ data, raw }) }),
+      db: {},
+    } as unknown as Container;
+    const service = new ConventionsService(fakeContainer);
+    Object.defineProperty(service, 'prepare', {
+      value: async () => ({
+        repo: { id: 'repo-one', fullName: 'fastify/fastify' },
+        files: [], indexedPaths: [], request: request(), choice: { provider: 'openrouter' },
+        sampledPaths: [],
+      }),
+    });
+    const admit = vi.spyOn(ConventionsExperiment.prototype, 'admit').mockResolvedValue(admission);
+    const persist = vi.spyOn(ConventionsRepository.prototype, 'replacePending');
+    try {
+      await expect(service.extract('workspace-one', 'repo-one', token)).rejects.toThrow(/unverified/);
+      expect(calls).toEqual(['record', 'verify']);
+      expect(receipts.read(binding.slot_id)[1]).toMatchObject({
+        state: 'model_result', model_result: data, model_raw: raw,
+      });
+      expect(persist).not.toHaveBeenCalled();
+      expect(admission.persisted).not.toHaveBeenCalled();
+      expect(admission.failed).toHaveBeenCalledOnce();
+      expect(admission.close).toHaveBeenCalledOnce();
+    } finally {
+      admit.mockRestore();
+      persist.mockRestore();
+    }
+  });
+});
+
 const preview = (): ExtractionPreview => ({
   ...binding,
   repository_commit_sha: '5df959f3af698823dd582f1c3661f3e80df0b5da',
@@ -216,6 +276,129 @@ describe('conventions authorization and runner accounting', () => {
     })).toThrow(/live capability/);
   });
 
+  it('durably records the grant before writing the usable token', () => {
+    const h = root();
+    const first = authorizeExtraction({
+      preview: preview(), stack: fakeStack({}), slotId: binding.slot_id,
+      reservationUsd: 0.01, cumulativeCeilingUsd: 0.05,
+      keyUsage: { limit_remaining: 1 }, home: h,
+    });
+    const logPath = join(h, '.devdigest', 'hw2-experiments', 'authorizations.jsonl');
+    const events = readFileSync(logPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events.map((event) => event.event)).toEqual(['authorization_intent', 'authorized']);
+    expect(events[0]).toMatchObject({
+      capability_id: first.capability.capability_id, slot_id: binding.slot_id,
+      request_sha256: binding.request_sha256,
+      capability_sha256: sha256(canonicalJson(first.capability)),
+    });
+    const dir = join(h, '.devdigest', 'hw2-experiments', binding.stack_id);
+    unlinkSync(join(dir, 'capability.json'));
+    unlinkSync(join(dir, 'capability.token'));
+    expect(() => authorizeExtraction({
+      preview: preview(), stack: fakeStack({}), slotId: binding.slot_id,
+      reservationUsd: 0.01, cumulativeCeilingUsd: 0.05,
+      keyUsage: { limit_remaining: 1 }, home: h,
+    })).toThrow(/already authorized/);
+  });
+
+  it.each([
+    ['intent', false, false],
+    ['capability', true, false],
+    ['token', true, true],
+  ] as const)('retains a durable intent after a simulated crash at %s', (boundary, capExists, tokenExists) => {
+    const h = root();
+    expect(() => authorizeExtraction({
+      preview: preview(), stack: fakeStack({}), slotId: binding.slot_id,
+      reservationUsd: 0.01, cumulativeCeilingUsd: 0.05,
+      keyUsage: { limit_remaining: 1 }, home: h,
+      onBoundary: (at) => { if (at === boundary) throw new Error('simulated crash'); },
+    })).toThrow(/simulated crash/);
+    const experimentRoot = join(h, '.devdigest', 'hw2-experiments');
+    const events = readFileSync(join(experimentRoot, 'authorizations.jsonl'), 'utf8')
+      .trim().split('\n').map((line) => JSON.parse(line) as { event: string; slot_id: string });
+    expect(events).toEqual([expect.objectContaining({ event: 'authorization_intent', slot_id: binding.slot_id })]);
+    const dir = join(experimentRoot, binding.stack_id);
+    expect(existsSync(join(dir, 'capability.json'))).toBe(capExists);
+    expect(existsSync(join(dir, 'capability.token'))).toBe(tokenExists);
+    expect(existsSync(join(experimentRoot, 'authorize.lock'))).toBe(false);
+    expect(existsSync(join(experimentRoot, 'runner.lock'))).toBe(false);
+  });
+
+  it('a real SIGKILL after token write leaves an intent and stale locks, never auto-resends', () => {
+    const h = root();
+    const child = spawnSync(process.execPath, [
+      '--import', 'tsx', join(process.cwd(), 'test/fixtures/authorization-crash.ts'),
+      h, JSON.stringify(preview()), JSON.stringify(fakeStack({}).identity),
+    ], { cwd: process.cwd(), encoding: 'utf8', timeout: 20_000 });
+    expect(child.signal, child.stderr).toBe('SIGKILL');
+
+    const experimentRoot = join(h, '.devdigest', 'hw2-experiments');
+    const dir = join(experimentRoot, binding.stack_id);
+    const events = readFileSync(join(experimentRoot, 'authorizations.jsonl'), 'utf8')
+      .trim().split('\n').map((line) => JSON.parse(line) as { event: string; slot_id: string });
+    expect(events).toEqual([expect.objectContaining({
+      event: 'authorization_intent', slot_id: binding.slot_id,
+    })]);
+    expect(existsSync(join(dir, 'capability.json'))).toBe(true);
+    expect(existsSync(join(dir, 'capability.token'))).toBe(true);
+    expect(existsSync(join(experimentRoot, 'authorize.lock'))).toBe(true);
+    expect(existsSync(join(experimentRoot, 'runner.lock'))).toBe(true);
+    expect(new Ledger(experimentRoot).slots().size).toBe(0);
+    expect(existsSync(join(experimentRoot, 'conventions-receipts'))).toBe(false);
+
+    // A supervisor must inspect and explicitly recover; no new authorization
+    // can bypass either stale lock or reuse this already recorded slot.
+    expect(() => authorizeExtraction({
+      preview: preview(), stack: fakeStack({}), slotId: binding.slot_id,
+      reservationUsd: 0.01, cumulativeCeilingUsd: 0.05,
+      keyUsage: { limit_remaining: 1 }, home: h,
+    })).toThrow();
+    unlinkSync(join(experimentRoot, 'authorize.lock'));
+    unlinkSync(join(experimentRoot, 'runner.lock'));
+    unlinkSync(join(dir, 'capability.json'));
+    unlinkSync(join(dir, 'capability.token'));
+    expect(() => authorizeExtraction({
+      preview: preview(), stack: fakeStack({}), slotId: binding.slot_id,
+      reservationUsd: 0.01, cumulativeCeilingUsd: 0.05,
+      keyUsage: { limit_remaining: 1 }, home: h,
+    })).toThrow(/already authorized/);
+  });
+
+  it('refuses authorization while a paid runner holds the global lock', () => {
+    const h = root();
+    const experimentRoot = join(h, '.devdigest', 'hw2-experiments');
+    mkdirSync(experimentRoot, { recursive: true });
+    writeFileSync(join(experimentRoot, 'runner.lock'), 'existing paid runner');
+    expect(() => authorizeExtraction({
+      preview: preview(), stack: fakeStack({}), slotId: binding.slot_id,
+      reservationUsd: 0.01, cumulativeCeilingUsd: 0.05,
+      keyUsage: { limit_remaining: 1 }, home: h,
+    })).toThrow(/runner/);
+    expect(existsSync(join(experimentRoot, 'authorize.lock'))).toBe(false);
+    expect(existsSync(join(experimentRoot, binding.stack_id, 'capability.json'))).toBe(false);
+  });
+
+  it('requires the exact pinned endpoint tag for extraction pricing', () => {
+    const config: ExperimentConfig = {
+      stackId: binding.stack_id, provider: 'deepinfra/fp8', providerName: 'DeepInfra',
+      model: binding.model, maxOutputTokens: 4000,
+      prices: { input: 0.00000009, output: 0.00000018, request: 0 },
+      generationLookup: null,
+    };
+    const endpoint = (tag: string, inputPrice: number): OpenRouterEndpointInfo => ({
+      providerName: 'DeepInfra', tag, quantization: 'fp8',
+      contextLength: 128_000, maxCompletionTokens: 16_384,
+      pricing: { prompt: inputPrice, completion: 0.00000018, request: 0 },
+    });
+    expect(exactConventionsPriceLimits(config, [endpoint('deepinfra/other', 0.0001)])).toBeNull();
+    const limits = exactConventionsPriceLimits(config, [
+      endpoint('deepinfra/other', 0.0001), endpoint('deepinfra/fp8', 0.0000001),
+    ]);
+    expect(limits?.prices.input).toBe(0.0000001);
+    expect(limits?.source).toContain('deepinfra/fp8');
+    expect(limits?.source).not.toContain('deepinfra/other');
+  });
+
   it('fails closed on price, repository, cluster and key-limit mismatches', () => {
     const stack = fakeStack({});
     const make = (p: ExtractionPreview, limit = 1) => authorizeExtraction({
@@ -239,6 +422,15 @@ describe('conventions authorization and runner accounting', () => {
       keyUsage: { limit_remaining: 1 }, home: h,
     })).toThrow();
     expect(existsSync(join(dir, 'capability.json'))).toBe(false);
+    const events = readFileSync(join(h, '.devdigest', 'hw2-experiments', 'authorizations.jsonl'), 'utf8')
+      .trim().split('\n').map((line) => JSON.parse(line) as { event: string });
+    expect(events.map((event) => event.event)).toEqual(['authorization_intent']);
+    unlinkSync(join(dir, 'capability.token'));
+    expect(() => authorizeExtraction({
+      preview: preview(), stack: fakeStack({}), slotId: binding.slot_id,
+      reservationUsd: 0.01, cumulativeCeilingUsd: 0.05,
+      keyUsage: { limit_remaining: 1 }, home: h,
+    })).toThrow(/already authorized/);
   });
 
   it('leaves no usable capability when the authorization log cannot be written', () => {

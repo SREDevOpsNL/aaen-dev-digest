@@ -78,6 +78,20 @@ provider prices and key limit and submit a revised ceiling. The existing
 $0.50 exploration, $1.00 confirmatory and $1.50 aggregate caps remain hard
 bounds.
 
+## Free protocol corrections before preregistration
+
+The confirmatory runner now stops after the first 429, infrastructure
+failure, ambiguous result or unknown cost; its exploratory defaults remain
+unchanged. The anchored keyword matcher remains a screening aid: the report
+labels its result provisional and cannot emit a final success from it. It does
+not prove the criterion 17 conjunction or criterion 18 lookup-semantics break.
+A final outcome still needs a frozen, condition-blinded technical adjudication
+record; missing or ambiguous judgments make the result incomplete. Before
+accepting the proposed $0.005 reservation, preview all four conditions and
+confirm each complete input upper bound is within that reservation at current
+prices. Freeze and verify complete request hashes for every condition, as well
+as the component fingerprints listed below.
+
 ## Freeze before any confirmatory request
 
 Pre-register a committed, unmodified manifest containing the final
@@ -88,8 +102,10 @@ source revision, requested model `deepseek/deepseek-v4-flash`, the sole
 `deepseek/deepseek-v4-flash-20260423`, temperature zero, single-pass strategy,
 repo-intel off, output cap 4,000, both retry counts zero, fallbacks off, exact
 request fingerprints, scoring rules, randomization seed and fresh unused slot
-IDs. Verify the cached L03 intent is absent on every run. The current source is
-uncommitted, so no final implementation or request fingerprint is frozen yet.
+IDs. Verify the cached L03 intent is absent on every run. The current source
+is committed, but the final implementation and request fingerprints remain
+unfrozen until criterion 14 is resolved and the free protocol corrections above
+are implemented and verified.
 
 The owner must approve the final manifest, complete reservation/ceiling and
 the separate paid confirmatory execution. No previously authorized exploratory

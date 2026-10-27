@@ -79,6 +79,19 @@ a diff that touches both `client/` and `server/` loads both skill sets.
    Skills block shows the enabled skills in the dragged order, leaves out the
    one switched off, and carries its own token count.
 
+### Criterion 14: mentor clarification requested
+
+The recovered English rubric says enabled Skill bodies belong in the **system
+prompt**. The current implementation places user-editable Skill bodies in a
+fenced user-message section. The saved physical drag, persisted order, run
+trace and Skills token count demonstrate ordering, but do not prove literal
+system-role placement. Would the mentor accept "system prompt" as the assembled
+review prompt here, or require the literal system-message role? We preserve the
+current trust boundary while awaiting that answer. A literal-role change would
+require separate approval and application-level prompt-injection regression
+tests. Criterion 14 remains Blocked; criteria 19 and 20 retain their existing
+trace evidence.
+
 ## 4. Conventions (rows 38–42, 45–51, 53)
 
 1. **Conventions** has separate **Run Scan** and **ReScan** buttons (23).

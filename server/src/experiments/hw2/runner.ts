@@ -108,7 +108,15 @@ export async function reconcile(deps: RunnerDeps): Promise<SlotRecord[]> {
     }
     const settled = lookup.runs.length === 1 ? terminalOf(lookup.runs[0]!) : null;
     if (settled) {
-      deps.ledger.append({ slot_id: slot.slot_id, phase: slot.phase, reservation_usd: slot.reservation_usd, state: settled.state, run_id: lookup.runs[0]!.run_id, cost_usd: settled.cost, detail: { reconciled: true } });
+      const expected = slot.events[0]?.detail?.expected_non_skill_fingerprint;
+      const actual = lookup.runs[0]?.experiment?.non_skill_fingerprint ?? null;
+      const fingerprintMismatch = slot.phase === 'confirmatory' &&
+        (typeof expected !== 'string' || actual !== expected);
+      deps.ledger.append({
+        slot_id: slot.slot_id, phase: slot.phase, reservation_usd: slot.reservation_usd,
+        state: settled.state, run_id: lookup.runs[0]!.run_id, cost_usd: settled.cost,
+        detail: { reconciled: true, fingerprint_mismatch: fingerprintMismatch },
+      });
       deps.log(`reconciled ${slot.slot_id}: ${settled.state}`);
     } else {
       deps.ledger.append({
@@ -195,6 +203,7 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
       // Operator links make a trace-only run: evidence for criteria 14, 19 and
       // 20, never part of an experiment's with/without comparison.
       purpose: run.skillIds === null ? 'trace-evidence' : 'comparison',
+      expected_non_skill_fingerprint: run.expectedNonSkillFingerprint,
     },
   });
 
@@ -243,12 +252,16 @@ async function dispatchAndFollow(deps: RunnerDeps, run: SlotRun, base: LedgerBas
     const current = lookup?.runs.find((r) => r.run_id === runId);
     const settled = current ? terminalOf(current) : null;
     if (settled && current?.status !== 'running') {
-      deps.ledger.append({ ...base, state: settled.state, run_id: runId, cost_usd: settled.cost });
       const outcome = current?.experiment?.attempts?.[0]?.outcome;
       const fingerprint = current?.experiment?.non_skill_fingerprint ?? null;
+      const fingerprintMismatch = settled.state !== 'refused' &&
+        run.expectedNonSkillFingerprint !== null && fingerprint !== run.expectedNonSkillFingerprint;
+      deps.ledger.append({
+        ...base, state: settled.state, run_id: runId, cost_usd: settled.cost,
+        detail: { fingerprint_mismatch: fingerprintMismatch },
+      });
       return {
-        fingerprintMismatch:
-          settled.state !== 'refused' && run.expectedNonSkillFingerprint !== null && fingerprint !== run.expectedNonSkillFingerprint,
+        fingerprintMismatch,
         state: settled.state,
         runId,
         costUsd: settled.cost,
@@ -389,13 +402,29 @@ export async function runSchedule(
   let infra = 0;
   for (const run of runs) {
     const recorded = deps.ledger.slots().get(run.slot.slot_id);
-    if (recorded && isTerminal(recorded.state)) continue;
+    if (recorded && isTerminal(recorded.state)) {
+      const terminal = recorded.events.find((event) => event.state === recorded.state);
+      if (run.slot.phase === 'confirmatory' &&
+          (recorded.state !== 'completed' || recorded.cost_usd === null ||
+           terminal?.detail?.fingerprint_mismatch !== false)) {
+        return { results, stopped: 'confirmatory slot ' + run.slot.slot_id +
+          ' was previously incomplete; refusing to continue the frozen schedule' };
+      }
+      continue;
+    }
     const result = await runSlot(deps, run);
     results.push({ ...result, slot_id: run.slot.slot_id });
     deps.log(`${run.slot.slot_id}: ${result.state}${result.reason ? ` — ${result.reason}` : ''}${result.diagnosis ? ` (${result.diagnosis})` : ''}`);
     if (result.state === 'refused' && result.runId === null && /budget/.test(result.reason ?? '')) return { results, stopped: result.reason };
     if (result.state === 'refused' && rules.stopOnRefusal) return { results, stopped: `guard refusal on ${run.slot.slot_id}: ${result.reason}` };
     if (result.fingerprintMismatch) return { results, stopped: `${run.slot.slot_id} did not reproduce the frozen non-Skill fingerprint` };
+    // A confirmatory schedule has fixed slots and no replacement sampling.
+    // Stop on the first unsuccessful or potentially billed slot, regardless
+    // of the more tolerant exploratory consecutive-failure defaults.
+    if (run.slot.phase === 'confirmatory' &&
+        (result.state !== 'completed' || result.costUsd === null || result.infraFailure)) {
+      return { results, stopped: 'confirmatory slot ' + run.slot.slot_id + ' is incomplete: ' + (result.reason ?? result.state) };
+    }
     unknownCost = result.costUsd === null ? unknownCost + 1 : 0;
     if (unknownCost >= rules.maxConsecutiveUnknownCost) return { results, stopped: `${unknownCost} consecutive slots with unknown cost` };
     infra = result.infraFailure ? infra + 1 : 0;

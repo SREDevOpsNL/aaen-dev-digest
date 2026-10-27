@@ -1,12 +1,13 @@
 import { evaluateSlot, fingerprintsAgree, type Eligibility, type FrozenExpectations } from './eligibility.js';
 import type { SlotRecord } from './ledger.js';
-import { detection, experimentOutcome, type ExpectedRule, type FindingLike } from './rules.js';
+import { detection, type ExpectedRule, type FindingLike } from './rules.js';
 
 /**
  * The experiment report, built from data only (the CLI fetches it). Every
  * scheduled slot appears, including slots that were never dispatched; a slot
  * counts only when it is strict single-generation evidence AND reproduces the
- * frozen non-Skill fingerprint. Detection uses the pre-registered rules.
+ * frozen non-Skill fingerprint. Regex screening uses the pre-registered rules
+ * but never establishes a final technical detection or passing outcome.
  */
 
 export interface ScheduledSlot {
@@ -168,13 +169,15 @@ export function buildReport(input: {
         note: `${wrong.length} slot(s) did not execute their preregistered slot, condition or Skills: ${wrong.map((r) => `${r.slot_id} (${r.execution_issues[0]})`).join('; ')}`,
       };
     }
+    // Anchored regexes are a provisional screen, not technical adjudication.
+    // They cannot establish #17's conjunction or #18's lookup-semantics break.
     return {
       experiment,
       with: withT,
       without: withoutT,
       fingerprints_agree: true,
-      outcome: experimentOutcome(withT.detected, withT.counted, withoutT.detected, withoutT.counted),
-      note: null,
+      outcome: 'incomplete',
+      note: 'Anchored regex screening is non-authoritative; sealed condition-blinded technical adjudication is required',
     };
   });
   return { rows, summaries };
@@ -184,14 +187,14 @@ const cell = (text: string) => text.replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
 export function renderReport(report: { rows: SlotRow[]; summaries: ExperimentSummary[] }): string {
   const lines = [
-    '| Experiment | With: detected / counted | Without: detected / counted | Fingerprints agree | Outcome |',
+    '| Experiment | With: regex hits / eligible | Without: regex hits / eligible | Fingerprints agree | Outcome |',
     '| --- | --- | --- | --- | --- |',
     ...report.summaries.map(
       (s) =>
         `| ${s.experiment} | ${s.with.detected} / ${s.with.counted} | ${s.without.detected} / ${s.without.counted} | ${s.fingerprints_agree ? 'yes' : 'no'} | ${s.outcome}${s.note ? ` (${cell(s.note)})` : ''} |`,
     ),
     '',
-    '| Slot | Exp. | Condition | State | Counted | Provenance | Fingerprint | Detected | Matched (anchor) | All finding titles | Cost (USD) | Not counted because |',
+    '| Slot | Exp. | Condition | State | Counted | Provenance | Fingerprint | Regex screen | Matched (anchor) | All finding titles | Cost (USD) | Not counted because |',
     '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...report.rows.map((r) =>
       [

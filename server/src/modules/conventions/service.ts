@@ -111,8 +111,9 @@ export class ConventionsService {
           onAttempt: admission.onAttempt,
         } : {}),
       });
-      admission?.assertVerified();
+      // Retain the provider response even when its provenance cannot be verified.
       admission?.modelResult(result.data, result.raw);
+      admission?.assertVerified();
 
     const verified: VerifiedCandidate[] = [];
     let droppedUngrounded = 0;

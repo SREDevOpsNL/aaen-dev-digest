@@ -8,6 +8,7 @@ import type {
 } from '@devdigest/shared';
 import { experimentRequestBody } from '@devdigest/reviewer-core';
 import type { Container } from '../../platform/container.js';
+import type { ExperimentConfig } from '../../platform/config.js';
 import { AppError, ConflictError, ValidationError } from '../../platform/errors.js';
 import { ExtractionReceipts, receiptAttempt } from '../../platform/experiment-receipts.js';
 import { EXPERIMENT_REQUEST_TIMEOUT_MS } from '../../platform/config.js';
@@ -18,6 +19,7 @@ import { implementationFingerprint, repoRoot } from '../../experiments/hw2/sourc
 import { evaluateSlot } from '../../experiments/hw2/eligibility.js';
 import {
   canonicalJson, effectivePriceLimits, experimentOptions, inputUpperBound, preflight, sha256,
+  type PriceLimits,
 } from '../_shared/experiment.js';
 import {
   extractionCapabilityProblem, extractionRequestSha256, type ConventionsCapability, type ExtractionBinding,
@@ -25,6 +27,15 @@ import {
 import type { SampledFile } from '../conventions/helpers.js';
 
 const PRIVATE_ROOT = join(homedir(), '.devdigest', 'hw2-experiments');
+
+/** Extraction must price and validate the exact endpoint its request pins. */
+export function exactConventionsPriceLimits(
+  config: ExperimentConfig, live: OpenRouterEndpointInfo[],
+): PriceLimits | null {
+  const tag = config.provider.toLowerCase();
+  const exact = live.filter((endpoint) => endpoint.tag?.toLowerCase() === tag);
+  return exact.length ? effectivePriceLimits(config, exact) : null;
+}
 type Repository = { id: string; fullName: string; owner: string; name: string };
 type Input<T> = {
   workspaceId: string;
@@ -139,7 +150,7 @@ export class ConventionsExperiment {
     const llm = await this.container.llm('openrouter');
     const lister = llm as Partial<{ listEndpoints(model: string): Promise<OpenRouterEndpointInfo[]> }>;
     if (typeof lister.listEndpoints !== 'function') throw new ValidationError('Endpoint metadata unavailable');
-    const limits = effectivePriceLimits(config, await lister.listEndpoints(input.request.model));
+    const limits = exactConventionsPriceLimits(config, await lister.listEndpoints(input.request.model));
     if (!limits) throw new ValidationError('Frozen endpoint unavailable');
     const body = canonicalJson(experimentRequestBody(frozenRequest, options));
     const upper = inputUpperBound(body, 0);

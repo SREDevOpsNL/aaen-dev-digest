@@ -383,7 +383,7 @@ describe('runner orchestration (fake API, no network)', () => {
 
   it('stops after two consecutive slots with unknown cost', async () => {
     api.settle = (slotId, runId) => ({ runs: [{ run_id: runId, status: 'done', cost_usd: null, experiment: { slot_id: slotId, dispatch_state: 'completed', usage_known: false } }] });
-    const { results, stopped } = await runSchedule(deps, [slotRun('a-1'), slotRun('a-2'), slotRun('a-3')]);
+    const { results, stopped } = await runSchedule(deps, [slotRun('a-1', 'exploration'), slotRun('a-2', 'exploration'), slotRun('a-3', 'exploration')]);
     expect(results).toHaveLength(2);
     expect(stopped).toMatch(/2 consecutive slots with unknown cost/);
   });
@@ -416,6 +416,49 @@ describe('runner orchestration (fake API, no network)', () => {
       'x-18-without-1: failed — 429 Provider returned error (origin upstream_provider, provider DeepInfra, error_type rate_limit_exceeded, provider_code rate_limited, retry-after 20, request req_1)',
     );
     expect(describeErrorDetail(null)).toBeNull();
+  });
+
+  it('stops a confirmatory schedule after one upstream 429 and refuses continuation on resume', async () => {
+    api.settle = (slotId, runId) => ({
+      runs: [{
+        run_id: runId, status: 'failed', cost_usd: null,
+        experiment: {
+          slot_id: slotId, dispatch_state: 'failed', usage_known: false,
+          refusal_reason: '429 upstream rate limit', attempts: [{ outcome: 'http_error' }],
+        },
+      }],
+    });
+    const schedule = [slotRun('c-429-1', 'confirmatory', 0.01), slotRun('c-429-2', 'confirmatory', 0.01)];
+    const first = await runSchedule(deps, schedule);
+    expect(first.results).toHaveLength(1);
+    expect(first.results[0]).toMatchObject({ state: 'failed', costUsd: null, infraFailure: true });
+    expect(first.stopped).toMatch(/confirmatory slot c-429-1 is incomplete/);
+    expect(api.calls.filter((call) => call.path === '/experiments/runs')).toHaveLength(1);
+    expect(spent(ledger.slots().values(), 'confirmatory')).toBeCloseTo(0.01);
+
+    const resumed = await runSchedule(deps, schedule);
+    expect(resumed.stopped).toMatch(/c-429-1 was previously incomplete/);
+    expect(api.calls.filter((call) => call.path === '/experiments/runs')).toHaveLength(1);
+  });
+
+  it('stops confirmatory requests after a completed slot with unknown cost', async () => {
+    api.settle = (slotId, runId) => ({
+      runs: [{ run_id: runId, status: 'done', cost_usd: null,
+        experiment: { slot_id: slotId, dispatch_state: 'completed', usage_known: false, attempts: [{ outcome: 'valid' }] } }],
+    });
+    const schedule = [slotRun('c-unknown-1'), slotRun('c-unknown-2')];
+    const { results, stopped } = await runSchedule(deps, schedule);
+    expect(results).toMatchObject([{ state: 'completed', costUsd: null }]);
+    expect(stopped).toMatch(/confirmatory slot c-unknown-1 is incomplete/);
+    expect(api.calls.filter((call) => call.path === '/experiments/runs')).toHaveLength(1);
+  });
+
+  it('stops confirmatory requests after an ambiguous dispatch', async () => {
+    api.postError = new Error('ECONNRESET');
+    const { results, stopped } = await runSchedule(deps, [slotRun('c-ambiguous-1'), slotRun('c-ambiguous-2')]);
+    expect(results).toMatchObject([{ state: 'ambiguous', costUsd: null }]);
+    expect(stopped).toMatch(/confirmatory slot c-ambiguous-1 is incomplete/);
+    expect(api.calls.filter((call) => call.path === '/experiments/runs')).toHaveLength(1);
   });
 
   it('stops on a guard refusal in the confirmatory phase', async () => {
@@ -459,6 +502,27 @@ describe('runner: capability header and frozen fingerprint', () => {
     const { stopped, results } = await runSchedule(deps, [run('c-1', 'a'.repeat(64)), run('c-2', 'a'.repeat(64))]);
     expect(results).toHaveLength(1);
     expect(stopped).toMatch(/did not reproduce the frozen non-Skill fingerprint/);
+    expect(ledger.slots().get('c-1')?.events.at(-1)?.detail?.fingerprint_mismatch).toBe(true);
+    const resumed = await runSchedule(deps, [run('c-1', 'a'.repeat(64)), run('c-2', 'a'.repeat(64))]);
+    expect(resumed.stopped).toMatch(/c-1 was previously incomplete/);
+    expect(api.calls.filter((call) => call.path === '/experiments/runs')).toHaveLength(1);
+  });
+
+  it('reconciliation persists a confirmatory fingerprint mismatch and blocks resume', async () => {
+    ledger.append({
+      slot_id: 'c-1', phase: 'confirmatory', reservation_usd: 0.05, state: 'reserved',
+      detail: { expected_non_skill_fingerprint: 'a'.repeat(64) },
+    });
+    ledger.append({ slot_id: 'c-1', phase: 'confirmatory', reservation_usd: 0.05, state: 'dispatched', run_id: 'run-c-1' });
+    api.slots.set('c-1', { runs: [{
+      run_id: 'run-c-1', status: 'done', cost_usd: 0.0002,
+      experiment: { dispatch_state: 'completed', usage_known: true, non_skill_fingerprint: 'b'.repeat(64) },
+    }] });
+    await reconcile(deps);
+    expect(ledger.slots().get('c-1')?.events.at(-1)?.detail?.fingerprint_mismatch).toBe(true);
+    const resumed = await runSchedule(deps, [run('c-1', 'a'.repeat(64)), run('c-2', 'a'.repeat(64))]);
+    expect(resumed.stopped).toMatch(/c-1 was previously incomplete/);
+    expect(api.calls.filter((call) => call.path === '/experiments/runs')).toHaveLength(0);
   });
 });
 
@@ -545,15 +609,36 @@ describe('experiment report', () => {
     expect(renderReport(result)).toContain('not dispatched');
   });
 
-  it('applies the frozen rules to the actual findings and the pre-registered success rule', () => {
+  it('screens findings with frozen regexes but requires blinded technical adjudication for a final outcome', () => {
     const result = report(allRuns((slot) => slot.condition === 'with' || slot.experiment === '18'));
     const byExp = Object.fromEntries(result.summaries.map((s) => [s.experiment, s]));
-    expect(byExp['17']).toMatchObject({ with: { counted: 5, detected: 5 }, without: { counted: 5, detected: 0 }, outcome: 'success', fingerprints_agree: true });
-    expect(byExp['18']).toMatchObject({ with: { detected: 5 }, without: { detected: 5 }, outcome: 'negative' });
+    expect(byExp['17']).toMatchObject({ with: { counted: 5, detected: 5 }, without: { counted: 5, detected: 0 }, outcome: 'incomplete', fingerprints_agree: true });
+    expect(byExp['18']).toMatchObject({ with: { detected: 5 }, without: { detected: 5 }, outcome: 'incomplete' });
+    expect(byExp['17'].note).toMatch(/Anchored regex screening is non-authoritative; sealed condition-blinded technical adjudication is required/);
+    expect(byExp['18'].note).toMatch(/Anchored regex screening is non-authoritative; sealed condition-blinded technical adjudication is required/);
     const row = result.rows.find((r) => r.experiment === '18')!;
     expect(row.finding_titles).toEqual(['Breaking change to v1 response', 'Style nit']);
     expect(row.matched).toEqual([{ title: 'Breaking change to v1 response', file: 'src/api/payments.ts', lines: '18-18' }]);
     expect(renderReport(result)).toContain('Breaking change to v1 response (src/api/payments.ts:18-18)');
+  });
+
+  it('does not score generic #17 edge text or #18 placeholder renaming as final detection', () => {
+    const runs = allRuns((slot) => slot.condition === 'with');
+    for (const slot of schedule) {
+      if (slot.condition !== 'with') continue;
+      const run = runs.get(slot.slot_id)!;
+      const finding = slot.experiment === '17'
+        ? { file: 'src/billing/discount.test.ts', start_line: 5, end_line: 7,
+          title: 'Add edge cases', rationale: 'Test more edge cases.' }
+        : { file: 'src/api/payments.ts', start_line: 18, end_line: 18,
+          title: 'Breaking placeholder rename', rationale: 'The URL parameter changed from :id to :reference.' };
+      runs.set(slot.slot_id, { ...run, findings: [finding] });
+    }
+    const result = report(runs);
+    expect(result.rows.filter((row) => row.condition === 'with').every((row) => row.detected)).toBe(true);
+    expect(result.summaries.every((summary) => summary.outcome === 'incomplete')).toBe(true);
+    expect(result.summaries.every((summary) => summary.note?.includes('technical adjudication'))).toBe(true);
+    expect(renderReport(result)).toContain('Regex screen');
   });
 
   it('marks an experiment invalid when an otherwise eligible slot does not reproduce the frozen fingerprint', () => {
