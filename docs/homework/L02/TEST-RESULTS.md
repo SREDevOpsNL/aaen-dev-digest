@@ -85,8 +85,8 @@ call. Criterion 21 still needs a real Claude Code session; criteria 17, 18,
 
 The conventions-only API restart and fresh Fastify preflight are recorded in
 [CONVENTIONS-EXTRACTION-PREFLIGHT.md](CONVENTIONS-EXTRACTION-PREFLIGHT.md).
-After the sample-path preview change, server typecheck and focused
-authorization/spend-gate tests passed (17/17); `bash -n scripts/e2e.sh`
+After the sample-path preview and private raw-response receipt changes,
+server typecheck and focused authorization/spend-gate tests passed (17/17); `bash -n scripts/e2e.sh`
 passed. The previous full suite and 14/14 hermetic flows remain the last
 broad local runs; GitHub Actions on the new head provide the subsequent
 package and browser gates. No extraction model call was made.

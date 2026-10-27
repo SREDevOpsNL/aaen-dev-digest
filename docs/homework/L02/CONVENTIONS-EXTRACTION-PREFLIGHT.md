@@ -48,7 +48,7 @@ runner lock, reserves durably, then makes **one** synchronous extraction POST.
 The existing OpenRouter experiment mode enforces zero SDK retries, zero schema
 reprompts, one provider, fallbacks off and attempt telemetry. A durable receipt
 is claimed exclusively and fsynced before dispatch, with later dispatch,
-attempt, parsed model-result and persistence events. A 4xx after dispatch is never presumed free.
+attempt, private raw/parsed model-result and persistence events. A 4xx after dispatch is never presumed free.
 
 The runner classifies the receipt and reads back pending candidate IDs and a
 digest through the API. Unknown cost, absent or conflicting provenance,
@@ -99,8 +99,8 @@ The paid operation is the existing `POST /repos/:id/conventions/extract`
 endpoint, invoked once by `run-conventions` after its one-use reservation.
 Its response contains `proposed`, `dropped_ungrounded`,
 `dropped_duplicate`, model, cost and the current candidate DTOs. Keep the
-private receipt's `model_result` event (the actual parsed structured model
-output) distinct from the grounded candidate rows. Do not publish the full
+private receipt's `model_raw` response string and parsed `model_result`
+event distinct from the grounded candidate rows. Do not publish the full
 private response or receipt without sanitizing it.
 
 For **#38**, capture the terminal ledger/receipt state and the API candidate
@@ -117,7 +117,7 @@ container. Verify that the API process changed, the stack/database/cluster
 identity did not, and the same candidate IDs and values remain in API and
 SQL read-back. Do not restart during an unresolved or in-flight slot.
 
-For **#40**, compare every raw `model_result.candidates[]` item against
+For **#40**, compare every parsed `model_result.candidates[]` item against
 the `ExtractionSchema` fields `category`, `rule`, `evidence_path`,
 `evidence_line` and `confidence`. Then compare it with the persisted
 grounded projection, including the source-snippet verification and any
@@ -170,8 +170,9 @@ reservation passes with `problems: []`.
 The unused slot proposed for approval is
 `conv-fastify-20261027-4bff6e22`. The exact complete-request fingerprint
 is `38d6b12f9ffb083846d2fb99e5f43b34bd7afb8d434416e2e6391c79edb83459`;
-the current committed implementation fingerprint is
-`bb86345330722b063e8590b1f85e7480a5888d26844f7af933eb36b798970016`.
+the current committed implementation fingerprint after private raw-response
+retention is
+`bbac3e4e51d0bef83d9e3f309fd72a006fb30d64a8d65a728c603a27be3a8215`.
 These bindings must be rechecked immediately before any future dispatch.
 
 The global ledger held seven terminal slots, no unresolved slot, and a
