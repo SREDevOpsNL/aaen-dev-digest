@@ -59,9 +59,10 @@ See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md). Still open:
 - criterion 14: drag order and trace are verified, but the recovered rubric
   literally requires the system-message role; mentor clarification is pending.
 - criteria 17 and 18: the exploratory pilot ran, but neither result is a pass (17 incomplete, 18 no detection difference). Confirmatory runs need a separate authorization;
-- the live conventions extraction (rows 38 and 40);
 - the headless `pr-self-review` session (row 21);
 - original-source verification of the rubric, which was a recovered English translation.
+
+Rows 38 and 40 are verified by the [single authorized live extraction](evidence/conventions-live-extraction.md), including model output, grounded persistence, API/SQL read-back and an API-only restart.
 
 ## Run it
 

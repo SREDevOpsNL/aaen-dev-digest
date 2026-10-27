@@ -116,3 +116,16 @@ The new report labels regex matches as provisional screening. No
 confirmatory outcome is claimed. The refreshed free extraction preview and
 API-only restart are in
 [CONVENTIONS-EXTRACTION-PREFLIGHT.md](CONVENTIONS-EXTRACTION-PREFLIGHT.md).
+
+## Live extraction evidence checkpoint (2026-10-27)
+
+At source `e2e5671`, all six GitHub Actions workflows passed. The previously
+reported isolated local suites remain the last full local test run.
+One separately authorized live conventions extraction then completed via
+the guarded application endpoint. Its single attempt, actual provider,
+parsed model response, grounded candidate, API/SQL read-back after API-only
+restart, $0.00265410 ledger cost, successful key-usage settlement and
+capability revocation are recorded in
+[conventions-live-extraction.md](evidence/conventions-live-extraction.md).
+This runtime evidence verifies criteria 38 and 40; it is not a new
+test-suite run and did not alter experiments 17 or 18.

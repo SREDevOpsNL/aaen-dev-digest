@@ -95,8 +95,10 @@ trace evidence.
 ## 4. Conventions (rows 38–42, 45–51, 53)
 
 1. **Conventions** has separate **Run Scan** and **ReScan** buttons (23).
-   **Paid:** Run Scan on an imported, indexed repository runs the extraction
-   (row 38).
+   One owner-authorized extraction ran through the same application endpoint
+   used by Run Scan, against an imported, indexed Fastify repository. See
+   [live extraction evidence](evidence/conventions-live-extraction.md) for
+   rows 38 and 40; do not rerun the paid call during the walkthrough.
 2. On the evidence stack, the candidates are seeded and labelled "Synthetic
    fixture — not a model extraction". Each card shows the rule, file link and
    confidence, with Accept, Reject and Edit (23).

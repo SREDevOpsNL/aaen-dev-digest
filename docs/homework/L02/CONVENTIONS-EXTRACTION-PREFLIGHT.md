@@ -1,8 +1,9 @@
-# L02 conventions extraction: unpaid preflight and authorization design
+# L02 conventions extraction: preflight, authorization and live evidence
 
-**Status:** unpaid verification complete; paid evidence pending. This
-document authorizes no paid request. Criteria 38 and 40 remain Implemented until a separately authorized
-real extraction, candidate evidence, database read-back and restart are shown.
+**Status:** one separately authorized live extraction completed on 2026-10-27.
+This document records the earlier unpaid preflight and the later guarded run;
+it authorizes no further paid request. Criteria 38 and 40 have
+[real runtime evidence](evidence/conventions-live-extraction.md).
 
 ## Separate public-repository stack
 
@@ -235,6 +236,24 @@ proposed unused slot `conv-fastify-20261027-4bff6e22`. The proposed
 cumulative ceiling remains $0.03116289. Recheck all mutable values
 immediately before any separately approved authorization.
 
-No extraction generation has run. Candidate persistence, actual structured
-output and post-generation restart read-back remain unverified for criteria
-38 and 40.
+At this earlier preflight checkpoint, no extraction generation had run.
+Candidate persistence, actual structured output and post-generation restart
+read-back were still unverified for criteria 38 and 40.
+
+## Completed owner-authorized extraction (2026-10-27)
+
+The first pre-dispatch check found the API process absent while the labelled
+disposable PostgreSQL container remained healthy. No capability or model
+request was made. An API-only process recovery preserved the database,
+cluster and indexed Fastify clone. A free preview still returned the exact
+approved request and implementation fingerprints. The owner separately
+reauthorized that exact one-use operation after the failed initial check.
+
+The guarded runner then made exactly one request, costing $0.00265410.
+The response contained 12 structured candidate claims; grounding retained
+one and rejected 11. The one persisted candidate matched through API and
+SQL before and after an API-only restart on the same database and PostgreSQL
+cluster. Key-usage settlement passed, and the consumed capability/token
+were revoked. See the [sanitized live evidence](evidence/conventions-live-extraction.md)
+for provider provenance, actual response fields, row ID, digests, restart
+and ledger reconciliation. No second extraction is authorized.

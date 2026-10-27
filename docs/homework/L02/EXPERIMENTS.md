@@ -317,3 +317,13 @@ condition-blinded technical adjudication protocol is still required before
 a prospective study can be frozen. The outcome rules, four-condition cost
 preflight and separate paid authorization gate are in
 [PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md).
+
+## Separate conventions extraction (2026-10-27)
+
+The owner authorized exactly one `conventions.extract` operation on
+`fastify/fastify` through the isolated extraction stack. It completed
+with one grounded candidate for $0.00265410 and passed key-usage
+settlement. This is evidence for criteria 38 and 40, documented in
+[conventions-live-extraction.md](evidence/conventions-live-extraction.md).
+It is **not** a trial in controlled experiments 17 or 18. Their Phase 1
+outcomes and prospective spending gate remain unchanged.
