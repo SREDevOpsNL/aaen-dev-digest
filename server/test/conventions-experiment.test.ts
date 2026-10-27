@@ -179,6 +179,7 @@ const preview = (): ExtractionPreview => ({
   ...binding,
   repository_commit_sha: '5df959f3af698823dd582f1c3661f3e80df0b5da',
   expected_provider_name: 'DeepInfra', expected_served_model: 'served-model',
+  sampled_paths: ['src/index.js'], indexed_paths: ['src/index.js'],
   input_upper_bound: 1000, output_cap: 4000, worst_case_usd: 0.002,
   reservation_usd: 0.01, ok: true, reason: null,
 });

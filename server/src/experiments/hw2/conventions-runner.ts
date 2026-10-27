@@ -83,6 +83,8 @@ export function extractionPreviewProblems(preview: ExtractionPreview, stack: Ext
   check(preview.postgres_system_identifier === stack.identity.postgres_system_identifier, 'PostgreSQL cluster');
   check(preview.repository_full_name === SOURCE_REPO, 'repository name');
   check(preview.repository_commit_sha === SOURCE_COMMIT, 'repository revision');
+  check(Array.isArray(preview.sampled_paths) && preview.sampled_paths.length > 0, 'sampled paths');
+  check(Array.isArray(preview.indexed_paths) && preview.indexed_paths.length > 0, 'indexed paths');
   check(preview.model === stack.identity.model, 'model');
   check(preview.upstream_provider_slug === stack.identity.provider, 'routing provider');
   check(preview.expected_provider_name === stack.identity.provider_name, 'serving provider');

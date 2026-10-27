@@ -37,6 +37,8 @@ type Input<T> = {
 export interface ExtractionPreview extends ExtractionBinding {
   expected_provider_name: string;
   expected_served_model: string;
+  sampled_paths: string[];
+  indexed_paths: string[];
   input_upper_bound: number;
   output_cap: number;
   worst_case_usd: number;
@@ -185,6 +187,8 @@ export class ConventionsExperiment {
       ...snapshot.binding,
       expected_provider_name: snapshot.providerName,
       expected_served_model: snapshot.servedModel,
+      sampled_paths: input.files.map((file) => file.path),
+      indexed_paths: input.indexedPaths,
       input_upper_bound: snapshot.upper,
       output_cap: snapshot.options.maxTokens,
       worst_case_usd: snapshot.decision.worstCaseUsd ?? Number.NaN,
