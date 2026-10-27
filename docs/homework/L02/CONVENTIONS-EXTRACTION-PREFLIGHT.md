@@ -132,6 +132,64 @@ provider billing evidence. Reconciliation never replays the slot; unknown
 cost retains the full reservation. Sanitize IDs, prompts and model text before
 adding evidence to the public PR.
 
+## Fresh final unpaid preflight (2026-10-27)
+
+The current stack is `hw2f-0671292f` on loopback API/UI
+`127.0.0.1:3261/3260` and disposable PostgreSQL `127.0.0.1:5451`.
+Its database is `devdigest_hw2f_0671292f`; the API and intended labelled
+container reported the same PostgreSQL system identifier
+`7701259158859145256`. The only repository is `fastify/fastify`,
+repository ID `d30c77d4-9dcf-4ee6-94ad-fdb018a38ad6`, in workspace
+`c82995b6-f142-4452-9670-61c54b120d0c`. The clone is clean at
+`5df959f3af698823dd582f1c3661f3e80df0b5da`; its full index has
+298 files and exactly that last-indexed SHA. Embeddings are disabled and
+demo PR #3 is absent.
+
+The free preview disclosed 16 sampled paths: `package.json`,
+`eslint.config.js`, `.editorconfig`, `CONTRIBUTING.md`, `fastify.js`,
+`lib/symbols.js`, `lib/errors.js`, `lib/decorate.js`, `lib/hooks.js`,
+`lib/request.js`, `test/helper.js`, `lib/reply.js`, `lib/schemas.js`,
+`lib/content-type.js`, `lib/logger-factory.js` and
+`lib/error-handler.js`. The ranked indexed-path hash is
+`c4a111c8547467b770c987f6a3f5dec833f64607893fe73aebb37638074d2c10`;
+the sampled contents hash is
+`d8ecd16c8a7d1a15c527f6de7b13aae4f3f651a15b075623d04043f9531c6134`.
+
+The configured Conventions choice is OpenRouter
+`deepseek/deepseek-v4-flash`, routed only to `deepinfra/fp8`, expected
+`DeepInfra` and served model
+`deepseek/deepseek-v4-flash-20260423`. Live free endpoint metadata
+reported 1,048,576 context tokens, 65,536 maximum completion tokens, and
+$0.00000009/input token plus $0.00000018/output token with no request fee.
+The request's conservative input bound is 96,446 tokens, output cap 4,000,
+single attempt, no retries and no fallback. Its worst case is
+`(96,446 × 0.00000009 + 4,000 × 0.00000018) × 1.5 = $0.01410021`;
+the additional 20% reservation check gives $0.016920252. A **$0.020**
+reservation passes with `problems: []`.
+
+The unused slot proposed for approval is
+`conv-fastify-20261027-4bff6e22`. The exact complete-request fingerprint
+is `38d6b12f9ffb083846d2fb99e5f43b34bd7afb8d434416e2e6391c79edb83459`;
+the current committed implementation fingerprint is
+`bb86345330722b063e8590b1f85e7480a5888d26844f7af933eb36b798970016`.
+These bindings must be rechecked immediately before any future dispatch.
+
+The global ledger held seven terminal slots, no unresolved slot, and a
+conservative charge of $0.01116289; neither global lock existed and no
+active capability file existed. The dedicated key's free usage endpoint
+reported usage $0.00157077 of a $2.00 hard limit, leaving $1.99842923.
+A single $0.020 extraction reservation would bring the proposed cumulative
+ceiling to **$0.03116289**, within the $0.50 exploration and $1.50 aggregate
+caps. This is a proposal, not permission to issue a capability.
+
+The conventions-only `SIGUSR1` restart path was tested without a model call:
+API PID 1615779 was replaced by 1619344 while the PostgreSQL cluster ID,
+one persisted repository, model setting and 298-file index remained unchanged.
+There were zero convention rows, so this proves the restart mechanism only,
+not criterion 38's candidate persistence. An extraction call without a
+capability returned HTTP 403 and made no receipt. The fresh stack remains
+running for the owner's decision; no capability or paid generation exists.
+
 ## Required approval and outstanding evidence
 
 Before any paid run, the owner must approve the exact one-use operation,

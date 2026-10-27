@@ -80,3 +80,13 @@ It performed no model generation and issued no capability. A no-capability
 extraction request was refused with HTTP 403 before any receipt or provider
 call. Criterion 21 still needs a real Claude Code session; criteria 17, 18,
 38 and 40 still need separately approved evidence.
+
+## Final unpaid extraction preflight, 2026-10-27
+
+The conventions-only API restart and fresh Fastify preflight are recorded in
+[CONVENTIONS-EXTRACTION-PREFLIGHT.md](CONVENTIONS-EXTRACTION-PREFLIGHT.md).
+After the sample-path preview change, server typecheck and focused
+authorization/spend-gate tests passed (17/17); `bash -n scripts/e2e.sh`
+passed. The previous full suite and 14/14 hermetic flows remain the last
+broad local runs; GitHub Actions on the new head provide the subsequent
+package and browser gates. No extraction model call was made.
