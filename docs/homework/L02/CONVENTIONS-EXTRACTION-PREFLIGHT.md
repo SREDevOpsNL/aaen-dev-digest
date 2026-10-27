@@ -93,6 +93,45 @@ then torn down; the earlier evidence container remained running. A future
 approved run must repeat the preflight on its own fresh stack and cannot reuse
 this short-lived preview or request hash without matching every bound input.
 
+## Evidence procedure after a separately approved extraction
+
+The paid operation is the existing `POST /repos/:id/conventions/extract`
+endpoint, invoked once by `run-conventions` after its one-use reservation.
+Its response contains `proposed`, `dropped_ungrounded`,
+`dropped_duplicate`, model, cost and the current candidate DTOs. Keep the
+private receipt's `model_result` event (the actual parsed structured model
+output) distinct from the grounded candidate rows. Do not publish the full
+private response or receipt without sanitizing it.
+
+For **#38**, capture the terminal ledger/receipt state and the API candidate
+list from `GET /repos/:id/conventions`. Read the same `id`, `category`,
+`rule`, `evidence_path`, `evidence_line`, `confidence` and `status`
+columns from the isolated database's `conventions` table, filtered by both
+workspace and repository ID. Compare IDs and field values, not merely row
+counts. After the extraction is terminal and the global runner lock and
+in-flight gate are clear, send `SIGUSR1` to the **new conventions harness
+process printed at startup**. Only `--serve --conventions` handles this
+signal: it checks the ledger and gate, stops its API child, starts a new API
+child on the same loopback port and retains the disposable PostgreSQL
+container. Verify that the API process changed, the stack/database/cluster
+identity did not, and the same candidate IDs and values remain in API and
+SQL read-back. Do not restart during an unresolved or in-flight slot.
+
+For **#40**, compare every raw `model_result.candidates[]` item against
+the `ExtractionSchema` fields `category`, `rule`, `evidence_path`,
+`evidence_line` and `confidence`. Then compare it with the persisted
+grounded projection, including the source-snippet verification and any
+corrected line number. Record the `proposed`, `dropped_ungrounded` and
+`dropped_duplicate` counts. Empty output, invalid schema, absent provider
+provenance, or only ungrounded candidates must be reported as such and cannot
+automatically verify #38 or #40. A successful HTTP response by itself is
+insufficient.
+
+If the API response is lost after dispatch, consult the private receipt and
+provider billing evidence. Reconciliation never replays the slot; unknown
+cost retains the full reservation. Sanitize IDs, prompts and model text before
+adding evidence to the public PR.
+
 ## Required approval and outstanding evidence
 
 Before any paid run, the owner must approve the exact one-use operation,

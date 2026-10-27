@@ -214,6 +214,60 @@ done
 [ "$api_up" -eq 1 ] || { echo "API never became healthy on :$API_PORT"; exit 1; }
 log "API healthy"
 
+# In conventions serve mode, restart only the API while keeping the disposable
+# Postgres container alive for post-extraction persistence evidence. This must
+# never run during an active or unresolved paid slot.
+restart_conventions_api() {
+  [ "$CONVENTIONS" -eq 1 ] || return 1
+  if [ -e "${HOME}/.devdigest/hw2-experiments/runner.lock" ]; then
+    warn "runner lock exists; refusing API restart"
+    return 0
+  fi
+  local ledger_file="${HOME}/.devdigest/hw2-experiments/ledger.jsonl"
+  if [ -f "$ledger_file" ] && ! python3 -c '
+import json, sys
+states = {}
+for line in open(sys.argv[1], encoding="utf-8"):
+    if line.strip():
+        event = json.loads(line)
+        states[event["slot_id"]] = event["state"]
+sys.exit(any(state in ("reserved", "dispatched") for state in states.values()))
+' "$ledger_file"; then
+    warn "an unresolved ledger slot exists or the ledger is unreadable; refusing API restart"
+    return 0
+  fi
+  local in_flight
+  in_flight="$(curl -fsS "http://127.0.0.1:${API_PORT}/experiments/identity" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("in_flight_slot") or "none")')" ||
+    { warn "cannot verify an idle API; refusing restart"; return 0; }
+  if [ "$in_flight" != "none" ]; then
+    warn "generation is in flight; refusing API restart"
+    return 0
+  fi
+  log "restarting only the conventions API on :$API_PORT; disposable database stays up"
+  kill_tree "$SERVER_PID"
+  local port_busy=1
+  for _ in $(seq 1 60); do
+    if ! lsof -nP -iTCP:"$API_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+      port_busy=0
+      break
+    fi
+    sleep 1
+  done
+  [ "$port_busy" -eq 0 ] || { echo "old API listener did not stop"; exit 1; }
+  (cd server && pnpm exec tsx src/server.ts) &
+  SERVER_PID=$!
+  local api_ready=0
+  for _ in $(seq 1 60); do
+    curl -fsS "http://127.0.0.1:${API_PORT}/health" >/dev/null 2>&1 && { api_ready=1; break; }
+    kill -0 "$SERVER_PID" 2>/dev/null || { echo "replacement API exited"; exit 1; }
+    sleep 1
+  done
+  [ "$api_ready" -eq 1 ] || { echo "replacement API did not become healthy"; exit 1; }
+  assert_loopback_listeners "$API_PORT" || { echo "replacement API is not loopback-only"; exit 1; }
+  log "conventions API restarted; database and stack identity retained"
+}
+
 # --- web on :$WEB_PORT (next dev → reads NEXT_PUBLIC_API_BASE from env) -------
 log "starting web on :$WEB_PORT"
 # `${a[@]+"${a[@]}"}`, not `"${a[@]}"`: under `set -u`, bash before 4.4 (macOS's
@@ -245,6 +299,15 @@ if [ "$SERVE" -eq 1 ]; then
   ledger     ${HOME}/.devdigest/hw2-experiments/ledger.jsonl (shared by every stack)
   key file   ${HOME}/.devdigest/hw2-experiments/secrets.json
 IDENTITY
+  if [ "$CONVENTIONS" -eq 1 ]; then
+    log "after a completed extraction, restart only this API with: kill -USR1 $$"
+    trap restart_conventions_api USR1
+    while kill -0 "$SERVER_PID" 2>/dev/null; do
+      wait "$SERVER_PID" || true
+    done
+    echo "conventions API exited; tearing down its disposable stack"
+    exit 1
+  fi
   wait "$SERVER_PID"
   exit $?
 fi
