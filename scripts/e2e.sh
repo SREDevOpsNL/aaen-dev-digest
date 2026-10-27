@@ -29,12 +29,15 @@ cd "$ROOT"
 # docs/homework/L02/EXPERIMENTS.md). It blocks until Ctrl-C, then
 # tears down like a normal run. No model is called by this script.
 SERVE=0
+CONVENTIONS=0
 for arg in "$@"; do
   case "$arg" in
     --serve) SERVE=1 ;;
-    *) echo "unknown argument: $arg (only --serve is supported)"; exit 2 ;;
+    --conventions) CONVENTIONS=1 ;;
+    *) echo "unknown argument: $arg (supported: --serve --conventions)"; exit 2 ;;
   esac
 done
+[ "$CONVENTIONS" -eq 0 ] || [ "$SERVE" -eq 1 ] || { echo "--conventions requires --serve"; exit 2; }
 
 # --- config (all overridable; defaults dodge the dev stack on 5432/3000/3001) ---
 PG_CONTAINER="${E2E_PG_CONTAINER:-devdigest-e2e-postgres}"
@@ -188,7 +191,12 @@ log "seeding demo data + HW2 experiment fixtures (isolated db)"
 # Conventions walkthrough; the flow run does not (flow 09 expects no candidates).
 SYNTHETIC=0
 [ "$SERVE" -eq 1 ] && SYNTHETIC=1
-(cd server && DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS="$SYNTHETIC" pnpm db:seed)
+if [ "$CONVENTIONS" -eq 1 ]; then
+  log "seeding only the local workspace identity (no demo repository or PR fixtures)"
+  (cd server && DEVDIGEST_SEED_IDENTITY_ONLY=1 pnpm db:seed)
+else
+  (cd server && DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS="$SYNTHETIC" pnpm db:seed)
+fi
 
 # --- API on :$API_PORT -------------------------------------------------------
 # tsx directly (not `pnpm start`, which needs a build; not `tsx watch`, to avoid

@@ -40,7 +40,8 @@ export default async function conventionsRoutes(appBase: FastifyInstance) {
     config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
   }, async (request) => {
     const { workspaceId } = await getContext(app.container, request);
-    return service.extract(workspaceId, request.params.id);
+    const capability = request.headers['x-hw2-capability'];
+    return service.extract(workspaceId, request.params.id, typeof capability === 'string' ? capability : undefined);
   });
 
   app.post('/repos/:id/conventions/skill', {

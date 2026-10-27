@@ -32,6 +32,7 @@ export type SlotInput = ExperimentRunRequest & { pr_id: string; agent_id: string
 export interface ExperimentIdentity {
   stack_id: string;
   database: string;
+  postgres_system_identifier: string;
   database_is_disposable: boolean;
   repos: string[];
   fixture_pulls: number[];
@@ -51,6 +52,7 @@ export interface ExperimentIdentity {
   /** The dedicated experiment key file, and whether it holds an OpenRouter key (never the key). */
   secrets_path: string;
   openrouter_key_configured: boolean;
+  embeddings_enabled: boolean;
 }
 
 /**
@@ -82,6 +84,7 @@ export class ExperimentsService {
     return {
       stack_id: config.stackId,
       database,
+      postgres_system_identifier: await this.repo.postgresSystemIdentifier(),
       database_is_disposable: isDisposableDatabaseName(database),
       repos: await this.repo.repoFullNames(),
       fixture_pulls: pulls.filter((n) => FIXTURE_PULLS.includes(n)),
@@ -99,6 +102,7 @@ export class ExperimentsService {
       armed_slot: this.container.experimentArms.armedSlot,
       secrets_path: this.container.config.secretsPath,
       openrouter_key_configured: Boolean(await this.container.secrets.get('OPENROUTER_API_KEY')),
+      embeddings_enabled: this.container.config.embeddingsEnabled,
     };
   }
 

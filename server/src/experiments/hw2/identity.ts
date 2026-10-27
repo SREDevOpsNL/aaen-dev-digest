@@ -16,6 +16,8 @@ export interface ExpectedStack {
 export interface StackIdentity {
   stack_id: string;
   database: string;
+  postgres_system_identifier?: string;
+  clone_dir?: string;
   database_is_disposable: boolean;
   repos: string[];
   fixture_pulls: number[];
@@ -29,6 +31,7 @@ export interface StackIdentity {
   in_flight_slot: string | null;
   secrets_path: string;
   openrouter_key_configured: boolean;
+  embeddings_enabled?: boolean;
 }
 
 /** The only key file an experiment stack may read (see platform/config.ts). */

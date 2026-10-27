@@ -162,7 +162,8 @@ That spend is part of the dedicated key's opening usage here.
 Paid Phase 1 was authorized on 2026-10-25: five exploratory slots, $0.01
 reserved each, a $0.06 cumulative ceiling, `deepseek/deepseek-v4-flash` via
 `deepinfra/fp8`, no retries, no fallback, and no confirmatory runs. Stack
-`hw2f-7d16304f`. Nothing has been generated yet.
+`hw2f-7d16304f`. At this authorization checkpoint, nothing had been
+generated; the Phase 1 log below records the later attempts and outcomes.
 
 ### Phase 1 log (in order)
 

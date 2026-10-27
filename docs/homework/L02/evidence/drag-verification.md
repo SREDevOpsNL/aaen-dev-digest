@@ -82,4 +82,5 @@ equals the value computed independently from the skill bodies for exactly
 So the assembled prompt contains only `semver-discipline` and
 `breaking-change`, in the dragged order. `b4978ce0…` is the
 `--expect-skill-fingerprint` for the trace-only slot `x-18-with-2`. The live
-trace itself (rows 14, 19, 20) needs that paid slot.
+trace was later captured in the completed, owner-authorized trace-only slot
+`x-18-with-2`; see [trace evidence](trace-evidence.md).

@@ -1,7 +1,9 @@
 # Test results
 
-Run on 2026-10-25 at commit `d07e4fe` of `homework/l02-mentor-submission`. Only
-documentation changed after that commit.
+Baseline run on 2026-10-25 at commit `d07e4fe` of
+`homework/l02-mentor-submission`. The table below records that baseline, not a
+fresh run at the current head. Later commits changed source and tests; use the
+PR checks and dated experiment evidence for their subsequent verification.
 
 **Environment:** Ubuntu 24.04.5 LTS on WSL2 (kernel 6.18.33.2), Node v22.23.2,
 pnpm 10.34.5, npm 10.9.8, Docker 29.8.1, agent-browser 0.27.0.

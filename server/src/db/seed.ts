@@ -58,6 +58,8 @@ export interface SeedOptions {
    * disposable-only like the fixtures (CLI: DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS=1).
    */
   syntheticConventions?: boolean;
+  /** Disposable conventions stack: seed only the local user/workspace/settings, never demo data. */
+  identityOnly?: boolean;
 }
 
 export async function seed(
@@ -65,7 +67,10 @@ export async function seed(
   options: SeedOptions = {},
 ): Promise<{ workspaceId: string; userId: string }> {
   // Checked before any write, so a refused run changes nothing.
-  if (options.experimentFixtures || options.syntheticConventions) await assertDisposableDatabase(db);
+  if (options.experimentFixtures || options.syntheticConventions || options.identityOnly) await assertDisposableDatabase(db);
+  if (options.identityOnly && (options.experimentFixtures || options.syntheticConventions)) {
+    throw new Error('Identity-only seed cannot add review fixtures or synthetic conventions');
+  }
 
   // ---- workspace + user (no-auth defaults) ----
   let [ws] = await db
@@ -107,6 +112,8 @@ export async function seed(
       .values({ workspaceId, userId, key, value })
       .onConflictDoNothing();
   }
+
+  if (options.identityOnly) return { workspaceId, userId };
 
   // ---- demo repo (acme/payments-api) ----
   let [repo] = await db
@@ -489,6 +496,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   seed(handle.db, {
     experimentFixtures: process.env.DEVDIGEST_SEED_EXPERIMENT_FIXTURES === '1',
     syntheticConventions: process.env.DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS === '1',
+    identityOnly: process.env.DEVDIGEST_SEED_IDENTITY_ONLY === '1',
   })
     .then(async (r) => {
       console.log('✓ seeded', r);

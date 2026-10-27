@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { LLMProvider, StructuredExperimentOptions, StructuredRequest } from '@devdigest/shared';
+import { REVIEW_SCHEMA_NAME } from '@devdigest/reviewer-core';
 import { ExperimentGuardedProvider, ExperimentSpendGate } from '../src/platform/experiment-spend-gate.js';
 
 const options = (slotId: string): StructuredExperimentOptions => ({
@@ -27,7 +28,7 @@ function setup() {
   const request = (experiment?: StructuredExperimentOptions): StructuredRequest<unknown> => ({
     model: 'm',
     schema: z.unknown(),
-    schemaName: 'X',
+    schemaName: REVIEW_SCHEMA_NAME,
     messages: [{ role: 'user', content: 'x' }],
     ...(experiment ? { experiment } : {}),
   });
@@ -40,7 +41,7 @@ describe('experiment spend gate', () => {
     expect(gate.tryOpen('x-1')).toBe(true);
     expect(gate.tryOpen('x-2')).toBe(false);
     expect(gate.consume('x-2')).toBe(false);
-    expect(gate.consume('x-1')).toBe(true);
+    expect(gate.consume('x-1', undefined, REVIEW_SCHEMA_NAME)).toBe(true);
     expect(gate.consume('x-1')).toBe(false);
     gate.close('x-2'); // closing another slot does nothing
     expect(gate.current).toBe('x-1');

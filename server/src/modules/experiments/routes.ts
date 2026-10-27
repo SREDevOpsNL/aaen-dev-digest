@@ -3,6 +3,9 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { getContext } from '../_shared/context.js';
 import { ExperimentsService } from './service.js';
+import { ConventionsService } from '../conventions/service.js';
+import { ExtractionReceipts } from '../../platform/experiment-receipts.js';
+import { ConventionsExperiment } from './conventions.js';
 
 /**
  * HW2 controlled-experiment routes. Every route answers 404 unless the server
@@ -35,10 +38,12 @@ const ArmBody = StartBody.omit({ slot_id: true });
 /** The operator's spending capability token (see `cli.ts authorize`); required by every slot. */
 const CAPABILITY_HEADER = 'x-hw2-capability';
 const SlotParams = z.object({ slotId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,80}$/) });
+const ConventionPreviewBody = z.object({ repo_id: z.string().uuid(), slot_id: SlotParams.shape.slotId, reservation_usd: z.number().positive().max(0.5) });
 
 export default async function experimentsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const service = new ExperimentsService(app.container);
+  const conventions = new ConventionsService(app.container);
 
   // Scoped to this plugin: without a complete experiment configuration every
   // route here is 404, before body validation or any other work.
@@ -56,6 +61,30 @@ export default async function experimentsRoutes(appBase: FastifyInstance) {
   app.get('/experiments/endpoints', async (request) => {
     await getContext(app.container, request);
     return service.endpoints();
+  });
+
+  app.post('/experiments/conventions/index', {
+    schema: { body: z.object({ repo_id: z.string().uuid() }) },
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } },
+  }, async (request) => {
+    const { workspaceId } = await getContext(app.container, request);
+    return new ConventionsExperiment(app.container).indexPinned(workspaceId, request.body.repo_id);
+  });
+
+  app.post('/experiments/conventions/preview', {
+    schema: { body: ConventionPreviewBody },
+  }, async (request) => {
+    const { workspaceId } = await getContext(app.container, request);
+    return conventions.previewExtraction(
+      workspaceId, request.body.repo_id, request.body.slot_id, request.body.reservation_usd,
+    );
+  });
+
+  app.get('/experiments/conventions/receipts/:slotId', {
+    schema: { params: SlotParams },
+  }, async (request) => {
+    await getContext(app.container, request);
+    return { slot_id: request.params.slotId, events: new ExtractionReceipts().read(request.params.slotId) };
   });
 
   app.post(

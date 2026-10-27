@@ -6,6 +6,13 @@ import * as t from '../../db/schema.js';
 export class ExperimentsRepository {
   constructor(private readonly db: Db) {}
 
+  async postgresSystemIdentifier(): Promise<string> {
+    const rows = await this.db.execute<{ system_identifier: string }>(
+      sql`select system_identifier::text from pg_control_system()`,
+    );
+    return [...rows][0]?.system_identifier ?? '';
+  }
+
   async databaseName(): Promise<string> {
     const rows = await this.db.execute<{ name: string }>(sql`select current_database() as name`);
     return [...rows][0]?.name ?? '';

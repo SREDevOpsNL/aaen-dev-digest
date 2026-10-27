@@ -35,6 +35,12 @@ import type { ExpectedRule, FindingLike } from './rules.js';
 import { reconcile, runSchedule, type SlotRun } from './runner.js';
 import { buildSchedule, slotId, type Phase, type Slot } from './schedule.js';
 import { implementationFingerprint, preregisteredManifest, repoRoot } from './source.js';
+import {
+  authorizeExtraction, extractionPreviewProblems, reconcileExtraction, runExtraction, verifyExtractionStack,
+  type ExtractionStack,
+} from './conventions-runner.js';
+import { extractionCapabilityProblem, type ConventionsCapability } from '../../modules/_shared/conventions-experiment.js';
+import type { ExtractionPreview } from '../../modules/experiments/conventions.js';
 
 type Flags = Record<string, string | true>;
 
@@ -557,9 +563,104 @@ async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, re
   );
 }
 
+async function conventionsStack(flags: Flags): Promise<ExtractionStack> {
+  return verifyExtractionStack({
+    api: new ExperimentApi(need(flags, 'api'), undefined, 480_000),
+    apiUrl: need(flags, 'api'),
+    stackId: need(flags, 'stack'),
+    database: need(flags, 'database'),
+    container: need(flags, 'container'),
+  });
+}
+
+async function conventionsPreview(stack: ExtractionStack, flags: Flags): Promise<ExtractionPreview> {
+  const repositories = await stack.api.get<Array<{ id: string; full_name: string }>>('/repos');
+  const repo = repositories.find((item) => item.full_name === 'fastify/fastify');
+  if (!repo || repositories.length !== 1) throw new Error('The isolated stack must contain exactly fastify/fastify');
+  const pulls = await stack.api.get<Array<{ number: number }>>(`/repos/${repo.id}/pulls`);
+  if (pulls.some((pull) => pull.number === 3)) throw new Error('Demo PR #3 is present');
+  return stack.api.post<ExtractionPreview>('/experiments/conventions/preview', {
+    repo_id: repo.id,
+    slot_id: need(flags, 'slot'),
+    reservation_usd: Number(need(flags, 'reservation')),
+  });
+}
+
 export async function main(argv: string[], log: (m: string) => void = console.log): Promise<void> {
   const { command, flags } = parseArgs(argv);
   switch (command) {
+    case 'preview-conventions': {
+      const stack = await conventionsStack(flags);
+      const preview = await conventionsPreview(stack, flags);
+      const problems = extractionPreviewProblems(
+        preview, stack, need(flags, 'slot'), Number(need(flags, 'reservation')),
+      );
+      log(JSON.stringify({ ...preview, problems }, null, 2));
+      if (problems.length) throw new Error(`Conventions preflight refused: ${problems.join('; ')}`);
+      return;
+    }
+    case 'authorize-conventions': {
+      if (assertPaidAuthorization(flags) !== 'exploration') throw new Error('Conventions extraction is exploration only');
+      const stack = await conventionsStack(flags);
+      const preview = await conventionsPreview(stack, flags);
+      const reservation = Number(need(flags, 'reservation'));
+      const key = experimentKey(flags);
+      const usage = await readKeyUsage(key);
+      const { capability } = authorizeExtraction({
+        preview, stack, slotId: need(flags, 'slot'),
+        reservationUsd: reservation,
+        cumulativeCeilingUsd: Number(need(flags, 'ceiling')),
+        keyUsage: usage,
+      });
+      log(`One-use conventions capability ${capability.capability_id.slice(0, 12)}… on ${stack.stackId}, slot ${capability.slot_id}, reserve $${reservation}, expires ${capability.expires_at}`);
+      return;
+    }
+    case 'run-conventions': {
+      if (assertPaidAuthorization(flags) !== 'exploration') throw new Error('Conventions extraction is exploration only');
+      const stack = await conventionsStack(flags);
+      const preview = await conventionsPreview(stack, flags);
+      const capPath = join(experimentDir(stack.stackId), 'capability.json');
+      const tokPath = tokenFile(stack.stackId);
+      for (const path of [capPath, tokPath]) {
+        if (!existsSync(path) || !lstatSync(path).isFile() || lstatSync(path).isSymbolicLink()) {
+          throw new Error('The extraction capability or token file is missing or unsafe');
+        }
+      }
+      const capability = JSON.parse(readFileSync(capPath, 'utf8')) as ConventionsCapability;
+      const token = readFileSync(tokPath, 'utf8').trim();
+      const problem = extractionCapabilityProblem(capability, token, preview);
+      if (problem) throw new Error(`Conventions extraction is not authorized: ${problem}`);
+      if (!new KeyUsageLog(experimentsRoot()).opening()) throw new Error('No opening key-usage reading');
+      const usage = await readKeyUsage(experimentKey(flags));
+      if (usage.limit_remaining === null || usage.limit_remaining < capability.reservation_usd) {
+        throw new Error('Dedicated provider key limit cannot cover the reservation');
+      }
+      const ledger = new Ledger(experimentsRoot());
+      ledger.acquire({ pid: process.pid, stackId: stack.stackId });
+      try {
+        if (ledger.unresolved().length) throw new Error('Resolve earlier slots before extraction');
+        const result = await runExtraction({ stack, preview, capability, token, ledger, log });
+        log(`Extraction slot ${capability.slot_id}: ${result.state}; cost ${result.costUsd ?? 'unknown, reservation retained'}; candidates ${result.candidateIds.length}`);
+        if (result.state !== 'completed') process.exitCode = 3;
+      } finally {
+        ledger.release();
+      }
+      return;
+    }
+    case 'reconcile-conventions': {
+      const stack = await conventionsStack(flags);
+      const ledger = new Ledger(experimentsRoot());
+      ledger.acquire({ pid: process.pid, stackId: stack.stackId });
+      try {
+        const repositories = await stack.api.get<Array<{ id: string; full_name: string }>>('/repos');
+        const repoId = repositories.find((repo) => repo.full_name === 'fastify/fastify')?.id;
+        const result = await reconcileExtraction(ledger, need(flags, 'slot'), stack.api, repoId);
+        log(`Reconciled extraction ${need(flags, 'slot')}: ${result.state}; cost ${result.costUsd ?? 'unknown, reservation retained'}`);
+      } finally {
+        ledger.release();
+      }
+      return;
+    }
     case 'endpoints': {
       log(JSON.stringify(await new ExperimentApi(need(flags, 'api')).get('/experiments/endpoints'), null, 2));
       return;
@@ -834,7 +935,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       return;
     }
     default:
-      log('commands: endpoints | check | preview | phase0-check | plan | manifest | authorize | revoke | key-usage | settle | reconcile | run | report (see docs/homework/L02/EXPERIMENTS.md)');
+      log('commands: preview-conventions | authorize-conventions | run-conventions | reconcile-conventions | endpoints | check | preview | phase0-check | plan | manifest | authorize | revoke | key-usage | settle | reconcile | run | report (see docs/homework/L02/EXPERIMENTS.md)');
   }
 }
 

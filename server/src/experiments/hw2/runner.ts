@@ -3,6 +3,7 @@ import { ApiError, type ExperimentApi } from './api.js';
 import { fits } from './budget.js';
 import { isTerminal, type Ledger, type SlotRecord, type SlotState } from './ledger.js';
 import type { Slot } from './schedule.js';
+import { reconcileExtraction } from './conventions-runner.js';
 
 /**
  * Orchestration of paid experiment slots against the disposable API. It is
@@ -85,6 +86,16 @@ function terminalOf(run: SlotLookup['runs'][number]): { state: SlotState; cost: 
  */
 export async function reconcile(deps: RunnerDeps): Promise<SlotRecord[]> {
   for (const slot of deps.ledger.unresolved()) {
+    if (slot.events[0]?.detail?.operation === 'conventions.extract') {
+      const sameStack = slot.events[0]?.stack_id === deps.stackId;
+      const repoId = slot.events[0]?.detail?.repository_id;
+      const outcome = await reconcileExtraction(
+        deps.ledger, slot.slot_id, sameStack ? deps.api : undefined,
+        typeof repoId === 'string' ? repoId : undefined, deps.ledger.dir,
+      );
+      deps.log(`reconciled extraction ${slot.slot_id}: ${outcome.state}`);
+      continue;
+    }
     // A slot armed for a Run Review click by a runner that died may still be
     // armed: disarm it first, so no later click can dispatch it (best effort;
     // it also expires on its own, and the slot stays charged in full).
