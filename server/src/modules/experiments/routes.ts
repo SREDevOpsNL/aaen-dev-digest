@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { getContext } from '../_shared/context.js';
 import { ExperimentsService } from './service.js';
 import { ConventionsService } from '../conventions/service.js';
-import { ExtractionReceipts } from '../../platform/experiment-receipts.js';
 import { ConventionsExperiment } from './conventions.js';
 
 /**
@@ -78,13 +77,6 @@ export default async function experimentsRoutes(appBase: FastifyInstance) {
     return conventions.previewExtraction(
       workspaceId, request.body.repo_id, request.body.slot_id, request.body.reservation_usd,
     );
-  });
-
-  app.get('/experiments/conventions/receipts/:slotId', {
-    schema: { params: SlotParams },
-  }, async (request) => {
-    await getContext(app.container, request);
-    return { slot_id: request.params.slotId, events: new ExtractionReceipts().read(request.params.slotId) };
   });
 
   app.post(

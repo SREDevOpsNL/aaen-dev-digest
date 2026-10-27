@@ -58,6 +58,40 @@ never resends a request. Provider key usage must still be settled through the
 existing `settle` command. Normal application extraction behavior outside
 experiment mode is unchanged.
 
+## Unpaid disposable-stack preflight (2026-10-27)
+
+A separate stack `hw2f-0abf2c75` used loopback API/UI ports 3261/3260
+and disposable Postgres port 5451. Identity-only seeding left the repository
+and PR tables empty. The existing import path cloned only `fastify/fastify`
+at the pinned commit; the index reported `full`, 298 files and the same
+revision. The configured Conventions model was set through disposable
+Settings, not overridden by the capability.
+
+The actual frozen sample's conservative complete-request input bound was
+**96,446 tokens**, with a 4,000-token output cap. Free endpoint metadata and
+the frozen price ceiling yielded **$0.01410021 worst case** with the existing
+1.5× contingency. A $0.005 extraction reservation failed preflight as it
+should; **$0.020 passed** the additional 20% reservation-margin check.
+The exact request hash was
+`68d0ee227f6ec42bee14ee0df6d676cbf96ba9af8f2cc155d4d0b0c274a906e6`
+and the implementation fingerprint was
+`a52cafc5727ca6eb07b2de5d43b9bcfce1fedfc246a21eb21760bed53d4390ac`.
+These hashes describe the initial free preview at local commit `6ffc7cd`;
+the later removal of an unused receipt-read API changes the source
+fingerprint. They are evidence for the tested design, not a future spending
+approval.
+The study proposal's $0.005 **review-trial** reservation is a different
+request and is still provisional.
+
+The complete `preview-conventions` CLI passed its container labels,
+PostgreSQL cluster identity, repository/revision, model, endpoint, fingerprint
+and budget checks with `problems: []`. Calling the extraction endpoint
+without a capability returned HTTP 403 and created no extraction receipt.
+No capability, ledger slot or provider generation was created. This stack was
+then torn down; the earlier evidence container remained running. A future
+approved run must repeat the preflight on its own fresh stack and cannot reuse
+this short-lived preview or request hash without matching every bound input.
+
 ## Required approval and outstanding evidence
 
 Before any paid run, the owner must approve the exact one-use operation,

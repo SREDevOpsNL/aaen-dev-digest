@@ -57,3 +57,26 @@ database or makes a model call.
 
 GitHub Actions runs the same suites on every push to PR #53. The latest
 results are in the PR's Checks tab and summarized in the PR description.
+
+
+## Isolated unpaid checkpoint, 2026-10-27
+
+Run from the separate `aaen-dev-digest-l02-extraction` WSL checkout; the
+PR #53 checkout and the previously running evidence stack were unchanged.
+
+| Check | Result |
+| --- | --- |
+| Server typecheck | passed |
+| Full server suite (unit and DB-backed, Testcontainers) | **494 / 494**, 54 files |
+| Focused extraction authorization and spend-gate tests | **17 / 17** |
+| reviewer-core typecheck and tests | passed, **102 / 102** |
+| E2E typecheck | passed |
+| Hermetic browser suite on separate ports 5440/3201/3200 | **14 / 14 flows**, exit 0 |
+| Staged `git diff --check` | passed |
+
+The free conventions preflight is documented in
+[CONVENTIONS-EXTRACTION-PREFLIGHT.md](CONVENTIONS-EXTRACTION-PREFLIGHT.md).
+It performed no model generation and issued no capability. A no-capability
+extraction request was refused with HTTP 403 before any receipt or provider
+call. Criterion 21 still needs a real Claude Code session; criteria 17, 18,
+38 and 40 still need separately approved evidence.
