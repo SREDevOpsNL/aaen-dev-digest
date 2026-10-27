@@ -18,6 +18,7 @@ export interface ExtractionReceiptEvent {
   candidate_ids?: string[];
   candidate_digest?: string;
   model_result?: unknown;
+  model_raw?: string;
   reason?: string;
 }
 

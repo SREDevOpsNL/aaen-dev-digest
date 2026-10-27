@@ -52,7 +52,7 @@ export interface ExtractionAdmission {
   timeoutMs: number;
   onAttempt: (attempt: StructuredAttemptTelemetry) => void;
   assertVerified: () => void;
-  modelResult: (data: unknown) => void;
+  modelResult: (data: unknown, raw: string) => void;
   persisted: (ids: string[], digest: string) => void;
   failed: () => void;
   close: () => void;
@@ -285,11 +285,12 @@ export class ConventionsExperiment {
         });
         if (!outcome.eligible) throw new ValidationError(`Serving provider unverified: ${outcome.reasons.join('; ')}`);
       },
-      modelResult: (data) => append({
+      modelResult: (data, raw) => append({
         capability_id: cap.capability_id,
         request_sha256: snapshot.binding.request_sha256,
         state: 'model_result',
         model_result: data,
+        model_raw: raw,
         cost_usd: attempts.length === 1 ? attempts[0]!.costUsd : null,
       }),
       persisted: (ids, digest) => append({

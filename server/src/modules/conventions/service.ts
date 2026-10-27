@@ -112,7 +112,7 @@ export class ConventionsService {
         } : {}),
       });
       admission?.assertVerified();
-      admission?.modelResult(result.data);
+      admission?.modelResult(result.data, result.raw);
 
     const verified: VerifiedCandidate[] = [];
     let droppedUngrounded = 0;

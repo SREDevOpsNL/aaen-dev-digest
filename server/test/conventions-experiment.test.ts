@@ -121,9 +121,10 @@ describe('durable extraction receipt', () => {
     const identity = { capability_id: hash, slot_id: 'conv-one', request_sha256: hash };
     receipt.claim(identity);
     receipt.append('conv-one', { ...identity, state: 'dispatching' });
-    receipt.append('conv-one', { ...identity, state: 'model_result', model_result: { candidates: [{ rule: 'public source rule' }] } });
+    receipt.append('conv-one', { ...identity, state: 'model_result', model_result: { candidates: [{ rule: 'public source rule' }] }, model_raw: '{"candidates":[{"rule":"public source rule"}]}' });
     expect(new ExtractionReceipts(dir).read('conv-one').map((event) => event.state)).toEqual(['claimed', 'dispatching', 'model_result']);
     expect(new ExtractionReceipts(dir).read('conv-one')[2]?.model_result).toEqual({ candidates: [{ rule: 'public source rule' }] });
+    expect(new ExtractionReceipts(dir).read('conv-one')[2]?.model_raw).toContain('public source rule');
     expect(() => new ExtractionReceipts(dir).claim(identity)).toThrow();
   });
 
