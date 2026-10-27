@@ -78,8 +78,9 @@ and the implementation fingerprint was
 `a52cafc5727ca6eb07b2de5d43b9bcfce1fedfc246a21eb21760bed53d4390ac`.
 These hashes describe the initial free preview at local commit `6ffc7cd`;
 the later removal of an unused receipt-read API changes the source
-fingerprint. They are evidence for the tested design, not a future spending
-approval.
+fingerprint. The committed implementation after that removal has fingerprint
+`c3ae06435ae25cad8c2059e84ff1c296d2350d12273b58e1ef2ad7f246bd7ef1`.
+These are evidence for the tested design, not a future spending approval.
 The study proposal's $0.005 **review-trial** reservation is a different
 request and is still provisional.
 
