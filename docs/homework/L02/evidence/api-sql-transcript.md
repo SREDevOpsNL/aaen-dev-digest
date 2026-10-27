@@ -1,6 +1,6 @@
 # API and SQL transcript (unpaid walkthrough)
 
-Stack: container `devdigest-hw2f-d8b288cf`, database `devdigest_hw2f_d8b288cf`, API `http://127.0.0.1:3251`. Commands as run; output verbatim.
+Stack: container `devdigest-hw2f-d8b288cf`, database `devdigest_hw2f_d8b288cf`, API `http://127.0.0.1:3251`. Commands as run; output values verbatim, with trailing table padding removed.
 
 ## Row 8: skills CRUD reads and writes PostgreSQL
 
@@ -78,7 +78,7 @@ walkthrough-skill v4 agent_count=0 used_by_count=0
 deprecation-policy.md (1,754 bytes) was imported through Skills → Add skill → Import skill (preview, then Import), enabled from its card, and linked in the agent's Skills tab (4 / 4 attached).
 ```
 $ psql -c "select s.name, s.source, s.enabled, a.name agent, l.\"order\", l.enabled link_enabled from skills s join agent_skills l on l.skill_id = s.id join agents a on a.id = l.agent_id where a.name = 'API Contract Reviewer' order by l.\"order\""
-        name        |    source     | enabled |         agent         | order | link_enabled 
+        name        |    source     | enabled |         agent         | order | link_enabled
 --------------------+---------------+---------+-----------------------+-------+--------------
  breaking-change    | manual        | t       | API Contract Reviewer |     0 | t
  response-schema    | manual        | t       | API Contract Reviewer |     1 | t
@@ -100,7 +100,7 @@ API Contract Reviewer skill_count=4
 
 semver-discipline was switched off for the API Contract Reviewer with its per-agent switch in the Skills tab. The link stays; only that agent's switch changes; the skill itself stays enabled:
 ```
-        name        | skill_enabled | link_enabled | order 
+        name        | skill_enabled | link_enabled | order
 --------------------+---------------+--------------+-------
  breaking-change    | t             | t            |     0
  response-schema    | t             | t            |     1
@@ -148,7 +148,7 @@ $ psql -At -c "select count(*) from skills where id='760a6971-6cb2-43f2-ae4a-18c
 The four candidates on this stack are seeded synthetic fixtures, each labelled "Synthetic fixture — not a model extraction" (a live extraction is a paid call, row 38). In the Conventions page: one candidate rejected, one edited inline then accepted, one accepted, the page reloaded, then Create skill → linked to General Reviewer → Create.
 ```
 $ psql -c "select category, status, rule from conventions order by category"
- category |  status  |                                     rule                                     
+ category |  status  |                                     rule
 ----------+----------+------------------------------------------------------------------------------
  api      | accepted | Answer a missing resource with HTTP 404 and the body { error: 'not_found' }
  errors   | rejected | Throw an Error whose message names the rejected input
@@ -157,7 +157,7 @@ $ psql -c "select category, status, rule from conventions order by category"
 (4 rows)
 
 $ psql -c "select s.name, s.type, s.enabled, s.version, a.name agent from skills s left join agent_skills l on l.skill_id = s.id left join agents a on a.id = l.agent_id where s.name = 'repo-conventions'"
-       name       |    type    | enabled | version |      agent       
+       name       |    type    | enabled | version |      agent
 ------------------+------------+---------+---------+------------------
  repo-conventions | convention | t       |       1 | General Reviewer
 (1 row)
