@@ -24,6 +24,26 @@ $ curl -s http://127.0.0.1:3251/skills | python3 -c 'import json,sys; print("pre
 absent from GET /skills
 ```
 
+### Independent POST-to-SQL reproduction, 2026-10-27
+
+A separate identity-only disposable stack (`devdigest-hw2f-7f47676c`,
+database `devdigest_hw2f_7f47676c`, API `127.0.0.1:3271`) had no
+spending capability. A Python `urllib.request` script sent
+`POST /skills` with
+`{"name":"row8-crud-20261027","description":"Disposable acceptance evidence","type":"rubric","body":"Check the caller-visible behavior."}`.
+It then called `GET /skills`, used `docker exec ... psql` to select the
+created row, deleted that row directly in PostgreSQL, and called
+`GET /skills` again. The script asserted every relationship and printed
+this actual result:
+
+```json
+{"post_http":201,"post_id":"2a364dc6-c304-4f3a-8ebd-7aedd15ca219","post_name":"row8-crud-20261027","get_present":true,"sql_select":"2a364dc6-c304-4f3a-8ebd-7aedd15ca219|row8-crud-20261027|1","sql_delete":"row8-crud-20261027\nDELETE 1","get_absent":true}
+```
+
+The temporary stack was torn down after capture. The original evidence
+stack and the isolated extraction stack remained healthy; no model call
+was made.
+
 ## Rows 27 and 29: versions and restore (skill `walkthrough-skill`)
 
 After Restore on v1 in the Versioning tab, v4 holds v1's body and the history is kept:
