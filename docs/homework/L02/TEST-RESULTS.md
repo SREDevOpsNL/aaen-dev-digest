@@ -129,3 +129,19 @@ capability revocation are recorded in
 [conventions-live-extraction.md](evidence/conventions-live-extraction.md).
 This runtime evidence verifies criteria 38 and 40; it is not a new
 test-suite run and did not alter experiments 17 or 18.
+
+## Unpaid fixture/protocol checkpoint (2026-10-28)
+
+Starting from source `e79ae2b`, the two seeded experiment fixtures
+received executable ground-truth checks in `server/test/hw2-fixture-ground-truth.test.ts`: coupon
+before/at/after expiry and unknown-code behavior; payment URL matching and
+ID-to-reference lookup change. Focused tests passed **2 / 2**. Server typecheck passed; full server unit
+tests passed **369 / 369** and DB-backed tests passed **140 / 140**.
+Reviewer-core typecheck and tests passed **102 / 102**; client lint,
+typecheck and tests passed **118 / 118**; E2E typecheck and hermetic
+browser flows passed **14 / 14**, exit 0, from the separate extraction
+checkout on ports 5440/3201/3200 with a disposable container. These are
+fixture checks, not a model comparison. The prospective study now records a
+condition-blinded adjudication and seal procedure and a provisional
+post-extraction ledger ceiling of $0.11381699. No confirmatory capability
+was issued and no model generation occurred.

@@ -58,10 +58,11 @@ automatic replacement sample.
 
 ## Provisional conservative budget, not spending approval
 
-The read-only global ledger check on 2026-10-27 showed $0.01116289
-conservatively charged and zero unresolved slots. Frozen endpoint prices must
-be verified again before authorization. At the currently recorded DeepInfra
-rates, $0.00000009 per input token and $0.00000018 per output token, with no
+The last settled global ledger check after the authorized conventions
+extraction showed $0.01381699 conservatively charged and zero unresolved
+slots ($0.01116289 historical plus $0.00265410 confirmed extraction).
+Frozen endpoint prices must be verified again before authorization. At the
+currently recorded DeepInfra rates, $0.00000009 per input token and $0.00000018 per output token, with no
 request fee, an upper bound of 16,000 input tokens, a 4,000 output-token cap,
 one request and a 1.5× contingency gives:
 
@@ -71,14 +72,41 @@ one request and a 1.5× contingency gives:
 ```
 
 The existing additional 20% margin requires $0.003888. A $0.005 reservation
-per slot provides that margin; 20 slots reserve **$0.10000000**. If no
-extraction or other spend occurs first, the resulting minimum cumulative
-ceiling is **$0.11116289**. If extraction runs first, recompute the ledger,
-provider prices and key limit and submit a revised ceiling. The existing
-$0.50 exploration, $1.00 confirmatory and $1.50 aggregate caps remain hard
+per slot provides that margin; 20 slots reserve **$0.10000000**. With the
+completed extraction included and no later spend, the provisional minimum
+cumulative ceiling is **$0.11381699**. Recompute the ledger, provider
+prices and key limit before requesting confirmatory authorization. The
+existing $0.50 exploration, $1.00 confirmatory and $1.50 aggregate caps remain hard
 bounds.
 
 ## Free protocol corrections before preregistration
+
+The unpaid fixture-ground-truth test in
+`server/test/hw2-fixture-ground-truth.test.ts` executes the coupon source
+reconstructed from the seeded patch at the four boundary/error cases. It
+executes the patched payment route against a stub lookup, showing that an old
+ID URL still matches but gets 404 when ID and public reference differ.
+These checks validate the fixture semantics; they do not score model responses
+or establish Skill efficacy.
+
+### Condition-blinded technical adjudication
+
+For each completed slot, an evidence preparer exports only the finding text,
+grounded file/line anchors, experiment number and an opaque randomly assigned
+case ID. The preparer keeps the case-ID-to-slot mapping private and hashes both
+the blinded packet and mapping before adjudication. The packet must not contain
+slot ID, run ID, condition, Skill block, prompt, cost, sequence or trace URLs.
+If finding wording itself reveals the condition, record compromised blinding.
+
+Two adjudicators independently apply the exact #17 and #18 technical rules
+above. For each case they record detection (yes, no or ambiguous), which
+grounded finding supports it, and a short reason. They sign and hash their
+judgments before the preparer reveals the mapping. Resolve disagreements
+against the frozen rule without access to condition; unresolved disagreement
+remains ambiguous. Publish the sealed packet digest, mapping digest, judgments,
+reconciliation and reveal order with the final report. A missing packet,
+judgment or seal blocks a passing conclusion. This procedure is prospective:
+no Phase 1 case is rescored.
 
 The confirmatory runner now stops after the first 429, infrastructure
 failure, ambiguous result or unknown cost; its exploratory defaults remain
