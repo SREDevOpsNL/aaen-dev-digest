@@ -32,3 +32,26 @@ both skill sets loaded in one invocation, the checks and the final review
 report. Check that no push hook invoked the skill. Redact credentials and local
 tokens before adding evidence. Keep criterion 21 Blocked until this session is
 captured or the mentor explicitly accepts an alternative.
+
+## Running it from the Claude Code desktop app (2026-10-30)
+
+The WSL Claude Code CLI 2.1.278 still holds the credentials from 2026-10-25;
+it was not retried. Claude Code is available through the desktop app's Code
+tab, which runs Claude Code inside WSL. Dependencies were installed from the
+frozen lockfiles in the scratch checkout (`npm ci` in `reviewer-core/`,
+`pnpm install --frozen-lockfile` in `server/` and `client/`), so the
+skill's deterministic checks can run. The tracked diff is still the two
+comment markers at `21c8f09`.
+
+Owner steps:
+
+1. In the Code tab, start a new session whose folder is
+   `/home/dmitri/projects/aaen-dev-digest-l02-self-review` itself. Do not let
+   the app create a new worktree for it: a fresh worktree would not contain the
+   uncommitted mixed diff.
+2. Type `/pr-self-review --base HEAD` as the first message and let it finish.
+3. Keep the session. Its transcript is then exported and sanitized into a new
+   evidence file. That file must show one invocation reading both the frontend
+   and backend `SKILL.md` sets, the checks and the final report. The only
+   project hook is `UserPromptSubmit` (the insights reminder); there is no
+   push hook.

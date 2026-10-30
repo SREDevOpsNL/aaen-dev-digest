@@ -33,7 +33,33 @@ private ledger and actual runtime before acting.
 Local verification completed: server typecheck, 369 unit and 140 DB-backed
 tests; reviewer-core typecheck and 102 tests; client lint, typecheck and
 118 tests; E2E typecheck and 14/14 hermetic flows on an isolated stack.
-Next free actions: inspect final GitHub CI and refresh this record when the
-PR head changes. The previous
+All six GitHub Actions workflows passed at `4d82c6f`. The previous
 full local matrix at `17241a3` and subsequent CI are in
 [TEST-RESULTS.md](TEST-RESULTS.md).
+
+## Resumption check and adjudication tooling - 2026-10-30
+
+- Verified from Git and GitHub before any change: PR #53 Draft at
+  `4d82c6f42693aa060a3c9f9b9a3950f2453098de` against
+  `codex/l01-severity-filters`, merge-base `5a3b496`, all six workflows green;
+  the private rubric still has the recorded SHA-256.
+- Private ledger re-read (read-only): $0.00381699 confirmed plus $0.01 held
+  for the failed `x-17-without-1` slot, **$0.01381699 conservative**, no
+  `reserved` or `dispatched` slot left; the last authorization event is the
+  extraction capability's revocation, and the last key-usage settlement
+  passed. Two raw `capability.token` files remain in the sealed Gate 3
+  closure directories of stacks whose containers were removed on
+  2026-10-21/22; no API runs for those stacks, so they are inert, and they
+  were left untouched.
+- The WSL host restarted at 14:20 on 2026-10-30. Only the dev
+  `devdigest-postgres` container is running; the earlier evidence stack's
+  processes and tmux sessions are gone. Recorded evidence is unaffected.
+- The condition-blinded adjudication procedure now has an implementation and
+  a synthetic dry run ([PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#condition-blinded-technical-adjudication),
+  [TEST-RESULTS.md](TEST-RESULTS.md#unpaid-adjudication-checkpoint-2026-10-30)).
+  It scores no real slot. The acceptance count is unchanged: 49 Verified,
+  #17 and #18 Implemented, #14 and #21 Blocked.
+- #21: Claude Code is available again through the desktop app. The owner
+  can open a session directly in the scratch checkout and type
+  `/pr-self-review --base HEAD`; see
+  [criterion-21-preparation.md](evidence/criterion-21-preparation.md).

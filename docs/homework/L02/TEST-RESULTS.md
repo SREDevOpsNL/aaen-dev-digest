@@ -145,3 +145,18 @@ fixture checks, not a model comparison. The prospective study now records a
 condition-blinded adjudication and seal procedure and a provisional
 post-extraction ledger ceiling of $0.11381699. No confirmatory capability
 was issued and no model generation occurred.
+
+## Unpaid adjudication checkpoint (2026-10-30)
+
+From source `4d82c6f`, where all six GitHub Actions workflows had passed.
+The sealed condition-blinded adjudication procedure in
+[PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#condition-blinded-technical-adjudication)
+gained an implementation (`server/src/experiments/hw2/adjudication.ts`) and
+a synthetic dry run (`server/test/hw2-adjudication.test.ts`, 9 / 9). Mutating
+the seal check, the ambiguity rule or the scheduled-slot gap check makes a
+test fail. Server typecheck passed; hermetic server unit tests passed
+**378 / 378** (38 files) with an empty sandboxed `HOME` and an unreachable
+`DATABASE_URL`. Only server code changed, so the DB-backed, client,
+reviewer-core and browser suites were not rerun locally; GitHub Actions on
+the new head provides those gates. No capability was issued and no model
+generation occurred.

@@ -346,6 +346,16 @@ correction. Repo-intel remains server-scoped;
   `server/src/experiments/hw2/conventions-runner.ts:222`
   (`authorizeExtraction`).
 
+- **2026-10-30** — A test on exactly five scheduled slots per condition cannot
+  catch a broken "no replacement" guard in an HW2 outcome function:
+  `experimentOutcome` in `rules.ts` already returns `incomplete` below five
+  counted trials, so a missing slot looks handled even when the gap check is
+  gone. Mutating the adjudication reveal's gap check to `false` left all eight
+  original tests green. Test the gap with more than five scheduled slots and
+  exactly five survivors. Evidence: `server/src/experiments/hw2/rules.ts`
+  (`experimentOutcome`), `server/test/hw2-adjudication.test.ts` ("five
+  surviving slots do not stand in for a larger schedule with a gap").
+
 ## Session Notes
 
 ## Open Questions

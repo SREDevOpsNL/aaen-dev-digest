@@ -108,6 +108,33 @@ reconciliation and reveal order with the final report. A missing packet,
 judgment or seal blocks a passing conclusion. This procedure is prospective:
 no Phase 1 case is rescored.
 
+**Implementation (2026-10-30, unpaid).** `server/src/experiments/hw2/adjudication.ts`
+implements this procedure as pure functions over the report's counted slots:
+
+- `preparePacket` gives each counted slot a random opaque case ID and exports
+  only finding title, rationale, file and lines, sorted by case ID. Slot,
+  run, condition, Skill block, severity, cost and schedule order stay out of
+  the packet. Uncounted scheduled slots appear only in the private mapping,
+  with their reason. Finding wording that names the Skill mechanism or a
+  target Skill is listed in the mapping as compromised blinding.
+- `sealJudgment` is the SHA-256 of a judgment's canonical JSON.
+- `reveal` refuses the result if the packet, mapping or any judgment differs
+  from its published digest, if there are not exactly two distinct
+  adjudicators, if any case is unjudged, or if a `yes` cites no finding. A
+  disagreement stays `ambiguous` unless a sealed reconciliation settles it,
+  and a reconciliation may touch only disputed cases. An experiment reaches
+  the 4/5 versus 1/5 rule only when every **scheduled** slot has an
+  unambiguous verdict; otherwise it is `incomplete`.
+
+`server/test/hw2-adjudication.test.ts` dry-runs prepare → seal → reveal on
+synthetic slots only (9 tests). Removing the seal check, the ambiguity rule
+or the scheduled-slot gap check each makes a test fail. Digests prove that a
+record was not changed after its digest was published. They cannot prove the
+order of publication, so the reveal order still has to be recorded by
+timestamped publication of each digest. Who the two adjudicators are, and the
+file-level CLI wrapper for this module, remain to be fixed in the frozen
+manifest.
+
 The confirmatory runner now stops after the first 429, infrastructure
 failure, ambiguous result or unknown cost; its exploratory defaults remain
 unchanged. The anchored keyword matcher remains a screening aid: the report
