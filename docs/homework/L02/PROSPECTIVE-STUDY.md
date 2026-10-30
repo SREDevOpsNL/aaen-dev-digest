@@ -180,18 +180,113 @@ Fixture PR #502 (src/api/payments.ts, src/payments/store.ts): the published rout
 ## Freeze before any confirmatory request
 
 Pre-register a committed, unmodified manifest containing the final
-implementation revision and fingerprint, current user-message Skill placement,
-all fixture patches and hashes, both reviewer prompts, Skill bodies and order,
-source revision, requested model `deepseek/deepseek-v4-flash`, the sole
-`deepinfra/fp8` endpoint, expected `DeepInfra` provider and served model
-`deepseek/deepseek-v4-flash-20260423`, temperature zero, single-pass strategy,
-repo-intel off, output cap 4,000, both retry counts zero, fallbacks off, exact
-request fingerprints, scoring rules, randomization seed and fresh unused slot
-IDs. Verify the cached L03 intent is absent on every run. The current source
-is committed, but the final implementation and request fingerprints remain
-unfrozen until criterion 14 is resolved and the free protocol corrections above
-are implemented and verified.
+implementation revision and fingerprint, the **system-role** Skill placement
+with the approved content digests, all fixture patches and hashes, both
+reviewer prompts, Skill bodies and order, source revision, requested model
+`deepseek/deepseek-v4-flash`, the sole `deepinfra/fp8` endpoint, expected
+`DeepInfra` provider and served model `deepseek/deepseek-v4-flash-20260423`,
+temperature zero, single-pass strategy, repo-intel off, output cap 4,000, both
+retry counts zero, fallbacks off, exact request fingerprints, scoring rules,
+randomization seed and fresh unused slot IDs. Verify the cached L03 intent is
+absent on every run. Criterion 14 was resolved on 2026-10-30 (system-role
+placement and an approval gate); the frozen manifest is below.
 
 The owner must approve the final manifest, complete reservation/ceiling and
 the separate paid confirmatory execution. No previously authorized exploratory
 capability may be reused.
+
+## Approval packet (2026-10-30)
+
+**Status: frozen and awaiting the owner's explicit authorization. Nothing in
+this section authorizes spending.** All values below were produced by free
+commands (`check`, `preview`, `manifest`) on the persistent keyless stack;
+no capability was issued and the global ledger stayed at 21 records.
+
+### Source and stack
+
+| Item | Value |
+| --- | --- |
+| Implementation commit | `23d0b48` (Skills in the system-role message + approval gate) on `homework/l02-mentor-submission` |
+| Implementation fingerprint | `201ffa9ad50a91ae23dd2bab213823e492739dabb32f23aeb4f58d4fffd804cb` (blob ids of `server/src`, `reviewer-core/src`, lockfiles, `scripts/e2e.sh`) |
+| Pre-registration | [`prereg/manifest-20261030.json`](prereg/manifest-20261030.json) (sha256 `0ed3b11d6655a537f5ca14dcead812b075efaad1a6468d69212a6a22a853f88b`), manifest fingerprint `728203fdf468659ece2fedabaa17ce74490533562656dc2449ba61b57f160f2a` |
+| Screening rules (provisional only) | [`prereg/rules-20261030.json`](prereg/rules-20261030.json) (sha256 `bb8fb1d080708bb98b057737316e90f6e78237637bc05961d0394cf9b9737a6a`), anchored at the redesigned fixtures' lines; earlier drafts pointed at stale lines and are not used |
+| Stack | `hw2f-1fe1aeec`, database `devdigest_hw2f_1fe1aeec`, container `devdigest-hw2f-1fe1aeec`, API `127.0.0.1:3251`, web `localhost:3250`, running in tmux session `hw2-freeze` (the manifest names this database; a different stack is refused) |
+| Model / provider | `deepseek/deepseek-v4-flash`, sole endpoint `deepinfra/fp8`, expected provider `DeepInfra`, served model `deepseek/deepseek-v4-flash-20260423` |
+| Settings | temperature 0, single-pass, repo-intel off, output cap 4,000, transport and structured retries 0, provider fallbacks off, one generation per slot |
+| Prices (live 2026-10-30) | $0.00000009 input, $0.00000018 output per token, no request fee; context 1,048,576, max completion 65,536 |
+| Key | dedicated key limit $2.00, usage $0.00422487, remaining $1.99577513 (unchanged since the last settlement) |
+
+### Fixtures, Skills and system-message composition
+
+| Exp. | Fixture | Diff sha256 | Reviewer (system prompt sha256) | Target Skill v1, approved body sha256 |
+| --- | --- | --- | --- | --- |
+| 17 | PR #501 | `8e0ba13345806d37f29233f6ba28057f52fd17c010ce0a482267b8cbc527d186` | Test Quality Reviewer (`8ad1660b08790d0506aebbfa2f2b7b69c5f130155edc31ca9771aae4fea6c3ad`) | Edge Cases and Error Paths, `82a7461ebbbe62468b147ed04fb2571b0bf7d8d1adeb794839739e77d48ed17f` (seed bootstrap, reviewed digest) |
+| 18 | PR #502 | `db6475df8244efc5ef4a323a07bf0b1433abf0a6bc820ef2229dc409868116fc` | API Contract Reviewer (`234bd58a28dd2bd385dfda320407e095241282669084a5735a8d45492666c276`) | breaking-change, `0d3d2e49739250a4c085e9287f9d0c76e48d2158d8bbf0d08c17369a155c6770` (seed bootstrap, reviewed digest) |
+
+Treatment (`with`): system message = reviewer instructions → `## Skills /
+rules` with exactly the target Skill fenced as `skill-0` → injection guard.
+Control (`without`): system message = reviewer instructions → injection
+guard; no Skill section anywhere. The user message is identical across
+conditions.
+
+### Request fingerprints (all four conditions)
+
+| Condition | Prompted Skills | Non-Skill fingerprint | Skill fingerprint | Input bound | Worst case ×1.5 |
+| --- | --- | --- | --- | --- | --- |
+| 17 with | Edge Cases and Error Paths | `c6010d90c44151bb6cc144d21cdbd9493dab1947cbf40e5791860c9a71d1a860` | `18efa8660db55161b35cb59dc198210af01a90d2eccf607ca542f2d55c3d83f2` | 9,474 | $0.00235899 |
+| 17 without | — | `c6010d90c44151bb6cc144d21cdbd9493dab1947cbf40e5791860c9a71d1a860` | `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945` | 8,967 | $0.00229054 |
+| 18 with | breaking-change | `e72553e45551e83d63d5cda58aafb8c40dcdbb2edb4b6c64d7cdd112b07b479c` | `03214820cdbc9c3cda85f055c23adf337bcc5abdfa341c795ba62039d9f95136` | 10,921 | $0.00255433 |
+| 18 without | — | `e72553e45551e83d63d5cda58aafb8c40dcdbb2edb4b6c64d7cdd112b07b479c` | `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945` | 8,879 | $0.00227867 |
+
+Full values are in the manifest and the private preview files
+(`~/.devdigest/hw2-experiments/freeze-20261030/`). Each slot's server
+recomputes both fingerprints and refuses on any difference. The largest
+worst case × the 1.2 reservation margin is $0.00306520, below $0.005.
+
+### Schedule (seed 20261030, five pairs per experiment)
+
+`c-18-with-5`, `c-18-without-5`, `c-17-with-1`, `c-17-without-1`,
+`c-17-without-2`, `c-17-with-2`, `c-17-with-5`, `c-17-without-5`,
+`c-18-without-1`, `c-18-with-1`, `c-18-without-3`, `c-18-with-3`,
+`c-17-without-4`, `c-17-with-4`, `c-17-with-3`, `c-17-without-3`,
+`c-18-with-2`, `c-18-without-2`, `c-18-with-4`, `c-18-without-4`.
+None of these IDs exists in the global ledger.
+
+### Spending items (each needs its own explicit approval)
+
+| Item | Slots | Max per call | Reservation | Cumulative ceiling after it |
+| --- | --- | --- | --- | --- |
+| A. #14 trace-only run (exploration, operator links: semver-discipline → breaking-change, response-schema switched off; Skill fingerprint `b4978ce07152b569aab7d82c2ea2290af54833c2312fa8157377f8f1a49fa0d6`, input bound 12,588, worst case $0.00277938) | `x-18-with-3` | $0.005 | $0.005 | $0.01881699 |
+| B. Confirmatory #17/#18 | the 20 slots above | $0.005 | $0.10000000 | $0.11881699 with A, $0.11381699 without |
+
+Starting ledger: $0.01381699 conservative ($0.00381699 confirmed + $0.01 held
+for `x-17-without-1`), no unresolved slot, no live capability. Hard caps
+($0.50 exploration, $1.00 confirmatory, $1.50 aggregate) are unchanged.
+Capability lifetime: 3 hours per item; revoked after the item.
+Manual action: for each slot, when the runner prints "armed", one **Run
+Review** click for the named agent on the PR page (criterion interpretation
+A5); 1 click for A, 20 for B.
+
+### Failure, settlement and reconciliation
+
+- Reservation is fsynced before dispatch; a crash leaves the slot unresolved
+  and it is charged at its full reservation until `reconcile`.
+- Confirmatory: the first 429, timeout, infrastructure failure, truncation,
+  schema failure, unknown cost or provenance mismatch **stops the schedule**.
+  No retry and no replacement; the affected experiment is `incomplete`.
+- After each item: `revoke`, then `settle` against the key's own usage
+  (`PENDING` while usage moves, never a pass).
+- `report --adjudication-input` exports the scheduled slots; the sealed
+  adjudication below decides detection. Regex screening is provisional.
+
+### Adjudication protocol
+
+`adjudication-cli.ts prepare` → two independent adjudication sessions →
+`register` each → `disputed` → optional sealed `reconcile` → `reveal`. Each
+adjudicator is a separately started Claude Code subagent with an isolated
+context ("Technical Reviewer A" and "Technical Reviewer B" are role labels,
+not human identities); its agent/session ID and model are recorded beside
+its sealed judgment. Each receives only `packet.json` (finding text, anchors,
+the frozen rules and ground truth above) and the judgment format; never the
+condition, slot or run IDs, Skill bodies, prompts, the mapping or earlier
+outcomes. Unresolved ambiguity makes the experiment `incomplete`.

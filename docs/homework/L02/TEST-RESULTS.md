@@ -160,3 +160,32 @@ test fail. Server typecheck passed; hermetic server unit tests passed
 reviewer-core and browser suites were not rerun locally; GitHub Actions on
 the new head provides those gates. No capability was issued and no model
 generation occurred.
+
+## Criterion 14 system-role placement and approval gate (2026-10-30)
+
+From the implementation commit `23d0b48`, in the separate
+`aaen-dev-digest-l02-extraction` checkout:
+
+| Check | Result |
+| --- | --- |
+| reviewer-core typecheck and tests | pass; **117 / 117** |
+| server typecheck | pass |
+| server hermetic unit tests (empty `HOME`, unreachable `DATABASE_URL`) | **398 / 398**, 41 files |
+| server DB-backed tests (Testcontainers) | **172 / 172**, 20 files, when run alone. One full run while a browser suite and a stack were also running failed two timing-sensitive cases in `experiments.it.test.ts`; that file then passed 32 / 32 twice on its own |
+| Schema drift | `pnpm db:generate`: no schema changes after `0013_clammy_hellion` |
+| client lint, typecheck, tests | pass; **129 / 129** |
+| e2e typecheck and hermetic browser flows | **14 / 14**, exit 0 (run alone) |
+| Agent-instruction checker; self-review router | pass; 10 / 10 |
+| Fixture ground truth (#501, #502) | 2 / 2 |
+| Adjudication module and CLI | 11 + 7 tests |
+
+Mutation checks: moving Skills back to the user message fails 9 reviewer-core
+and 8 server regression tests; removing the fail-closed gate fails 7; dropping
+the digest comparison fails 2; removing the adjudication seal check, ambiguity
+rule or scheduled-slot gap check each fails a test.
+
+The browser suite first failed flow 11: a new approval badge widened every
+Skills card past its grid column, so a pointer click on Delete hit the next
+card. The footer now wraps. Running the hermetic suite and an `--serve` stack
+from the same worktree at once also failed two flows, because both `next dev`
+processes share `client/.next`; run them one after the other.

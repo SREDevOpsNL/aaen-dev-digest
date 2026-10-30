@@ -327,3 +327,20 @@ settlement. This is evidence for criteria 38 and 40, documented in
 [conventions-live-extraction.md](evidence/conventions-live-extraction.md).
 It is **not** a trial in controlled experiments 17 or 18. Their Phase 1
 outcomes and prospective spending gate remain unchanged.
+
+## Skill placement change and new pre-registration (2026-10-30)
+
+Every Phase 1 slot above ran with Skill bodies in the **user** message. After
+the mentor's ruling on criterion 14, Skills move to the **system-role**
+message behind an owner approval gate (commit `23d0b48`). That changes every
+non-Skill fingerprint and the implementation fingerprint, so:
+
+- the Phase 1 records stay exactly as recorded and are **never pooled** with
+  any later slot;
+- no earlier pre-registration can authorize a new confirmatory slot;
+- the new frozen manifest, fingerprints, schedule and approval packet are in
+  [PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#approval-packet-2026-10-30).
+
+The treatment's target Skill must be approved for its exact body before any
+slot can arm; both target Skills are approved by the reviewed seed bootstrap.
+No confirmatory request has been made.

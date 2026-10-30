@@ -118,3 +118,25 @@ says which file a finding goes in.
   (2026-10-23, the extension of the eligibility entry) and
   [`reviewer-core/LEARNINGS.md`](reviewer-core/LEARNINGS.md#codebase-patterns--tool--library-notes)
   (what OpenRouter documents).
+
+- **2026-10-30 — L02 criterion 14: Skills in the system-role message.** The
+  mentor ruled that "system prompt" means the literal system message.
+  Moving the fenced Skills section there was a small change. The real work
+  was the trust step the mentor asked for: an owner approval bound to the
+  exact body digest, failing closed before any model call. Findings worth
+  keeping:
+  - **Rendered-Markdown approval is not content review.** The first approval
+    panel sat under the Markdown preview, which hides HTML comments, so an
+    owner could approve text they never saw. Approval now happens from the
+    raw body.
+  - **Draft experiment rules drift from redesigned fixtures.** Both draft
+    screening-rule files anchored experiment 18 at `payments.ts:18`, but the
+    redesigned fixture's route and lookup are at lines 12–13. A new,
+    re-anchored rules file was frozen; regex screening stays provisional.
+  - Two environment traps (card overflow hiding a control from pointer
+    clicks; concurrent `next dev` sharing `client/.next`) are in
+    [`client/LEARNINGS.md`](client/LEARNINGS.md#recurring-errors--fixes) and
+    [`e2e/LEARNINGS.md`](e2e/LEARNINGS.md#recurring-errors--fixes).
+  Evidence: `reviewer-core/src/prompt.ts` (`assemblePrompt`),
+  `server/src/modules/_shared/skill-approval.ts`,
+  `docs/homework/L02/prereg/rules-20261030.json`.

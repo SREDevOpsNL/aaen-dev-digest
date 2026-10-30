@@ -63,3 +63,23 @@ full local matrix at `17241a3` and subsequent CI are in
   can open a session directly in the scratch checkout and type
   `/pr-self-review --base HEAD`; see
   [criterion-21-preparation.md](evidence/criterion-21-preparation.md).
+
+## Criterion 14 resolved; study frozen for approval - 2026-10-30
+
+- Mentor ruling: criterion 14 needs the literal system-role message plus a
+  trust step for editable Skills. Implemented in `23d0b48`; see
+  [ARCHITECTURE.md](ARCHITECTURE.md#prompt-assembly-and-the-run-trace) and
+  [criterion-14-system-role.md](evidence/criterion-14-system-role.md).
+- Acceptance: **49 Verified**; #14, #17, #18 Implemented; #21 Blocked. #14
+  needs one authorized trace-only run to show a system-role trace (item A of
+  the [approval packet](PROSPECTIVE-STUDY.md#approval-packet-2026-10-30)).
+- #21: this session cannot run it. The standalone WSL CLI reports
+  `loggedIn: false`; `pr-self-review` is user-only
+  (`disable-model-invocation`), so only the owner can type it in a Claude Code
+  session rooted at the scratch checkout.
+- Persistent keyless freeze stack `hw2f-1fe1aeec` runs in tmux session
+  `hw2-freeze`; the frozen manifest names its database. Its API Contract
+  Reviewer links are arranged for trace slot A (semver-discipline,
+  breaking-change, response-schema off).
+- Ledger unchanged at $0.01381699 conservative (21 records); key usage
+  $0.00422487 of $2.00. No capability issued.

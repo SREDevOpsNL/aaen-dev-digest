@@ -55,3 +55,21 @@ Owner steps:
    and backend `SKILL.md` sets, the checks and the final report. The only
    project hook is `UserPromptSubmit` (the insights reminder); there is no
    push hook.
+
+## Status check (2026-10-30, later)
+
+Checked from the Claude Code desktop session working on PR #53:
+
+- The scratch checkout is intact: detached at `21c8f09`, exactly the two
+  comment-marker changes in `client/src/app/skills/page.tsx` and
+  `server/src/modules/skills/routes.ts`.
+- No session was ever opened with that folder (no transcript under
+  `~/.claude/projects/` for it), so no `/pr-self-review` run exists.
+- The standalone WSL CLI 2.1.278 reports `loggedIn: false`; it was checked
+  once and not retried.
+- This session cannot substitute: its folder is another checkout, and
+  `pr-self-review` has `disable-model-invocation: true`, so only a person can
+  invoke it by typing the slash command.
+
+Criterion 21 stays Blocked until the owner opens a Code-tab session whose
+folder is the scratch checkout and types `/pr-self-review --base HEAD`.
