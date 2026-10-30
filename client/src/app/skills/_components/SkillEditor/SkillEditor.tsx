@@ -6,6 +6,7 @@ import { Badge, Icon, Tabs } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
 import { SKILL_TABS, SKILL_TYPE_COLORS } from "../../constants";
 import { skillStyles as s } from "../../styles";
+import { ApprovalBadge } from "../ApprovalBadge";
 import { SourceBadge } from "../SourceBadge";
 import { ConfigTab } from "./_components/ConfigTab";
 import { PreviewTab } from "./_components/PreviewTab";
@@ -25,6 +26,7 @@ export function SkillEditor({ skill, tab, onTab }: { skill: Skill; tab: string; 
         <SourceBadge source={skill.source} />
         <Badge color="var(--text-secondary)" icon="History" mono>{t("editor.version", { version: skill.version })}</Badge>
         {!skill.enabled && <Badge color="var(--text-muted)">{t("editor.disabled")}</Badge>}
+        <ApprovalBadge approval={skill.approval} />
       </div>
       <div style={{ marginTop: 12 }}>
         <Tabs tabs={tabs} value={tab} onChange={onTab} pad="0 28px" />

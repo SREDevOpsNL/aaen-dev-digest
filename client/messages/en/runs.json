@@ -47,9 +47,10 @@
     },
     "prompt": {
       "system": "System",
-      "skills": "Skills (dynamic)",
+      "skills": "Skills — part of the system message (dynamic)",
+      "skillsLegacy": "Skills — in the user message (earlier trace) (dynamic)",
       "tokens": "~{count, plural, =1 {1 token} other {# tokens}}",
-      "tokensHint": "Tokens of the whole Skills section as sent to the model: heading, instructions and every enabled skill.",
+      "tokensHint": "Tokens of the whole Skills section as sent to the model inside the system message: heading, instructions and every enabled skill. Shown separately here; it is also included in the System block above.",
       "memory": "Memory (dynamic)",
       "repoMap": "Repo skeleton — repo-intel (dynamic)",
       "specs": "Project context (dynamic)",

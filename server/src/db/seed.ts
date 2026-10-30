@@ -9,7 +9,8 @@ import {
   TEST_QUALITY_REVIEWER_PROMPT,
   API_CONTRACT_REVIEWER_PROMPT,
 } from './seed-prompts.js';
-import { API_CONTRACT_SEED_SKILLS } from './seed-skills.js';
+import { API_CONTRACT_SEED_SKILLS, TEST_QUALITY_SEED_SKILLS } from './seed-skills.js';
+import { approveReviewedSeedSkill } from './reviewed-seed-skills.js';
 import { EXPERIMENT_FIXTURES, SYNTHETIC_CONVENTIONS, patchStats } from './seed-fixtures.js';
 import { assertDisposableDatabase } from './disposable.js';
 import { AgentsRepository } from '../modules/agents/repository.js';
@@ -225,52 +226,13 @@ export async function seed(
   if (options.syntheticConventions) await seedSyntheticConventions(db, workspaceId, repoId);
 
   // ---- built-in skills (text configuration only; never executable) ----
-  const seedSkills: Array<typeof t.skills.$inferInsert> = [
-    {
-      workspaceId,
-      name: 'Behavioral Coverage',
-      description: 'Checks that tests prove public behavior rather than implementation details.',
-      type: 'rubric',
-      source: 'manual',
-      body:
-        'Identify every caller-visible behavior changed by the diff. Require focused tests for meaningful success, failure, and state-transition paths. Do not request tests solely to increase line coverage.',
-      enabled: true,
-      version: 1,
-    },
-    {
-      workspaceId,
-      name: 'Assertion Quality',
-      description: 'Rejects assertions that can pass while the intended behavior is broken.',
-      type: 'rubric',
-      source: 'manual',
-      body:
-        'Check that assertions observe the externally meaningful result, error, or side effect. Flag tests that only assert mocks were called, snapshots changed, or values exist when those checks would miss a realistic regression.',
-      enabled: true,
-      version: 1,
-    },
-    {
-      workspaceId,
-      name: 'Edge Cases and Error Paths',
-      description: 'Covers boundaries and failure behavior introduced by the change.',
-      type: 'rubric',
-      source: 'manual',
-      body:
-        'Look for untested empty, missing, malformed, boundary, authorization, and dependency-failure inputs relevant to this diff. Require fail-closed behavior where security or data integrity is involved.',
-      enabled: true,
-      version: 1,
-    },
-    {
-      workspaceId,
-      name: 'Test Isolation and Determinism',
-      description: 'Finds order dependence, leaked state, time races, and unintended external I/O.',
-      type: 'convention',
-      source: 'manual',
-      body:
-        'Tests must be deterministic and independently runnable. Flag shared mutable state, unbounded timing assumptions, real network calls, cross-test database leakage, and cleanup that is skipped on failure.',
-      enabled: true,
-      version: 1,
-    },
-  ];
+  const seedSkills: Array<typeof t.skills.$inferInsert> = TEST_QUALITY_SEED_SKILLS.map((content) => ({
+    workspaceId,
+    ...content,
+    source: 'manual' as const,
+    enabled: true,
+    version: 1,
+  }));
   const skillIds: string[] = [];
   for (const skill of seedSkills) {
     let [stored] = await db
@@ -285,6 +247,8 @@ export async function seed(
       .insert(t.skillVersions)
       .values({ skillId: stored!.id, version: 1, body: stored!.body })
       .onConflictDoNothing();
+    // Approved for the system message only if this exact body was reviewed.
+    await approveReviewedSeedSkill(db, stored!, userId);
   }
 
   // ---- API Contract skills (three seeded; deprecation-policy is imported) ----
@@ -305,6 +269,8 @@ export async function seed(
       .insert(t.skillVersions)
       .values({ skillId: stored!.id, version: 1, body: stored!.body })
       .onConflictDoNothing();
+    // Approved for the system message only if this exact body was reviewed.
+    await approveReviewedSeedSkill(db, stored!, userId);
   }
 
   // ---- built-in agents (the starter presets + Test Quality + API Contract) ----

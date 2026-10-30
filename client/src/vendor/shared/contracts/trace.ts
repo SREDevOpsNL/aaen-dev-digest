@@ -39,7 +39,7 @@ export type ToolCall = z.infer<typeof ToolCall>;
 export const PromptAssembly = z.object({
   system: z.string(),
   skills: z.string().nullish(),
-  /** Tokens of the whole Skills section of the user message as sent (heading,
+  /** Tokens of the whole Skills section of the system message as sent (heading,
       preamble and wrapped skill bodies), counted by the studio tokenizer;
       null/absent when no skill was attached or in traces written before it existed. */
   skills_tokens: z.number().int().nonnegative().nullish(),

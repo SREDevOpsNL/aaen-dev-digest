@@ -7,14 +7,15 @@ import type { SkillSummary } from "@devdigest/shared";
 import { useUpdateSkill } from "@/lib/hooks/skills";
 import { SKILL_TYPE_COLORS } from "../../constants";
 import { skillStyles as s } from "../../styles";
+import { ApprovalBadge } from "../ApprovalBadge";
 import { SourceBadge } from "../SourceBadge";
 
 /** Clicks that start on a real control keep that control's own behaviour. */
 const CONTROL_SELECTOR = "button, a, input, select, textarea, label, [role=switch]";
 
 /**
- * Skills-grid card: name, type, description, enabled toggle, current version and
- * linked-agent count. It holds three separate controls, never nested: a native
+ * Skills-grid card: name, type, description, enabled toggle, system-prompt
+ * approval status, current version and linked-agent count. It holds three separate controls, never nested: a native
  * preview button (name + description), the enabled toggle and Delete.
  *
  * For the mouse, a click anywhere else on the card (e.g. the footer) also opens
@@ -56,9 +57,10 @@ export function SkillCard({
         </label>
         <IconBtn icon="Trash" size={26} danger label={t("card.delete", { name: skill.name })} onClick={() => onDelete(skill)} />
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: "auto" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: "auto" }}>
         <Badge color={SKILL_TYPE_COLORS[skill.type]}>{t(`listItem.type.${skill.type}`)}</Badge>
         <SourceBadge source={skill.source} />
+        <ApprovalBadge approval={skill.approval} />
         <span className="mono" style={{ ...s.muted, fontSize: 11 }}>{t("card.version", { version: skill.version })}</span>
         <span style={{ ...s.muted, fontSize: 11, marginLeft: "auto" }}>{t("card.usedBy", { count: skill.agent_count })}</span>
       </div>

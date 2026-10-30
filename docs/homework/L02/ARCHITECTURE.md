@@ -68,18 +68,66 @@ flowchart LR
 
 ## Prompt assembly and the run trace
 
+Changed on 2026-10-30 after the mentor's ruling on criterion 14: Skill bodies
+go in the literal **system-role** message, and only owner-approved content
+may get there.
+
 1. `AgentsRepository.enabledSkillsForPrompt` selects the agent's links whose
-   skill is enabled **and** whose link is on, ordered by `agent_skills.order`.
-2. The executor (`modules/reviews/run-executor.ts`) passes those bodies to
-   `reviewer-core`.
-3. `assemblePrompt` (`reviewer-core/src/prompt.ts`) renders them as one
-   `## Skills / rules` section, each body fenced as untrusted data
-   (`<untrusted source="skill-N">`). It sits after the PR description and
-   before the repo context and the diff.
+   skill is enabled **and** whose link is on, ordered by `agent_skills.order`
+   (the drag order), with each skill's approval state.
+2. The executor (`modules/reviews/run-executor.ts`, `buildSkillBlocks`) fails
+   the run **before any model request** if one of those skills is not
+   approved, its approval is stale or revoked, or the approval lookup fails
+   (`409 skill_not_approved`). Disabled skills are never loaded, so they
+   need no approval. Otherwise it passes the bodies to `reviewer-core`.
+3. `assemblePrompt` (`reviewer-core/src/prompt.ts`) builds:
+   - **system message:** the agent's trusted instructions, then the
+     `## Skills / rules` section from `renderSkillsSection` (each body fenced
+     as `<untrusted source="skill-N">`, closing tags escaped regardless of
+     case or whitespace), then the trusted injection guard, last;
+   - **user message:** task, PR description, memory, repo skeleton, project
+     context, callers and the diff.
+
+   A review with no enabled skill produces byte-for-byte the same messages
+   as before. Single-pass and every map chunk use the same assembler.
+   Fencing and the guard are a policy the model is asked to follow, not a
+   guarantee of injection resistance; the approval gate, output-schema
+   validation and grounding remain the enforced controls.
 4. `skills_tokens` is the tokenizer count (js-tiktoken) of exactly that
-   section. It is stored in the run trace's prompt assembly and shown on the
-   Skills block in the trace drawer. With no enabled skill there is no block
-   and no count.
+   section, rendered once by the same function. It is stored in the run
+   trace's prompt assembly and shown on the separate Skills block in the
+   trace drawer, labelled as part of the system message. With no enabled
+   skill there is no block and no count. Traces written before the change
+   (Skills in the user message) render with a legacy label.
+
+## Skill content approval
+
+- **Rule.** A skill is approved only if its latest decision is `approve` and
+  names its current version **and** the SHA-256 of its exact current body
+  (`modules/_shared/skill-approval.ts`). Any edit, rename or restore bumps the
+  version and makes it `stale` with no write; `revoke` makes it `revoked`.
+  Create, import, conventions "create skill", link and enable never approve.
+- **Who.** `POST /skills/:id/approval {version, body_sha256, reason?}` and
+  `DELETE /skills/:id/approval` require the caller to be a workspace `owner`
+  (403 otherwise; 404 for another workspace; 409 when the reviewed version or
+  digest is no longer current). Under the MVP's `LocalNoAuthProvider` every
+  local caller is the seeded owner, so the 403 path is enforced and tested
+  but cannot occur locally.
+- **Audit.** `skill_approvals` (migration `0013_clammy_hellion`) is
+  append-only in application code and keeps `skill_name`; deleting a skill
+  sets `skill_id` to null instead of deleting its history.
+  `GET /skills/:id/approvals` lists the decisions.
+- **Seeded skills.** `server/src/db/reviewed-seed-skills.ts` lists the SHA-256
+  of seven seeded bodies that were read for injection-style text. The seed
+  approves a seeded skill only if its stored body matches that digest and it
+  has no earlier decision, so it never overrides an owner's revoke. The
+  import-only `deprecation-policy` stays unapproved. After migrating an
+  existing database, run `pnpm db:seed`.
+- **UI.** Skill cards and the editor show "Approved for system prompt"
+  separately from Enabled. The Preview tab's approval panel shows the exact
+  raw body (not rendered Markdown), version and full digest, and approves
+  only that. The agent's Skills tab marks each row and warns when an enabled
+  skill blocks reviews.
 
 ## Conventions
 

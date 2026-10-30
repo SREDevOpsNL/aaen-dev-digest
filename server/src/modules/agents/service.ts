@@ -141,7 +141,7 @@ export class AgentsService {
   /** Linked skills with their resolved config, in deterministic link order. */
   async skillLinks(agentId: string): Promise<AgentSkillDetail[]> {
     const links = await this.repo.linkedSkills(agentId);
-    return links.map(({ skill, order, linkEnabled }) => ({
+    return links.map(({ skill, order, linkEnabled, approval }) => ({
       agent_id: agentId,
       skill_id: skill.id,
       order,
@@ -157,6 +157,7 @@ export class AgentsService {
         enabled: skill.enabled,
         version: skill.version,
         evidence_files: skill.evidenceFiles ?? null,
+        approval,
       } satisfies Skill,
     }));
   }

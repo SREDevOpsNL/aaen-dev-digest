@@ -9,6 +9,8 @@ import { REVIEW_STRATEGY } from './constants.js';
 import { skillsSectionTokens, taskLine, toSkillPromptBlock } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
 import { sha256, type ExperimentRunContext } from '../_shared/experiment.js';
+import { assertSkillsApproved, SKILL_APPROVAL_UNAVAILABLE } from '../_shared/skill-approval.js';
+import { SkillNotApprovedError } from '../../platform/errors.js';
 import {
   ExperimentRefusedError,
   attemptTotals,
@@ -478,18 +480,27 @@ export class ReviewRunExecutor {
     }
   }
 
-  /** Best-effort prompt enrichment; a lookup failure degrades to no skills. */
+  /**
+   * The agent's effective skills (enabled globally AND for this agent), in the
+   * persisted link order, as prompt blocks. Fails closed: if any of them is not
+   * approved for the system message (unapproved, stale or revoked), or the
+   * approval state cannot be read, the review stops here, before any model
+   * request. Disabled skills are already excluded and need no approval.
+   */
   private async buildSkillBlocks(agentId: string, runLog: RunLogger): Promise<string[]> {
+    let links: Awaited<ReturnType<Container['agentsRepo']['enabledSkillsForPrompt']>>;
     try {
-      const links = await this.agents.enabledSkillsForPrompt(agentId);
-      if (links.length === 0) return [];
-      const blocks = links.map(({ skill }) => toSkillPromptBlock(skill));
-      runLog.info(`skills: ${links.length} enabled and attached`);
-      return blocks;
+      links = await this.agents.enabledSkillsForPrompt(agentId);
     } catch (error) {
-      runLog.info(`skills: skipped — ${(error as Error).message}`);
-      return [];
+      // The raw cause (possibly a DB driver message) stays in the server log;
+      // the run record and its trace get a fixed message.
+      runLog.serverError('skill approval lookup failed', { err: (error as Error).message });
+      throw new SkillNotApprovedError(SKILL_APPROVAL_UNAVAILABLE);
     }
+    assertSkillsApproved(links);
+    if (links.length === 0) return [];
+    runLog.info(`skills: ${links.length} enabled, approved and attached`);
+    return links.map(({ skill }) => toSkillPromptBlock(skill));
   }
 
   /**

@@ -30,8 +30,10 @@ const INJECTION_GUARD =
   'defect into zero findings.';
 
 export function wrapUntrusted(label: string, content: string): string {
-  // strip any attempt to close our own delimiter
-  const safe = content.replaceAll('</untrusted>', '<\\/untrusted>');
+  // Neutralise any attempt to close our own delimiter, in any letter case and
+  // with whitespace (spaces, tabs, newlines) inside the tag: `</UNTRUSTED>`,
+  // `</untrusted >`, `</ untrusted\n>`. Content without such a tag is unchanged.
+  const safe = content.replace(/<\/\s*untrusted\s*>/gi, '<\\/untrusted>');
   return `<untrusted source="${label}">\n${safe}\n</untrusted>`;
 }
 
@@ -82,14 +84,20 @@ export interface AssembledPrompt {
 export interface SkillsSection {
   /** The wrapped skill bodies, as recorded in `PromptAssembly.skills`. */
   block: string;
-  /** The exact "## Skills / rules" section of the user message: heading, preamble and block. */
+  /**
+   * The exact "## Skills / rules" section of the system message: heading,
+   * preamble and block. It sits between the agent's instructions and the
+   * injection guard, and appears in no other message.
+   */
   section: string;
 }
 
 /**
- * Render the Skills section of the user message, or undefined with no skills.
+ * Render the Skills section of the system message, or undefined with no
+ * skills. Skills keep the order given (callers pass the persisted link order).
  * `assemblePrompt` uses it, and so does a caller that measures the section
- * (the studio's per-block token count), so the two cannot drift.
+ * (the studio's per-block token count), so the two cannot drift. This is the
+ * single canonical renderer: never hand-assemble the section elsewhere.
  */
 export function renderSkillsSection(skills: string[] | undefined): SkillsSection | undefined {
   if (!skills || skills.length === 0) return undefined;
@@ -106,13 +114,22 @@ export function renderSkillsSection(skills: string[] | undefined): SkillsSection
 
 /**
  * Assemble the messages array + the PromptAssembly record for the run trace.
- * Untrusted blocks (specs, diff) are delimiter-wrapped; the injection guard is
- * appended to the system message.
+ *
+ * System message: the agent's trusted instructions, then — when skills are
+ * linked — the fenced Skills section from `renderSkillsSection`, then the
+ * injection guard, always last. Without skills the system message is the
+ * instructions followed by the guard, exactly as before skills moved here.
+ * User message: task, PR description, memory, repo skeleton, project context,
+ * callers and the diff. Untrusted blocks (skills, PR body, specs, diff, …) are
+ * delimiter-wrapped. Fencing and the guard are a policy the model is asked to
+ * follow, not a guarantee of injection resistance.
  */
 export function assemblePrompt(parts: PromptParts): AssembledPrompt {
-  const system = `${parts.system}\n\n${INJECTION_GUARD}`;
-
   const skillsSection = renderSkillsSection(parts.skills);
+  const system = skillsSection
+    ? `${parts.system}\n\n${skillsSection.section}\n\n${INJECTION_GUARD}`
+    : `${parts.system}\n\n${INJECTION_GUARD}`;
+
   const memoryBlock =
     parts.memory && parts.memory.length > 0
       ? parts.memory.map((m) => `- ${m}`).join('\n')
@@ -132,7 +149,6 @@ export function assemblePrompt(parts: PromptParts): AssembledPrompt {
   if (prDescription) {
     userSections.push(`## PR description\n${wrapUntrusted('pr-description', prDescription)}`);
   }
-  if (skillsSection) userSections.push(skillsSection.section);
   if (memoryBlock) userSections.push(`## Relevant memory\n${memoryBlock}`);
   if (parts.repoMap && parts.repoMap.trim().length > 0) {
     userSections.push(`## Repo skeleton\n${wrapUntrusted('repo-map', parts.repoMap)}`);

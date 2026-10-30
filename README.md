@@ -153,6 +153,11 @@ Postgres); everything else is hermetic. The browser e2e flows live in
 
 - **`relation ... does not exist` / API errors on first run** — migrations weren't
   applied. The server does **not** migrate on boot: run `cd server && pnpm db:migrate`.
+- **A review fails with `skill_not_approved`** — an enabled skill's current
+  content has no owner approval (or it is stale or revoked). After migrating an
+  existing database, run `cd server && pnpm db:seed` to bootstrap approvals for
+  the reviewed seeded skills; approve any other skill on its Preview tab, or
+  switch it off for the agent.
 - **Port 5432 already in use** — another Postgres is running. Stop it, or change the
   host port in `docker-compose.yml`.
 - **Can't reach Postgres from another machine or the WSL IP** — by design: it is

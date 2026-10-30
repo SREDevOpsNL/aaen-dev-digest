@@ -27,6 +27,14 @@ describe('skill mappings and version rule', () => {
       enabled: true,
       version: 1,
       evidence_files: null,
+      approval: {
+        status: 'unapproved',
+        version: 1,
+        body_sha256: '815a7c633170ec7acd26719ff37af09a7fd19adf569c4efa5e7ee58aa23508c1',
+        approved_version: null,
+        approved_at: null,
+        approved_by: null,
+      },
     });
   });
 

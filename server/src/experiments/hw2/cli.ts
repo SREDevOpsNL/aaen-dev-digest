@@ -931,6 +931,12 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       });
       const markdown = renderReport(report);
       if (typeof flags.out === 'string') writeFileSync(flags.out, `${markdown}\n`);
+      // Input for adjudication-cli.ts prepare: private (it carries condition and slot identity).
+      if (typeof flags['adjudication-input'] === 'string') {
+        const design = { manifest_fingerprint: manifestFingerprint(frozen), experiments: Object.keys(EXPERIMENT_FIXTURE), per_condition: 5, slots: frozen.schedule.slots };
+        const input = { design, rows: report.rows, runs: Object.fromEntries(runs), skill_names: frozen.skills.map((s) => s.name) };
+        writeFileSync(flags['adjudication-input'], `${JSON.stringify(input, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+      }
       log(markdown);
       return;
     }

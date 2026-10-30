@@ -7,6 +7,7 @@ import { AppError, ConflictError, NotFoundError, ValidationError } from '../../p
 import { assertDisposableDatabase, isDisposableDatabaseName } from '../../db/disposable.js';
 import { ReviewService } from '../reviews/service.js';
 import type { Logger } from '../reviews/run-executor.js';
+import { assertSkillsApproved } from '../_shared/skill-approval.js';
 import type { AgentRow } from '../../db/rows.js';
 import {
   EXPERIMENT_CAPS,
@@ -142,6 +143,7 @@ export class ExperimentsService {
       await this.checkBudget(workspaceId, input, capability);
       const targets = await this.reviews.resolveTargets(workspaceId, { agentId: input.agent_id });
       if (targets.length !== 1) throw new ValidationError('An armed slot needs exactly one agent');
+      await this.assertSkillsApproved(targets);
       const { expires_at } = this.container.experimentArms.arm(
         { slotId: input.slot_id, workspaceId, prId: input.pr_id, agentId: input.agent_id, request: { input, capabilityToken } },
         () => gate.close(input.slot_id),
@@ -267,6 +269,9 @@ export class ExperimentsService {
   private async dispatch(workspaceId: string, input: SlotInput, targets: AgentRow[], logger?: Logger): Promise<string> {
     const config = this.config();
     const gate = this.container.experimentSpendGate;
+    // Checked again here (the executor checks too): a slot whose skills are
+    // not approved is refused before any run row exists, so it is not used up.
+    await this.assertSkillsApproved(targets);
     const { runs } = await this.reviews.runReview(workspaceId, input.pr_id, targets, logger, {
       config,
       request: {
@@ -282,6 +287,11 @@ export class ExperimentsService {
       onSettled: () => gate.close(input.slot_id),
     });
     return runs[0]!.run_id;
+  }
+
+  /** Fail closed when any target's effective skill content is not approved. */
+  private async assertSkillsApproved(targets: AgentRow[]): Promise<void> {
+    for (const agent of targets) assertSkillsApproved(await this.container.agentsRepo.enabledSkillsForPrompt(agent.id));
   }
 
   /**

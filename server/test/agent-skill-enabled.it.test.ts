@@ -8,6 +8,7 @@ import * as t from '../src/db/schema.js';
 import { loadConfig } from '../src/platform/config.js';
 import { dockerAvailable, startPg, type PgFixture } from './helpers/pg.js';
 import { waitForPrRuns, waitForRunTrace } from './helpers/runs.js';
+import { approveSkill } from './helpers/skills.js';
 
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
@@ -50,7 +51,8 @@ d('per-agent skill switch (agent_skills.enabled)', () => {
   async function skill(app: App, name: string) {
     const res = await app.inject({ method: 'POST', url: '/skills', payload: { name: `${name} ${seq++}`, description: '', type: 'rubric', body: `${name} criteria.` } });
     expect(res.statusCode).toBe(201);
-    return res.json() as { id: string; name: string };
+    // Reviews fail closed on unapproved skill content, so approve it as the owner.
+    return approveSkill(app, (res.json() as { id: string }).id);
   }
   async function agentWith(app: App, skillIds: string[]) {
     const agent = (
@@ -84,7 +86,15 @@ d('per-agent skill switch (agent_skills.enabled)', () => {
     await waitForPrRuns(pg.handle.db, pull!.id, { expected: 1 });
     await waitForRunTrace(pg.handle.db, started.runs[0]!.run_id);
     const trace = (await app.inject({ url: `/runs/${started.runs[0]!.run_id}/trace` })).json();
-    return { skills: trace.prompt_assembly.skills ?? null, tokens: trace.prompt_assembly.skills_tokens ?? null };
+    const skills: string | null = trace.prompt_assembly.skills ?? null;
+    const system = trace.prompt_assembly.system as string;
+    const user = trace.prompt_assembly.user as string;
+    // Placement: the Skills block sits in the system message only, never in the user message.
+    expect(user).not.toContain('## Skills / rules');
+    expect(user).not.toContain('<untrusted source="skill-');
+    if (skills) expect(system).toContain(skills);
+    else expect(system).not.toContain('## Skills / rules');
+    return { skills, tokens: trace.prompt_assembly.skills_tokens ?? null };
   }
 
   it('links start enabled; PATCH turns one off for this agent only and leaves the skill itself enabled', async () => {

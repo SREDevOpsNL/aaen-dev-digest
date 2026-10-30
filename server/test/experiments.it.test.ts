@@ -426,6 +426,36 @@ d('HW2 experiment mode (disposable devdigest_test database, fake provider)', () 
     }
   });
 
+  it('fails closed on unapproved skill content: preview and start are refused, no run, no model request, slot not used up', async () => {
+    const links = (await app.inject({ url: `/agents/${apiAgent}/skills` })).json() as Array<{ skill_id: string; skill: { name: string; approval: { status: string } } }>;
+    // The seeded target skills are approved by the reviewed-digest bootstrap.
+    expect(links.map((l) => l.skill.approval.status)).toEqual(links.map(() => 'approved'));
+    const target = links.find((l) => l.skill.name === 'breaking-change')!.skill_id;
+    expect((await app.inject({ method: 'DELETE', url: `/skills/${target}/approval`, payload: { reason: 'test' } })).statusCode).toBe(200);
+    try {
+      const preview = await app.inject({
+        method: 'POST',
+        url: '/experiments/preview',
+        payload: { pr_id: pr502, agent_id: apiAgent, experiment: '18', condition: 'with', phase: 'exploration', reservation_usd: 0.05, expected_diff_sha256: await fixtureDiffSha(502) },
+      });
+      expect(preview.statusCode).toBe(409);
+      expect(preview.json().error).toMatchObject({ code: 'skill_not_approved' });
+      expect(preview.json().error.message).toContain('"breaking-change" (revoked)');
+
+      const before = modelCalls();
+      const slot = nextSlot();
+      const refused = await start({ slot_id: slot });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error.message).toContain('"breaking-change" (revoked)');
+      expect(modelCalls()).toBe(before);
+      expect((await app.inject({ url: `/experiments/slots/${slot}` })).json().runs).toHaveLength(0);
+      expect((await app.inject({ url: '/experiments/identity' })).json().in_flight_slot).toBeNull();
+    } finally {
+      const current = (await app.inject({ url: `/skills/${target}` })).json() as { approval: { version: number; body_sha256: string } };
+      await app.inject({ method: 'POST', url: `/skills/${target}/approval`, payload: { version: current.approval.version, body_sha256: current.approval.body_sha256 } });
+    }
+  });
+
   it('refuses when no live endpoint matches the frozen provider', async () => {
     llm.endpoints = [{ ...ENDPOINT, providerName: 'Novita', tag: 'novita' }];
     const before = modelCalls();

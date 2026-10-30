@@ -11,6 +11,13 @@ import {
 } from '../src/experiments/hw2/adjudication.js';
 import type { SlotRow, SlotRunData } from '../src/experiments/hw2/report.js';
 
+const designFor = (rows: SlotRow[], perCondition = 5) => ({
+  manifest_fingerprint: 'synthetic-manifest',
+  experiments: [...new Set(rows.map((r) => r.experiment))],
+  per_condition: perCondition,
+  slots: rows.map((r) => ({ slot_id: r.slot_id, experiment: r.experiment, condition: r.condition })),
+});
+
 // Synthetic slots only: no Phase 1 case is rescored.
 const finding = (title: string, rationale = 'synthetic rationale') => ({ file: 'src/billing/discount.ts', start_line: 3, end_line: 9, title, rationale });
 
@@ -40,6 +47,7 @@ function schedule(uncounted: string[] = []) {
   const slots = [1, 2, 3, 4, 5].flatMap((i) => [slot(`c-17-with-${i}`, 'with', !uncounted.includes(`c-17-with-${i}`)), slot(`c-17-without-${i}`, 'without', !uncounted.includes(`c-17-without-${i}`))]);
   let n = 0;
   return preparePacket({
+    design: designFor(slots.map((s) => s.row)),
     rows: slots.map((s) => s.row),
     runs: new Map(slots.map((s) => [s.row.slot_id, s.run])),
     rules: { '17': 'error branch AND now == expiresAt boundary' },
@@ -148,7 +156,7 @@ describe('HW2 sealed condition-blinded adjudication', () => {
 
   it('five surviving slots do not stand in for a larger schedule with a gap', () => {
     const slots = [1, 2, 3, 4, 5, 6].flatMap((i) => [slot(`c-17-with-${i}`, 'with'), slot(`c-17-without-${i}`, 'without', i !== 6)]);
-    const base = preparePacket({ rows: slots.map((s) => s.row), runs: new Map(slots.map((s) => [s.row.slot_id, s.run])), rules: {}, skillNames: [] });
+    const base = preparePacket({ design: designFor(slots.map((s) => s.row), 6), rows: slots.map((s) => s.row), runs: new Map(slots.map((s) => [s.row.slot_id, s.run])), rules: {}, skillNames: [] });
     const conditionOf = (id: string) => base.mapping.entries.find((e) => e.case_id === id)!.condition;
     const answer = (id: string): Verdict => (conditionOf(id) === 'with' ? 'yes' : 'no');
     const result = reveal({ ...base, judgments: [judge(base.packet, base.packet_sha256, 'A', answer), judge(base.packet, base.packet_sha256, 'B', answer)] });
@@ -158,7 +166,34 @@ describe('HW2 sealed condition-blinded adjudication', () => {
   it('records finding wording that may reveal the condition as compromised blinding', () => {
     const slots = [slot('c-17-with-1', 'with')];
     slots[0]!.run!.findings = [finding('Per the test-quality guidance, the expiry boundary is untested')];
-    const { mapping } = preparePacket({ rows: slots.map((s) => s.row), runs: new Map(slots.map((s) => [s.row.slot_id, s.run])), rules: {}, skillNames: ['test-quality'] });
+    const rows = slots.map((s) => s.row);
+    const design = { ...designFor(rows), per_condition: 1, slots: [...designFor(rows).slots, { slot_id: 'c-17-without-1', experiment: '17', condition: 'without' as const }] };
+    const extra = slot('c-17-without-1', 'without', false);
+    const { mapping } = preparePacket({ design, rows: [...rows, extra.row], runs: new Map([...slots, extra].map((s) => [s.row.slot_id, s.run])), rules: {}, skillNames: ['test-quality'] });
     expect(mapping.blinding_warnings).toEqual([expect.objectContaining({ ref: 'f1', term: 'test-quality' })]);
+  });
+
+  it('refuses input that is not exactly the pre-registered schedule', () => {
+    const slots = [1, 2, 3, 4, 5].flatMap((i) => [slot(`c-17-with-${i}`, 'with'), slot(`c-17-without-${i}`, 'without')]);
+    const rows = slots.map((s) => s.row);
+    const runs = new Map(slots.map((s) => [s.row.slot_id, s.run]));
+    const prepare = (design: ReturnType<typeof designFor>, inputRows: SlotRow[]) => () => preparePacket({ design, rows: inputRows, runs, rules: {}, skillNames: [] });
+    const extra = slot('c-17-with-6', 'with');
+    runs.set(extra.row.slot_id, extra.run);
+    expect(prepare(designFor(rows), [...rows, extra.row])).toThrow(/is not scheduled/);
+    expect(prepare(designFor(rows), [...rows, rows[0]!])).toThrow(/repeats a slot id/);
+    expect(prepare(designFor(rows), rows.slice(1))).toThrow(/missing from the input/);
+    expect(prepare({ ...designFor(rows), experiments: ['17', '18'] }, rows)).toThrow(/experiment 18 with: 0 scheduled/);
+    const flipped = structuredClone(rows);
+    flipped[0]!.condition = flipped[0]!.condition === 'with' ? 'without' : 'with';
+    expect(prepare(designFor(rows), flipped)).toThrow(/differs from its scheduled/);
+  });
+
+  it('the mapping carries a secret nonce, so its published digest does not identify the assignment', () => {
+    const a = schedule();
+    const b = schedule();
+    expect(a.mapping.nonce).toMatch(/^[0-9a-f]{64}$/);
+    expect(a.mapping.nonce).not.toBe(b.mapping.nonce);
+    expect(a.mapping_sha256).not.toBe(b.mapping_sha256);
   });
 });

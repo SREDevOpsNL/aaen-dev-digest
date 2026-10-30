@@ -17,7 +17,8 @@ export function toSkillPromptBlock(skill: { name: string; body: string }): strin
 
 /**
  * Token count of the Skills section exactly as `assemblePrompt` renders it into
- * the user message, or null when no skill is attached (nothing was sent).
+ * the system message (once, between the agent's instructions and the injection
+ * guard), or null when no skill is attached (nothing was sent).
  */
 export function skillsSectionTokens(
   skillBlocks: string[],

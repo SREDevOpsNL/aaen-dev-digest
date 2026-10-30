@@ -164,5 +164,49 @@
   },
   "source": {
     "imported_file": "Imported"
+  },
+  "approval": {
+    "status": {
+      "approved": "Approved for system prompt",
+      "unapproved": "Not approved",
+      "stale": "Approval stale",
+      "revoked": "Approval revoked"
+    },
+    "statusTooltip": {
+      "approved": "A workspace owner approved this exact content (v{version}) to enter the review's system message.",
+      "unapproved": "No workspace owner has approved this content. While it is enabled on an agent, that agent's reviews are blocked.",
+      "stale": "The content changed after v{approved} was approved. Reviews that use it are blocked until the current version is approved.",
+      "revoked": "The approval was revoked. Reviews that use this skill are blocked until it is approved again."
+    },
+    "title": "System-prompt approval",
+    "explainer": "Enabled and approved are separate. Enabled decides whether agents use the skill; approved means a workspace owner reviewed this exact text for the review's system message. An enabled skill that is not approved blocks every review that would use it.",
+    "current": "Current content: v{version} · sha256 {digest}",
+    "approvedBy": "Approved v{version} on {at}",
+    "approve": "Approve this content",
+    "revoke": "Revoke approval",
+    "approveTitle": "Approve v{version} for the system prompt?",
+    "approveBody": "You are approving exactly the raw text below (v{version}). It will be placed in the review's system message for every agent that has this skill enabled. Any later edit or restore requires a new approval.",
+    "approveConfirm": "Approve",
+    "approvePending": "Approving…",
+    "revokeTitle": "Revoke approval for {name}?",
+    "revokeBody": "Reviews by agents that have this skill enabled will be blocked until it is approved again.",
+    "revokeConfirm": "Revoke",
+    "revokePending": "Revoking…",
+    "cancel": "Cancel",
+    "reasonLabel": "Reason (optional)",
+    "conflict": "The skill changed since this page loaded. Review the current content and approve again.",
+    "forbidden": "Only a workspace owner can approve or revoke skill content.",
+    "failed": "Could not save the decision. Try again.",
+    "historyTitle": "Approval history",
+    "historyEmpty": "No decisions yet.",
+    "historyError": "Could not load the approval history.",
+    "decision": {
+      "approve": "Approved",
+      "revoke": "Revoked"
+    },
+    "historyRow": "{decision} v{version} · {actor} · {at}",
+    "rawTitle": "Exact text to approve",
+    "rawHint": "The stored text as the model receives it, unrendered. Comments, raw HTML and link definitions that the preview above hides are shown here; review this, not the preview.",
+    "rawConfirmTitle": "Exact text of v{version} to approve"
   }
 }

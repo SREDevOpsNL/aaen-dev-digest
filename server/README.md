@@ -108,6 +108,17 @@ Migrations are **not** applied on boot — run `pnpm db:migrate` (pgvector is
 enabled by migration `0000`). `pnpm db:seed` is idempotent demo data
 (`acme/payments-api`, PR #482, the built-in agents and skills). The HW2 experiment fixture PRs #501 and #502 are added only with `DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1`, and only into a disposable database (`devdigest_test`, `devdigest_e2e` or `devdigest_hw2f[_<nonce>]` holding no other repository; `src/db/disposable.ts`). The hermetic e2e runner and CI's browser workflow enable it; the plain `pnpm db:seed` never does.
 
+**Skill-content approval after an upgrade.** Migration `0013` adds
+`skill_approvals`, empty. On an existing database, run `pnpm db:migrate` and
+then `pnpm db:seed`: the seed records the bootstrap approval for each seeded
+skill whose stored body is still on the reviewed digest list
+(`src/db/reviewed-seed-skills.ts`). Until then — and for any other skill until
+a workspace owner approves it on the skill's Preview tab — a review by an agent
+with that skill enabled fails before dispatch with `skill_not_approved`.
+Under `LocalNoAuthProvider` every local caller is the seeded owner, so the
+owner-only `403` on `POST`/`DELETE /skills/:id/approval` is enforced and tested
+but cannot occur in the MVP.
+
 ## Review context (non-obvious)
 
 What the reviewer actually sends to the model is assembled in

@@ -16,6 +16,7 @@ vi.mock("@/lib/hooks/skills", () => ({
 
 import { SkillEditor } from "../SkillEditor";
 import { VersionsTab } from "./VersionsTab";
+import { approvalFixture } from "@/test/skill-approval";
 
 const skill: Skill = {
   id: "s1",
@@ -27,6 +28,7 @@ const skill: Skill = {
   enabled: true,
   version: 3,
   evidence_files: null,
+  approval: approvalFixture("approved", { version: 3 }),
 };
 
 const version = (n: number, body: string): SkillVersion => ({

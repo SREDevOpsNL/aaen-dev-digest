@@ -79,6 +79,16 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
 
 ## Recurring Errors & Fixes
 
+- **2026-10-30** — Do not run `scripts/e2e.sh` (hermetic) and an
+  `e2e.sh --serve` stack from the same worktree at the same time, even on
+  different ports. Both start `next dev` in the same `client/` directory and
+  share `client/.next`, so one UI was built against the other stack's
+  `NEXT_PUBLIC_API_BASE` (port 3201 instead of 3251), and the hermetic run
+  failed two flows on `wait --url tab=config`. The same suite passed 14/14
+  when run alone. Run them one after the other, or from separate worktrees.
+  Evidence: `scripts/e2e.sh` (`NEXT_PUBLIC_API_BASE`, `next dev` in
+  `client/`), the 2026-10-30 runs in `docs/homework/L02/TEST-RESULTS.md`.
+
 ## Session Notes
 
 ## Open Questions

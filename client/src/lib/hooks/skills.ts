@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AgentSkillDetail,
   Skill,
+  SkillApprovalRecord,
   SkillSummary,
   SkillType,
   SkillVersion,
@@ -150,4 +151,43 @@ export function useSetAgentSkills() {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
+}
+
+/** The append-only approval audit for one skill, newest first. */
+export function useSkillApprovals(id: string) {
+  return useQuery({
+    queryKey: ["skill-approvals", id],
+    queryFn: () => api.get<SkillApprovalRecord[]>(`/skills/${id}/approvals`),
+  });
+}
+
+function useApprovalMutation<V extends { id: string }>(request: (variables: V) => Promise<Skill>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (skill) => {
+      queryClient.setQueryData(["skill", skill.id], skill);
+      queryClient.invalidateQueries({ queryKey: ["skills"] });
+      queryClient.invalidateQueries({ queryKey: ["skill-approvals", skill.id] });
+      // Agent Skills tabs show each linked skill's approval state.
+      queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+    },
+  });
+}
+
+/**
+ * Approve the exact content the owner reviewed: the version and body digest
+ * the page showed. The server refuses (409) if the body changed since.
+ */
+export function useApproveSkill() {
+  return useApprovalMutation(({ id, version, body_sha256, reason }: { id: string; version: number; body_sha256: string; reason?: string }) =>
+    api.post<Skill>(`/skills/${id}/approval`, { version, body_sha256, ...(reason ? { reason } : {}) }),
+  );
+}
+
+/** Revoke the skill's approval; its content then blocks reviews while enabled. */
+export function useRevokeSkill() {
+  return useApprovalMutation(({ id, reason }: { id: string; reason?: string }) =>
+    api.del<Skill>(`/skills/${id}/approval`, reason ? { reason } : undefined),
+  );
 }

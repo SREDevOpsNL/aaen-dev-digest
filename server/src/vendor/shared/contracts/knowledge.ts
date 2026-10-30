@@ -119,6 +119,29 @@ export type SkillType = z.infer<typeof SkillType>;
 export const SkillSource = z.enum(['manual', 'imported_file', 'imported_url', 'extracted', 'community']);
 export type SkillSource = z.infer<typeof SkillSource>;
 
+/**
+ * Whether a skill's current body may enter the review's system message.
+ * `approved` only when the latest decision is an approval of exactly this
+ * version AND body digest; an edit or restore makes it `stale` with no write.
+ * Enabled (runtime switch) and approved (reviewed content) are independent.
+ */
+export const SkillApprovalStatus = z.enum(['approved', 'unapproved', 'stale', 'revoked']);
+export type SkillApprovalStatus = z.infer<typeof SkillApprovalStatus>;
+
+const Sha256Hex = z.string().regex(/^[0-9a-f]{64}$/);
+
+export const SkillApproval = z.object({
+  status: SkillApprovalStatus,
+  /** The skill's current version and the sha256 (hex) of its current body. */
+  version: z.number().int(),
+  body_sha256: Sha256Hex,
+  /** From the latest decision when it is an approval (current or stale); else null. */
+  approved_version: z.number().int().nullable(),
+  approved_at: z.string().nullable(),
+  approved_by: z.string().nullable(),
+});
+export type SkillApproval = z.infer<typeof SkillApproval>;
+
 export const Skill = z.object({
   id: z.string(),
   name: z.string(),
@@ -129,8 +152,40 @@ export const Skill = z.object({
   enabled: z.boolean(),
   version: z.number().int(),
   evidence_files: z.array(z.string()).nullish(),
+  approval: SkillApproval,
 });
 export type Skill = z.infer<typeof Skill>;
+
+/** Body of `POST /skills/:id/approval`: the exact version and digest the reviewer saw. */
+export const SkillApprovalRequest = z.object({
+  version: z.number().int().positive(),
+  body_sha256: Sha256Hex,
+  reason: z.string().trim().max(2_000).optional(),
+});
+export type SkillApprovalRequest = z.infer<typeof SkillApprovalRequest>;
+
+/** Body of `DELETE /skills/:id/approval` (optional). */
+export const SkillRevokeRequest = z.object({
+  reason: z.string().trim().max(2_000).optional(),
+});
+export type SkillRevokeRequest = z.infer<typeof SkillRevokeRequest>;
+
+/** One append-only audit row (`GET /skills/:id/approvals`, newest first). */
+export const SkillApprovalRecord = z.object({
+  id: z.string(),
+  /** Null once the skill was deleted; the audit row itself is kept. */
+  skill_id: z.string().nullable(),
+  /** The skill's name when the decision was made. */
+  skill_name: z.string(),
+  version: z.number().int(),
+  body_sha256: Sha256Hex,
+  decision: z.enum(['approve', 'revoke']),
+  actor_user_id: z.string(),
+  actor_name: z.string().nullable(),
+  reason: z.string().nullable(),
+  created_at: z.string(),
+});
+export type SkillApprovalRecord = z.infer<typeof SkillApprovalRecord>;
 
 /**
  * Library-list projection. `agent_count` is the number of agents linked to the

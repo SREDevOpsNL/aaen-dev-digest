@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SkillSummary } from "@devdigest/shared";
+import { approvalFixture } from "@/test/skill-approval";
 import {
   approximateTokens,
   deriveSkillName,
@@ -21,6 +22,7 @@ const SKILLS: SkillSummary[] = [
     version: 1,
     evidence_files: null,
     agent_count: 1, used_by_count: 1,
+    approval: approvalFixture(),
   },
   {
     id: "two",
@@ -33,6 +35,7 @@ const SKILLS: SkillSummary[] = [
     version: 2,
     evidence_files: null,
     agent_count: 0, used_by_count: 0,
+    approval: approvalFixture("unapproved"),
   },
 ];
 

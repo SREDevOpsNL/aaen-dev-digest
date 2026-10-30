@@ -52,6 +52,18 @@ correction. Genuinely cross-package findings belong in
   `client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/FindingsPreview.tsx:49`
   (`onScroll`).
 
+- **2026-10-30** — A Skills-grid card whose footer is a non-wrapping flex row
+  overflows its `minmax(280px, 1fr)` grid column as soon as one more badge is
+  added: the card's min-content width (396 px) exceeded the ~305 px column at
+  1280 px, so each card slid under its right-hand neighbour. Accessible-name
+  queries still found the Delete button, but a pointer click landed on the
+  next card's title and opened its preview, so e2e flow 11 failed on the
+  missing delete dialog while every jsdom test passed. Let card footers wrap
+  (`flexWrap: "wrap"`) and check `document.elementFromPoint` at a control's
+  centre when a click "succeeds" but nothing happens. Evidence:
+  `client/src/app/skills/_components/SkillCard/SkillCard.tsx` (footer style),
+  `e2e/specs/11-skills-lab.flow.json` ("skill delete confirmation opens").
+
 ## Session Notes
 
 ## Open Questions

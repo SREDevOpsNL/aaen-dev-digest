@@ -147,6 +147,36 @@ confirm each complete input upper bound is within that reservation at current
 prices. Freeze and verify complete request hashes for every condition, as well
 as the component fingerprints listed below.
 
+### Frozen adjudication text
+
+Adjudicators receive exactly this text in the blind packet (`TECHNICAL_RULES` and
+`FIXTURE_GROUND_TRUTH` in `server/src/experiments/hw2/adjudication.ts`; a test fails
+if the two differ). One line per experiment.
+
+Rule #17:
+
+```text
+Detected only if one grounded finding (or findings together) explicitly identifies BOTH (a) a missing test for an error branch of applyDiscount (an expired coupon or an unknown code throwing) AND (b) a missing test at the exact expiry-equality boundary, now == expiresAt. Generic "edge case" or "more tests" wording does not count. Otherwise: no; if the text cannot be decided: ambiguous.
+```
+
+Ground truth #17:
+
+```text
+Fixture PR #501 (src/billing/discount.ts): applyDiscount succeeds before expiry; throws "Coupon expired" at exactly now == expiresAt and after it; throws "Unknown coupon" for an unknown code. The added tests exercise only the success path: no error branch and no expiry-boundary case is tested.
+```
+
+Rule #18:
+
+```text
+Detected only if a grounded finding identifies that existing v1 requests that use a payment ID now fail (404) because the lookup changed from payment ID to public reference. Naming only the :id to :reference placeholder rename, or a generic breaking-change claim, does not count. Otherwise: no; if the text cannot be decided: ambiguous.
+```
+
+Ground truth #18:
+
+```text
+Fixture PR #502 (src/api/payments.ts, src/payments/store.ts): the published route GET /v1/payments/:id becomes /v1/payments/:reference in place and its handler calls findPaymentByReference. An old ID URL such as /v1/payments/pay_123 still matches the new pattern, but the parameter is now looked up as a public reference, so an existing client calling it with a payment ID gets 404 where it got 200. The placeholder rename on its own changes nothing; the lookup change breaks clients.
+```
+
 ## Freeze before any confirmatory request
 
 Pre-register a committed, unmodified manifest containing the final

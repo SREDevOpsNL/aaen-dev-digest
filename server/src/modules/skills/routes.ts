@@ -3,6 +3,9 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   Skill,
+  SkillApprovalRecord,
+  SkillApprovalRequest,
+  SkillRevokeRequest,
   SkillSummary,
   SkillType,
   SkillVersion,
@@ -151,6 +154,37 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
       const agents = await service.linkedAgents(workspaceId, request.params.id);
       if (!agents) throw new NotFoundError('Skill not found');
       return agents;
+    },
+  );
+
+  // ---- content approval (owner-only decisions; append-only audit) --------
+
+  app.post(
+    '/skills/:id/approval',
+    { schema: { params: IdParams, body: SkillApprovalRequest, response: { 200: Skill } } },
+    async (request) => {
+      const ctx = await getContext(app.container, request);
+      return service.approve(ctx, request.params.id, request.body);
+    },
+  );
+
+  app.delete(
+    '/skills/:id/approval',
+    { schema: { params: IdParams, body: SkillRevokeRequest.nullish(), response: { 200: Skill } } },
+    async (request) => {
+      const ctx = await getContext(app.container, request);
+      return service.revoke(ctx, request.params.id, request.body?.reason);
+    },
+  );
+
+  app.get(
+    '/skills/:id/approvals',
+    { schema: { params: IdParams, response: { 200: z.array(SkillApprovalRecord) } } },
+    async (request) => {
+      const { workspaceId } = await getContext(app.container, request);
+      const records = await service.listApprovals(workspaceId, request.params.id);
+      if (!records) throw new NotFoundError('Skill not found');
+      return records;
     },
   );
 }

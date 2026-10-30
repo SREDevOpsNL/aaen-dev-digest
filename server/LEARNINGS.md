@@ -225,6 +225,15 @@ correction. Repo-intel remains server-scoped;
   (`API_REQUEST_TIMEOUT_MS`), `server/test/hw2-api-timeout.test.ts`, which
   fails when the signal is removed.
 
+- **2026-10-30** — A Fastify route whose Zod `body` schema is
+  `.optional()` still answers `422` when the request has no body;
+  `.nullish()` accepts it. `DELETE /skills/:id/approval`
+  (reason optional) failed for a body-less `inject` until the schema
+  became `.nullish()`. Use `.nullish()`
+  for an optional body and test the body-less request. Evidence:
+  `server/src/modules/skills/routes.ts` (`SkillRevokeRequest.nullish()`),
+  `server/test/skill-approval.it.test.ts` (revoke without a reason).
+
 ## Decisions
 
 ## Recurring Errors & Fixes

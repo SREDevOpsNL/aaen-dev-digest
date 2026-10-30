@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { SlotRow, SlotRunData } from './report.js';
+import type { ScheduledSlot, SlotRow, SlotRunData } from './report.js';
 import { experimentOutcome } from './rules.js';
 
 /**
@@ -37,6 +37,8 @@ export interface BlindPacket {
   version: 1;
   /** The frozen technical rule per experiment, as the adjudicators apply it. */
   rules: Record<string, string>;
+  /** What the fixture's executable ground truth shows, per experiment. */
+  ground_truth: Record<string, string>;
   /** Sorted by case_id, so packet order does not follow the schedule. */
   cases: BlindCase[];
 }
@@ -56,9 +58,20 @@ export interface BlindingWarning {
   term: string;
 }
 
+/** The pre-registered design the packet must cover exactly: no extra, missing or duplicated slot. */
+export interface AdjudicationDesign {
+  manifest_fingerprint: string;
+  experiments: string[];
+  per_condition: number;
+  slots: ScheduledSlot[];
+}
+
 export interface CaseMapping {
   version: 1;
+  /** Secret: keeps the published mapping digest from being brute-forced over case-to-slot assignments. */
+  nonce: string;
   packet_sha256: string;
+  design: AdjudicationDesign;
   entries: MappingEntry[];
   /** Finding wording that may reveal the condition: recorded, never hidden. */
   blinding_warnings: BlindingWarning[];
@@ -77,6 +90,31 @@ export interface Judgment {
   packet_sha256: string;
   verdicts: CaseVerdict[];
 }
+
+/** The frozen technical scoring rules (PROSPECTIVE-STUDY.md), exactly as adjudicators receive them. */
+export const TECHNICAL_RULES: Record<string, string> = {
+  '17':
+    'Detected only if one grounded finding (or findings together) explicitly identifies BOTH (a) a missing test for an error branch ' +
+    'of applyDiscount (an expired coupon or an unknown code throwing) AND (b) a missing test at the exact expiry-equality boundary, ' +
+    'now == expiresAt. Generic "edge case" or "more tests" wording does not count. Otherwise: no; if the text cannot be decided: ambiguous.',
+  '18':
+    'Detected only if a grounded finding identifies that existing v1 requests that use a payment ID now fail (404) because the lookup ' +
+    'changed from payment ID to public reference. Naming only the :id to :reference placeholder rename, or a generic breaking-change ' +
+    'claim, does not count. Otherwise: no; if the text cannot be decided: ambiguous.',
+};
+
+/** The executable fixture ground truth (server/test/hw2-fixture-ground-truth.test.ts), as adjudicators receive it. */
+export const FIXTURE_GROUND_TRUTH: Record<string, string> = {
+  '17':
+    'Fixture PR #501 (src/billing/discount.ts): applyDiscount succeeds before expiry; throws "Coupon expired" at exactly ' +
+    'now == expiresAt and after it; throws "Unknown coupon" for an unknown code. The added tests exercise only the success path: ' +
+    'no error branch and no expiry-boundary case is tested.',
+  '18':
+    'Fixture PR #502 (src/api/payments.ts, src/payments/store.ts): the published route GET /v1/payments/:id becomes ' +
+    '/v1/payments/:reference in place and its handler calls findPaymentByReference. An old ID URL such as /v1/payments/pay_123 ' +
+    'still matches the new pattern, but the parameter is now looked up as a public reference, so an existing client calling it ' +
+    'with a payment ID gets 404 where it got 200. The placeholder rename on its own changes nothing; the lookup change breaks clients.',
+};
 
 /** Stable JSON: object keys sorted at every level, so equal records hash equally. */
 export function canonicalJson(value: unknown): string {
@@ -107,14 +145,41 @@ function blindingWarnings(cases: BlindCase[], extraTerms: string[]): BlindingWar
   return warnings;
 }
 
+/** Problems that make `design` an invalid schedule, or `rows` not exactly that schedule. */
+export function designProblems(design: AdjudicationDesign, rows: Array<Pick<SlotRow, 'slot_id' | 'experiment' | 'condition'>>): string[] {
+  const problems: string[] = [];
+  const ids = design.slots.map((s) => s.slot_id);
+  if (new Set(ids).size !== ids.length) problems.push('the design repeats a slot id');
+  for (const experiment of design.experiments) {
+    for (const condition of ['with', 'without'] as const) {
+      const n = design.slots.filter((s) => s.experiment === experiment && s.condition === condition).length;
+      if (n !== design.per_condition) problems.push(`experiment ${experiment} ${condition}: ${n} scheduled, design needs ${design.per_condition}`);
+    }
+  }
+  for (const slot of design.slots) if (!design.experiments.includes(slot.experiment)) problems.push(`slot ${slot.slot_id} is outside the design's experiments`);
+  const rowIds = rows.map((r) => r.slot_id);
+  if (new Set(rowIds).size !== rowIds.length) problems.push('the input repeats a slot id');
+  for (const row of rows) {
+    const slot = design.slots.find((s) => s.slot_id === row.slot_id);
+    if (!slot) problems.push(`input slot ${row.slot_id} is not scheduled`);
+    else if (slot.experiment !== row.experiment || slot.condition !== row.condition) problems.push(`input slot ${row.slot_id} differs from its scheduled experiment or condition`);
+  }
+  for (const id of ids) if (!rowIds.includes(id)) problems.push(`scheduled slot ${id} is missing from the input`);
+  return problems;
+}
+
 export function preparePacket(input: {
+  design: AdjudicationDesign;
   rows: SlotRow[];
   runs: Map<string, SlotRunData | null>;
   rules: Record<string, string>;
+  groundTruth?: Record<string, string>;
   /** Target Skill names, checked as condition-revealing terms. */
   skillNames: string[];
   newCaseId?: () => string;
 }): { packet: BlindPacket; packet_sha256: string; mapping: CaseMapping; mapping_sha256: string } {
+  const problems = designProblems(input.design, input.rows);
+  if (problems.length > 0) throw new Error(`input does not match the pre-registered schedule: ${problems.join('; ')}`);
   const newCaseId = input.newCaseId ?? (() => `case-${randomBytes(6).toString('hex')}`);
   const used = new Set<string>();
   const cases: BlindCase[] = [];
@@ -142,9 +207,9 @@ export function preparePacket(input: {
     return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: caseId, not_counted_reason: null };
   });
   cases.sort((a, b) => (a.case_id < b.case_id ? -1 : 1));
-  const packet: BlindPacket = { version: 1, rules: input.rules, cases };
+  const packet: BlindPacket = { version: 1, rules: input.rules, ground_truth: input.groundTruth ?? {}, cases };
   const packet_sha256 = digest(packet);
-  const mapping: CaseMapping = { version: 1, packet_sha256, entries, blinding_warnings: blindingWarnings(cases, input.skillNames) };
+  const mapping: CaseMapping = { version: 1, nonce: randomBytes(32).toString('hex'), packet_sha256, design: input.design, entries, blinding_warnings: blindingWarnings(cases, input.skillNames) };
   return { packet, packet_sha256, mapping, mapping_sha256: digest(mapping) };
 }
 
@@ -174,7 +239,8 @@ export type RevealResult =
       blinding_compromised: boolean;
     };
 
-function judgmentErrors(j: Judgment, packet: BlindPacket, packetSha: string, cases: Set<string> | null): string[] {
+/** Problems with one judgment; `cases` = the case IDs it must cover (null = every case). */
+export function judgmentErrors(j: Judgment, packet: BlindPacket, packetSha: string, cases: Set<string> | null): string[] {
   const errors: string[] = [];
   const who = j.adjudicator || '(unnamed)';
   if (!j.adjudicator) errors.push('a judgment has no adjudicator');
@@ -212,6 +278,7 @@ export function reveal(input: {
   const caseIds = input.packet.cases.map((c) => c.case_id);
   const mapped = input.mapping.entries.filter((e) => e.case_id !== null).map((e) => e.case_id!);
   if (mapped.length !== caseIds.length || caseIds.some((id) => !mapped.includes(id))) errors.push('the mapping and packet do not cover the same cases');
+  errors.push(...designProblems(input.mapping.design, input.mapping.entries));
 
   const names = input.judgments.map((j) => j.judgment.adjudicator);
   if (new Set(names).size !== 2 || names.length !== 2) errors.push('exactly two distinct adjudicators are required');
@@ -242,7 +309,7 @@ export function reveal(input: {
       return { case_id: id, slot_id: e.slot_id, condition: e.condition, experiment: e.experiment, final, verdicts };
     });
 
-  const experiments = [...new Set(input.mapping.entries.map((e) => e.experiment))].map((experiment): AdjudicatedExperiment => {
+  const experiments = input.mapping.design.experiments.map((experiment): AdjudicatedExperiment => {
     const tally = (condition: 'with' | 'without'): ConditionTally => {
       const scheduled = input.mapping.entries.filter((e) => e.experiment === experiment && e.condition === condition).length;
       const judged = cases.filter((c) => c.experiment === experiment && c.condition === condition);
@@ -256,7 +323,7 @@ export function reveal(input: {
     const w = tally('with');
     const wo = tally('without');
     // Five scheduled, not surviving, trials per condition: no replacement and no partial pass.
-    const gaps = [w, wo].some((t) => t.scheduled < 5 || t.adjudicated < t.scheduled);
+    const gaps = [w, wo].some((t) => t.scheduled < 5 || t.scheduled !== input.mapping.design.per_condition || t.adjudicated < t.scheduled);
     if (gaps) {
       const note = `${w.scheduled - w.adjudicated} with and ${wo.scheduled - wo.adjudicated} without scheduled slot(s) lack an unambiguous adjudicated verdict`;
       return { experiment, with: w, without: wo, outcome: 'incomplete', note };

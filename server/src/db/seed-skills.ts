@@ -1,6 +1,9 @@
 /**
- * API Contract skills seeded for the built-in API Contract Reviewer.
+ * Built-in skill content: the four Test Quality skills and the API Contract
+ * skills seeded for the built-in API Contract Reviewer. A change to any body
+ * here must be re-reviewed and its digest updated in ./reviewed-seed-skills.ts.
  *
+ * API Contract skills:
  * Each body is a verbatim copy of `docs/skills/api-contract/<name>.md`, and each
  * description is that file's `Description:` line; `server/test/seed-content.test.ts`
  * fails when they drift. The fourth skill, `deprecation-policy`, is deliberately
@@ -12,6 +15,38 @@ export interface SeedSkillContent {
   description: string;
   body: string;
 }
+
+/** The four Test Quality rubric skills, linked to the Test Quality Reviewer in this order. */
+export const TEST_QUALITY_SEED_SKILLS: ReadonlyArray<SeedSkillContent & { type: 'rubric' | 'convention' }> = [
+  {
+    name: 'Behavioral Coverage',
+    description: 'Checks that tests prove public behavior rather than implementation details.',
+    type: 'rubric',
+    body:
+      'Identify every caller-visible behavior changed by the diff. Require focused tests for meaningful success, failure, and state-transition paths. Do not request tests solely to increase line coverage.',
+  },
+  {
+    name: 'Assertion Quality',
+    description: 'Rejects assertions that can pass while the intended behavior is broken.',
+    type: 'rubric',
+    body:
+      'Check that assertions observe the externally meaningful result, error, or side effect. Flag tests that only assert mocks were called, snapshots changed, or values exist when those checks would miss a realistic regression.',
+  },
+  {
+    name: 'Edge Cases and Error Paths',
+    description: 'Covers boundaries and failure behavior introduced by the change.',
+    type: 'rubric',
+    body:
+      'Look for untested empty, missing, malformed, boundary, authorization, and dependency-failure inputs relevant to this diff. Require fail-closed behavior where security or data integrity is involved.',
+  },
+  {
+    name: 'Test Isolation and Determinism',
+    description: 'Finds order dependence, leaked state, time races, and unintended external I/O.',
+    type: 'convention',
+    body:
+      'Tests must be deterministic and independently runnable. Flag shared mutable state, unbounded timing assumptions, real network calls, cross-test database leakage, and cleanup that is skipped on failure.',
+  },
+];
 
 /** Linked to the API Contract Reviewer in this order. */
 export const API_CONTRACT_SEED_SKILLS: readonly SeedSkillContent[] = [

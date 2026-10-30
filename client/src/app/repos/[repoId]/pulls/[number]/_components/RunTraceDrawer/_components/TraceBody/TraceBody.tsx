@@ -16,6 +16,15 @@ import { PromptBlock } from "../PromptBlock";
 import { FindingsSection } from "../FindingsSection";
 import { Row, Stat } from "../atoms";
 
+/**
+ * Skills are sent inside the system message. Traces written before that change
+ * carried them in the user message; label those honestly instead of failing.
+ */
+function skillsInUserMessage(assembly: RunTrace["prompt_assembly"]): boolean {
+  const skills = assembly.skills;
+  return skills != null && !assembly.system.includes(skills) && assembly.user.includes(skills);
+}
+
 export function TraceBody({ trace, findings }: { trace: RunTrace; findings: FindingRecord[] }) {
   const t = useTranslations("runs");
   const stats = trace.stats;
@@ -75,7 +84,7 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
         <PromptBlock label={t("trace.prompt.system")} text={trace.prompt_assembly.system} color={PROMPT_COLORS.system} />
         {trace.prompt_assembly.skills != null && (
           <PromptBlock
-            label={t("trace.prompt.skills")}
+            label={t(skillsInUserMessage(trace.prompt_assembly) ? "trace.prompt.skillsLegacy" : "trace.prompt.skills")}
             text={trace.prompt_assembly.skills}
             color={PROMPT_COLORS.skills}
             tokens={trace.prompt_assembly.skills_tokens}

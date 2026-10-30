@@ -1,8 +1,9 @@
-import type { Skill, SkillType, SkillVersion } from '@devdigest/shared';
-import type { SkillRow, SkillVersionRow } from '../../db/rows.js';
+import type { Skill, SkillApprovalRecord, SkillType, SkillVersion } from '@devdigest/shared';
+import type { SkillApprovalRow, SkillRow, SkillVersionRow } from '../../db/rows.js';
+import { skillApprovalState, type ApprovalDecision } from '../_shared/skill-approval.js';
 
-/** Pure row-to-contract mapping for a skill. */
-export function toSkillDto(row: SkillRow): Skill {
+/** Pure row-to-contract mapping for a skill and its latest approval decision. */
+export function toSkillDto(row: SkillRow, latestDecision?: ApprovalDecision): Skill {
   return {
     id: row.id,
     name: row.name,
@@ -13,6 +14,23 @@ export function toSkillDto(row: SkillRow): Skill {
     enabled: row.enabled,
     version: row.version,
     evidence_files: row.evidenceFiles ?? null,
+    approval: skillApprovalState(row, latestDecision),
+  };
+}
+
+/** Pure row-to-contract mapping for one audit row. */
+export function toSkillApprovalRecord(row: SkillApprovalRow, actorName: string | null): SkillApprovalRecord {
+  return {
+    id: String(row.id),
+    skill_id: row.skillId,
+    skill_name: row.skillName,
+    version: row.version,
+    body_sha256: row.bodySha256,
+    decision: row.decision,
+    actor_user_id: row.actorUserId,
+    actor_name: actorName,
+    reason: row.reason,
+    created_at: row.createdAt.toISOString(),
   };
 }
 

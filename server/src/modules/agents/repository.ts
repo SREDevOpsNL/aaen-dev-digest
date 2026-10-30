@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import type { Db } from '../../db/client.js';
+import type { Db, Tx } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
+import type { CiFailOn, Provider, ReviewStrategy, SkillApproval } from '@devdigest/shared';
+import { latestSkillDecisions, skillApprovalState } from '../_shared/skill-approval.js';
 import { DEFAULT_AGENT_DESCRIPTION, INITIAL_AGENT_VERSION } from './constants.js';
 import { isConfigChange } from './helpers.js';
 import {
@@ -58,6 +59,20 @@ export interface LinkedSkillRow {
   order: number;
   /** The per-agent switch on the link (agent_skills.enabled). */
   linkEnabled: boolean;
+  /** Whether the skill's CURRENT content is approved for the system message. */
+  approval: SkillApproval;
+}
+
+type LinkRowWithoutApproval = Omit<LinkedSkillRow, 'approval'>;
+
+/** Attach each linked skill's approval state, read in the skills' own workspace. */
+async function withApproval(db: Db | Tx, rows: LinkRowWithoutApproval[]): Promise<LinkedSkillRow[]> {
+  if (rows.length === 0) return [];
+  // An agent's links are all in its workspace (the join enforces it), so one lookup.
+  const workspaceId = rows[0]!.skill.workspaceId;
+  const latest = await latestSkillDecisions(db, workspaceId, rows.map((r) => r.skill.id));
+  // Decisions are read in that workspace only: anything else reads as unapproved.
+  return rows.map((row) => ({ ...row, approval: skillApprovalState(row.skill, latest.get(row.skill.id)) }));
 }
 
 /** An agent with the number of skills linked to it. */
@@ -243,10 +258,15 @@ export class AgentsRepository {
       .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
       .where(eq(t.agentSkills.agentId, agentId))
       .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
-    return rows.map((r) => ({ skill: r.skill, order: r.order, linkEnabled: r.linkEnabled }));
+    return withApproval(this.db, rows.map((r) => ({ skill: r.skill, order: r.order, linkEnabled: r.linkEnabled })));
   }
 
-  /** Enabled skill bodies used by the review prompt, in deterministic link order. */
+  /**
+   * Enabled skill bodies used by the review prompt, in deterministic link
+   * order, each with its approval state. Disabled skills (globally or for this
+   * agent) are excluded here; the caller must refuse the review when any
+   * returned skill is not `approved` (fail closed, see the review executor).
+   */
   async enabledSkillsForPrompt(agentId: string): Promise<LinkedSkillRow[]> {
     const rows = await this.db
       .select({ skill: t.skills, order: t.agentSkills.order, linkEnabled: t.agentSkills.enabled })
@@ -262,7 +282,7 @@ export class AgentsRepository {
       // Both switches must be on: the skill's own (global) and the link's (per agent).
       .where(and(eq(t.agentSkills.agentId, agentId), eq(t.skills.enabled, true), eq(t.agentSkills.enabled, true)))
       .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
-    return rows.map((row) => ({ skill: row.skill, order: row.order, linkEnabled: row.linkEnabled }));
+    return withApproval(this.db, rows.map((row) => ({ skill: row.skill, order: row.order, linkEnabled: row.linkEnabled })));
   }
 
   async skillIdsForAgent(agentId: string): Promise<string[]> {
@@ -341,7 +361,10 @@ export class AgentsRepository {
         .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
       return {
         kind: 'ok',
-        links: links.map((row) => ({ skill: row.skill, order: row.order, linkEnabled: row.linkEnabled })),
+        links: await withApproval(
+          tx,
+          links.map((row) => ({ skill: row.skill, order: row.order, linkEnabled: row.linkEnabled })),
+        ),
       };
     });
   }

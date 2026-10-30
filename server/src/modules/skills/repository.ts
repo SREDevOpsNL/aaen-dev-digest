@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { SkillSource, SkillType } from '@devdigest/shared';
 import type { Db } from '../../db/client.js';
-import type { AgentRow, SkillRow, SkillVersionRow } from '../../db/rows.js';
+import type { AgentRow, SkillApprovalRow, SkillRow, SkillVersionRow } from '../../db/rows.js';
 import {
   linkedSkillIds,
   lockAgent,
@@ -9,6 +9,7 @@ import {
   writeAgentSkills,
 } from '../_shared/agent-skill-links.js';
 import * as t from '../../db/schema.js';
+import { latestSkillDecisions, skillBodySha256 } from '../_shared/skill-approval.js';
 import { INITIAL_SKILL_VERSION } from './constants.js';
 import { isSkillConfigChange } from './helpers.js';
 
@@ -43,6 +44,15 @@ export type RestoreSkillResult =
   | { kind: 'skill_not_found' }
   | { kind: 'version_not_found' }
   | { kind: 'ok'; skill: SkillRow; restored: boolean };
+
+/** Outcome of recording an approval decision under the skill's row lock. */
+export type SkillDecisionResult =
+  | { kind: 'skill_not_found' }
+  /** The reviewed version/digest is not the current content (approve only). */
+  | { kind: 'content_mismatch'; skill: SkillRow; currentSha256: string }
+  /** Nothing to do: already approved (approve) or not approved (revoke). */
+  | { kind: 'unchanged'; skill: SkillRow; latest: SkillApprovalRow | undefined }
+  | { kind: 'ok'; skill: SkillRow; latest: SkillApprovalRow };
 
 export interface SkillWithUsage {
   skill: SkillRow;
@@ -221,5 +231,88 @@ export class SkillsRepository {
       .innerJoin(t.agents, eq(t.agentSkills.agentId, t.agents.id))
       .where(eq(t.agentSkills.skillId, skillId))
       .orderBy(asc(t.agents.name), asc(t.agents.id));
+  }
+
+  // ---- skill_approvals (append-only: insert and select only) --------------
+
+  async latestDecisions(workspaceId: string, skillIds: readonly string[]): Promise<Map<string, SkillApprovalRow>> {
+    return latestSkillDecisions(this.db, workspaceId, skillIds);
+  }
+
+  /** The audit trail for one skill, newest first, with the actor's display name. */
+  async listDecisions(
+    workspaceId: string,
+    skillId: string,
+  ): Promise<Array<{ row: SkillApprovalRow; actorName: string | null }>> {
+    const rows = await this.db
+      .select({ row: t.skillApprovals, actorName: t.users.name })
+      .from(t.skillApprovals)
+      .leftJoin(t.users, eq(t.users.id, t.skillApprovals.actorUserId))
+      .where(and(eq(t.skillApprovals.workspaceId, workspaceId), eq(t.skillApprovals.skillId, skillId)))
+      .orderBy(desc(t.skillApprovals.id));
+    return rows.map((r) => ({ row: r.row, actorName: r.actorName ?? null }));
+  }
+
+  /** True when the user is an `owner` member of the workspace. */
+  async isWorkspaceOwner(workspaceId: string, userId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ role: t.workspaceMembers.role })
+      .from(t.workspaceMembers)
+      .where(and(eq(t.workspaceMembers.workspaceId, workspaceId), eq(t.workspaceMembers.userId, userId)));
+    return row?.role === 'owner';
+  }
+
+  /**
+   * Approve the reviewed content, or revoke. Runs under the same skill row lock
+   * as `update` and `restoreVersion`, so the digest check and the insert see
+   * the body the decision is bound to, and decision ids follow decision order.
+   */
+  async recordDecision(input: {
+    workspaceId: string;
+    skillId: string;
+    actorUserId: string;
+    decision: 'approve' | 'revoke';
+    reason?: string;
+    /** Required for 'approve': what the reviewer saw. */
+    reviewed?: { version: number; bodySha256: string };
+  }): Promise<SkillDecisionResult> {
+    return this.db.transaction(async (tx) => {
+      const [skill] = await tx
+        .select()
+        .from(t.skills)
+        .where(and(eq(t.skills.workspaceId, input.workspaceId), eq(t.skills.id, input.skillId)))
+        .for('update');
+      if (!skill) return { kind: 'skill_not_found' };
+      const currentSha256 = skillBodySha256(skill.body);
+      const latest = (await latestSkillDecisions(tx, input.workspaceId, [skill.id])).get(skill.id);
+      const approvedNow =
+        latest?.decision === 'approve' && latest.version === skill.version && latest.bodySha256 === currentSha256;
+
+      if (input.decision === 'approve') {
+        const reviewed = input.reviewed;
+        if (!reviewed || reviewed.version !== skill.version || reviewed.bodySha256 !== currentSha256) {
+          return { kind: 'content_mismatch', skill, currentSha256 };
+        }
+        if (approvedNow) return { kind: 'unchanged', skill, latest };
+      } else if (latest?.decision !== 'approve') {
+        // Never approved, or already revoked: there is no approval to revoke.
+        return { kind: 'unchanged', skill, latest };
+      }
+
+      const [row] = await tx
+        .insert(t.skillApprovals)
+        .values({
+          workspaceId: input.workspaceId,
+          skillId: skill.id,
+          skillName: skill.name,
+          version: skill.version,
+          bodySha256: currentSha256,
+          decision: input.decision,
+          actorUserId: input.actorUserId,
+          reason: input.reason ?? null,
+        })
+        .returning();
+      return { kind: 'ok', skill, latest: row! };
+    });
   }
 }

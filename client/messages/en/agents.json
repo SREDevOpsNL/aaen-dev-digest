@@ -137,8 +137,11 @@
       "attached": "Links the skill to this agent (up to {max}). Switching it off detaches the skill from this agent only.",
       "enabledTerm": "Enabled for this agent",
       "enabled": "Shown only for attached skills. When it is on, the skill is part of this agent's review prompt. Switching it off marks the row “{off}” and leaves the skill out of this agent's reviews, without detaching it, losing its place in the order, or switching it off for other agents. Switch it back on to include it again.",
-      "orderTerm": "Order"
-    }
+      "orderTerm": "Order",
+      "approvedTerm": "Approved",
+      "approved": "Separate from Enabled: a workspace owner must approve each skill's exact content before it can enter the system prompt. Approve it on the skill's Preview tab."
+    },
+    "blockedByApproval": "Reviews with this agent are blocked: these enabled skills are not approved for the system prompt: {names}. Approve them on the Skills page, or switch them off for this agent."
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."

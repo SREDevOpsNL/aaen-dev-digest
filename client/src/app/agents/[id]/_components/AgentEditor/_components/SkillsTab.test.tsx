@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { Agent, SkillSummary } from "@devdigest/shared";
 import messages from "../../../../../../../messages/en/agents.json";
+import skillsMessages from "../../../../../../../messages/en/skills.json";
 
 const mutate = vi.fn();
 const mutateEnabled = vi.fn();
@@ -10,9 +11,10 @@ let pending = false;
 let linkOff = new Set<string>();
 
 const skill = (id: string, name: string, enabled = true): SkillSummary => ({
-  id, name, description: `${name} guidance`, type: "rubric", source: "manual", body: "b", enabled, version: 1, evidence_files: null, agent_count: 1, used_by_count: 1,
+  id, name, description: `${name} guidance`, type: "rubric", source: "manual", body: "b", enabled, version: 1, evidence_files: null, agent_count: 1, used_by_count: 1, approval: approvalFixture(),
 });
 const SKILLS = [skill("s1", "Alpha"), skill("s2", "Beta off", false), skill("s3", "Gamma"), skill("s4", "Delta")];
+let skillsData = SKILLS;
 const buildLinks = () =>
   ["s1", "s2", "s3"].map((id, order) => ({ agent_id: "ag1", skill_id: id, order, enabled: id !== "s2", link_enabled: !linkOff.has(id), skill: { id } }));
 // One stable array per test, as react-query returns: a new array on every
@@ -21,19 +23,20 @@ let linksData = buildLinks();
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/hooks/skills", () => ({
-  useSkills: () => ({ data: SKILLS, isLoading: false, isError: false, refetch: vi.fn() }),
+  useSkills: () => ({ data: skillsData, isLoading: false, isError: false, refetch: vi.fn() }),
   useAgentSkills: () => ({ data: linksData, isLoading: false, isError: false, refetch: vi.fn() }),
   useSetAgentSkills: () => ({ mutate, isPending: pending }),
   useSetAgentSkillEnabled: () => ({ mutate: mutateEnabled, isPending: false }),
 }));
 
 import { SkillsTab } from "./SkillsTab";
+import { approvalFixture } from "@/test/skill-approval";
 
 const AGENT = { id: "ag1", name: "API Contract Reviewer" } as Agent;
 
 function renderTab() {
   return render(
-    <NextIntlClientProvider locale="en" messages={{ agents: messages }}>
+    <NextIntlClientProvider locale="en" messages={{ agents: messages, skills: skillsMessages }}>
       <SkillsTab agent={AGENT} />
     </NextIntlClientProvider>,
   );
@@ -55,6 +58,7 @@ beforeEach(() => {
   pending = false;
   linkOff = new Set();
   linksData = buildLinks();
+  skillsData = SKILLS;
 });
 afterEach(cleanup);
 
@@ -181,5 +185,31 @@ describe("Agent Skills tab", () => {
     expect(row("s1")).toHaveAttribute("draggable", "false");
     dragOnto("s3", "s1");
     expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("shows each skill's approval separately from Enabled, and warns when an enabled linked skill blocks reviews", () => {
+    // s1 (linked, on) is stale; s2 (linked, globally off) and s4 (not linked) are unapproved; s3 is approved.
+    const status = { s1: "stale", s2: "unapproved", s3: "approved", s4: "unapproved" } as const;
+    skillsData = SKILLS.map((sk) => ({ ...sk, approval: approvalFixture(status[sk.id as keyof typeof status]) }));
+    renderTab();
+    expect(within(row("s1")).getByTestId("skill-approval")).toHaveAttribute("data-status", "stale");
+    expect(within(row("s1")).getByText("Approval stale")).toBeInTheDocument();
+    expect(within(row("s3")).getByText("Approved for system prompt")).toBeInTheDocument();
+    // Enabled-for-agent is still on for s1: the two states are independent.
+    expect(screen.getByRole("switch", { name: "Use Alpha in this agent's reviews" })).toHaveAttribute("aria-checked", "true");
+    const alert = screen.getByTestId("approval-blocked");
+    expect(alert).toHaveTextContent("Alpha");
+    // A globally disabled or unlinked unapproved skill does not block reviews.
+    expect(alert).not.toHaveTextContent("Beta off");
+    expect(alert).not.toHaveTextContent("Delta");
+  });
+
+  it("does not warn when the unapproved skill is switched off for this agent", () => {
+    linkOff = new Set(["s1"]);
+    linksData = buildLinks();
+    skillsData = SKILLS.map((sk) => ({ ...sk, approval: approvalFixture(sk.id === "s1" ? "revoked" : "approved") }));
+    renderTab();
+    expect(screen.queryByTestId("approval-blocked")).not.toBeInTheDocument();
+    expect(within(row("s1")).getByText("Approval revoked")).toBeInTheDocument();
   });
 });

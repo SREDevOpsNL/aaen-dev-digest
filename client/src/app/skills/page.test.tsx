@@ -24,6 +24,7 @@ vi.mock("@/lib/hooks/skills", () => ({
 }));
 
 import SkillsPage from "./page";
+import { approvalFixture } from "@/test/skill-approval";
 
 const skill = (id: string, overrides: Partial<SkillSummary> = {}): SkillSummary => ({
   id,
@@ -36,6 +37,7 @@ const skill = (id: string, overrides: Partial<SkillSummary> = {}): SkillSummary 
   version: 3,
   evidence_files: null,
   agent_count: 2, used_by_count: 2,
+  approval: approvalFixture(),
   ...overrides,
 });
 

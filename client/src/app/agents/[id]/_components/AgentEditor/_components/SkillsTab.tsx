@@ -8,6 +8,7 @@ import type { Agent, SkillSummary } from "@devdigest/shared";
 import { useAgentSkills, useSetAgentSkillEnabled, useSetAgentSkills, useSkills } from "@/lib/hooks/skills";
 import { MAX_AGENT_SKILLS, SKILL_TYPE_COLORS } from "@/app/skills/constants";
 import { skillStyles as s } from "@/app/skills/styles";
+import { ApprovalBadge } from "@/app/skills/_components/ApprovalBadge";
 import { moveLinkedSkill } from "../helpers";
 
 // Fixed column widths, so the headings line up with each row's controls.
@@ -110,6 +111,11 @@ export function SkillsTab({ agent }: { agent: Agent }) {
 
   // The per-agent switch of each link; a skill linked a moment ago starts on.
   const linkEnabled = new Map((links.data ?? []).map((link) => [link.skill_id, link.link_enabled]));
+  // Effective skills (attached, on for this agent and on globally) whose content
+  // is not approved: the server refuses this agent's reviews while any exist.
+  const blocking = orderedSkills(skills.data, linkedIds).filter(
+    (skill) => linkedIds.includes(skill.id) && skill.enabled && (linkEnabled.get(skill.id) ?? true) && skill.approval.status !== "approved",
+  );
   const normalized = query.trim().toLowerCase();
   const rows = orderedSkills(skills.data, linkedIds).filter((skill) =>
     !normalized || skill.name.toLowerCase().includes(normalized) || skill.description.toLowerCase().includes(normalized),
@@ -136,10 +142,19 @@ export function SkillsTab({ agent }: { agent: Agent }) {
           <dd style={legend.desc}>{t("skills.legend.enabled", { off: t("skills.disabledForAgent") })}</dd>
         </div>
         <div style={legend.item}>
+          <dt style={legend.term}>{t("skills.legend.approvedTerm")}</dt>
+          <dd style={legend.desc}>{t("skills.legend.approved")}</dd>
+        </div>
+        <div style={legend.item}>
           <dt style={legend.term}>{t("skills.legend.orderTerm")}</dt>
           <dd style={legend.desc}>{t("skills.orderHint")}</dd>
         </div>
       </dl>
+      {blocking.length > 0 && (
+        <div role="alert" data-testid="approval-blocked" style={{ marginBottom: 12, color: "var(--warn)", fontSize: 13 }}>
+          {t("skills.blockedByApproval", { names: blocking.map((skill) => skill.name).join(", ") })}
+        </div>
+      )}
       {limitReached && <div role="alert" style={{ marginBottom: 12, color: "var(--warn)", fontSize: 13 }}>{t("skills.limitReached", { max: MAX_AGENT_SKILLS })}</div>}
       {/* Column headings: the switches carry their own accessible names, so these are visual only. */}
       <div aria-hidden style={{ ...cols.row, padding: "0 13px 6px", ...legend.heading }}>
@@ -207,6 +222,7 @@ export function SkillsTab({ agent }: { agent: Agent }) {
                       <Badge color="var(--text-muted)">{t("skills.disabledGlobally")}</Badge>
                     </span>
                   )}
+                  <ApprovalBadge approval={skill.approval} />
                 </div>
                 <div title={skill.description} style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 2, opacity: dimmed ? 0.6 : 1, ...clamp2 }}>{skill.description}</div>
               </div>

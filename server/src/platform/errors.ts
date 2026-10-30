@@ -53,3 +53,21 @@ export class ConflictError extends AppError {
     super('conflict', message, 409, details);
   }
 }
+
+/** The caller is known but lacks the workspace role this action needs. */
+export class ForbiddenError extends AppError {
+  constructor(message = 'Forbidden', details?: unknown) {
+    super('forbidden', message, 403, details);
+  }
+}
+
+/**
+ * A review would put skill content into the system message that no workspace
+ * owner approved (or whose approval is stale or revoked), or the approval
+ * state could not be read. Raised before any model request.
+ */
+export class SkillNotApprovedError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super('skill_not_approved', message, 409, details);
+  }
+}

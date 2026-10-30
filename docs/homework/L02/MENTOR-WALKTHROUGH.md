@@ -79,18 +79,26 @@ a diff that touches both `client/` and `server/` loads both skill sets.
    Skills block shows the enabled skills in the dragged order, leaves out the
    one switched off, and carries its own token count.
 
-### Criterion 14: mentor clarification requested
+### Criterion 14: system-role placement (mentor ruling, 2026-10-30)
 
-The recovered English rubric says enabled Skill bodies belong in the **system
-prompt**. The current implementation places user-editable Skill bodies in a
-fenced user-message section. The saved physical drag, persisted order, run
-trace and Skills token count demonstrate ordering, but do not prove literal
-system-role placement. Would the mentor accept "system prompt" as the assembled
-review prompt here, or require the literal system-message role? We preserve the
-current trust boundary while awaiting that answer. A literal-role change would
-require separate approval and application-level prompt-injection regression
-tests. Criterion 14 remains Blocked; criteria 19 and 20 retain their existing
-trace evidence.
+The mentor confirmed that criterion 14 means the literal system-role message,
+that drag order must change the executed prompt, and that the order must be
+visible in the prompt-assembly trace. The mentor also recommended a trust or
+approval step for imported and user-editable Skills. Both are implemented:
+see [ARCHITECTURE.md](ARCHITECTURE.md#prompt-assembly-and-the-run-trace) and
+[criterion-14-system-role.md](evidence/criterion-14-system-role.md). To see
+the approval gate:
+
+1. Open a skill → **Preview**. The approval panel shows the raw body, its
+   version and SHA-256. **Approve this content** records an owner decision.
+2. Edit the body: the badge becomes **stale** and agents that use it can no
+   longer run a review until it is approved again.
+3. On an agent's **Skills** tab, an enabled but unapproved skill is flagged;
+   **Run Review** with that agent fails before any model request with
+   `skill_not_approved`.
+
+The earlier ordering evidence (physical drag, trace with Skills in the user
+message) is kept as historical evidence.
 
 ## 4. Conventions (rows 38–42, 45–51, 53)
 
