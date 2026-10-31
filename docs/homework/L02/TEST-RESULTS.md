@@ -189,3 +189,16 @@ Skills card past its grid column, so a pointer click on Delete hit the next
 card. The footer now wraps. Running the hermetic suite and an `--serve` stack
 from the same worktree at once also failed two flows, because both `next dev`
 processes share `client/.next`; run them one after the other.
+
+## Live system-role trace, item A (2026-10-31)
+
+At `406dc25` (CI green), on the rebuilt stack `hw2f-cc928441`: `check`
+(implementation fingerprint `201ffa9a…`, isolation) passed, and the free
+`--keep-links` preview matched the packet's Skill fingerprint. Then one paid
+trace-only slot ran, `x-18-with-3`: completed, $0.00022779, one attempt on
+DeepInfra, grounding 1/1. `revoke` removed the capability, and `settle`
+passed, with key usage up exactly $0.00022779. The persisted trace, the trace
+drawer and SQL agree. They show Skills in the system message in link order,
+the guard after them, the switched-off Skill absent, and `skills_tokens` 831.
+Details: [criterion-14-system-role.md](evidence/criterion-14-system-role.md#live-system-role-run-trace-item-a-2026-10-31).
+This docs-only commit does not change the implementation fingerprint.

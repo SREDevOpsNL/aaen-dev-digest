@@ -348,3 +348,67 @@ All three would move to Verified with one separately authorized, paid,
 trace-only Run Review of API Contract Reviewer on this arrangement
 (semver-discipline, breaking-change; response-schema off), with the trace
 drawer screenshotted and `GET /runs/:id/trace` recorded.
+
+## Live system-role run trace (item A, 2026-10-31)
+
+The owner approved item A of the
+[approval packet](../PROSPECTIVE-STUDY.md#approval-packet-2026-10-30) only:
+one trace-only exploration slot, reservation $0.005, cumulative ceiling
+$0.01881699, capability lifetime 3 hours. Item B (the 20 confirmatory slots)
+was not authorized, and nothing in this section belongs to the study.
+
+| Item | Value |
+| --- | --- |
+| Source | `406dc25` (implementation fingerprint `201ffa9ad50a91ae23dd2bab213823e492739dabb32f23aeb4f58d4fffd804cb`, the same as `23d0b48`) |
+| Stack | `hw2f-cc928441`, database `devdigest_hw2f_cc928441`, container `devdigest-hw2f-cc928441`, API `127.0.0.1:3251`, web `localhost:3250`. The packet's stack `hw2f-1fe1aeec` was destroyed by a host restart at 11:03; the owner reconfirmed item A on the rebuilt stack. |
+| Links (API Contract Reviewer) | semver-discipline `order` 0 on, breaking-change `order` 1 on, response-schema `order` 2 **off** for this agent (all three approved for their current body) |
+| Free preview just before | ok, prompted [semver-discipline, breaking-change], Skill fingerprint `b4978ce07152b569aab7d82c2ea2290af54833c2312fa8157377f8f1a49fa0d6` (the packet's value), worst case $0.00277938 |
+| Capability | authorized 12:09:30Z (charged before $0.01381699, ceiling $0.01881699, expires 15:09:30Z), revoked 12:11:29Z |
+| Slot | `x-18-with-3`, armed 12:09:38Z; **one** Run Review click (API Contract Reviewer on PR #502) at 12:10:57Z; dispatched 12:10:58Z; completed 12:11:15Z |
+| Run | `4fdedc2e-0d50-4b48-ab3a-b182f18f4f06`, DeepInfra, served `deepseek/deepseek-v4-flash-20260423`, one attempt, 1,765 → 383 tokens, $0.00022779, 1 finding (grounding 1/1) |
+| Settlement | PASS: key usage $0.00445266 (+$0.00022779 since the last settlement), within [$0.00404478, $0.01404478] |
+| Ledger | 24 records; $0.01404478 conservative ($0.00404478 confirmed + $0.01 held for `x-17-without-1`), no unresolved slot, no live capability |
+
+### What the persisted trace shows
+
+`GET /runs/4fdedc2e-0d50-4b48-ab3a-b182f18f4f06/trace`, field
+`prompt_assembly`, cross-checked by SQL over `run_traces.trace`:
+
+| Check | Result |
+| --- | --- |
+| The Skills block is inside the **system** message | yes: `system` (5,464 chars) contains the whole `skills` block at offsets 995–4,359 |
+| Order in the system message = link order | `### semver-discipline` at 1,024 (`skill-0`), `### breaking-change` at 2,623 (`skill-1`) |
+| Injection guard comes after the Skills | `SECURITY — read carefully` at 4,361, directly after the block |
+| Switched-off Skill is absent | `response-schema` occurs nowhere in `system` or `user` |
+| No Skill in the user message | `user` (2,016 chars) has neither Skill heading |
+| Separate Skills block with its own count (#19) | `skills_tokens` 831; the drawer row reads "Skills — part of the system message (dynamic) ~831 tokens" |
+| Run record | `agent_runs.status` `done`, `cost_usd` 0.00022779, `grounding` `1/1 passed` |
+
+The raw trace JSON, the runner log, the settlement log and the SQL read-back
+stay private in `~/.devdigest/hw2-experiments/freeze-20261031/` (mode 0600).
+
+### Screenshots
+
+- [48](screenshots/48-item-a-run-review-menu.png): the Run Review menu on PR #502 before the click.
+- [49](screenshots/49-item-a-agent-runs.png): Agent runs, the one API Contract Reviewer run at $0.00022779.
+- [50](screenshots/50-item-a-trace-drawer.png): the trace drawer: configuration and stats.
+- [51](screenshots/51-item-a-prompt-assembly-system-skills.png): Prompt assembly: System, "Skills — part of the system message (dynamic) ~831 tokens", User / diff.
+- [52](screenshots/52-item-a-system-skill-0-semver.png): the expanded System block: `## Skills / rules`, then `skill-0` semver-discipline.
+- [53](screenshots/53-item-a-system-skill-1-breaking.png): the same block: `skill-1` breaking-change after it.
+- [54](screenshots/54-item-a-system-guard-after-skills.png): the same block: the injection guard after the last Skill.
+
+### Verdict update (2026-10-31)
+
+This supersedes the verdict above for the parts a live trace can show.
+
+- **#14: Verified.** The drag order, persisted in `agent_skills.order`, is
+  the order of the Skill blocks inside the system-role message of a real run,
+  shown in the persisted trace, the drawer and SQL. The switched-off Skill is
+  absent, and the approval gate was shown earlier in this file.
+- **#19: Verified on the current source.** It is a separate Skills block with
+  its own token count (831), labelled as part of the system message.
+- **#20: Verified on the current source.** Both enabled Skills have a block,
+  and the Skill switched off for the agent has none.
+
+This run was not built to show whether a Skill changes a review: there is one
+run, no control, and operator links. It is not evidence for #17 or #18.

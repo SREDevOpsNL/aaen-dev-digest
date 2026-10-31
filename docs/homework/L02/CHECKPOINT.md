@@ -83,3 +83,19 @@ full local matrix at `17241a3` and subsequent CI are in
   breaking-change, response-schema off).
 - Ledger unchanged at $0.01381699 conservative (21 records); key usage
   $0.00422487 of $2.00. No capability issued.
+
+## Item A executed; item B needs a re-freeze - 2026-10-31
+
+- Owner approved item A only. Trace-only slot `x-18-with-3` completed
+  ($0.00022779), capability revoked, settlement PASS. #14 → **Verified**;
+  #19/#20 refreshed with the live system-role trace. Acceptance: **50
+  Verified**, #17/#18 Implemented, #21 Blocked.
+- A host restart (11:03) destroyed `hw2f-1fe1aeec` and its tmux session.
+  The rebuilt keyless stack is `hw2f-cc928441`, in tmux session
+  `hw2-freeze`. `manifest-20261030.json` names the destroyed database, so
+  item B needs the candidate re-freeze `prereg/manifest-20261031.json` and a
+  new explicit approval.
+- Ledger: 24 records, $0.01404478 conservative; key usage $0.00445266 of
+  $2.00. No live capability.
+- #21 unchanged: the owner must type `/pr-self-review --base HEAD` in a
+  Code-tab session rooted at `aaen-dev-digest-l02-self-review`.

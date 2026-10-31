@@ -344,3 +344,15 @@ non-Skill fingerprint and the implementation fingerprint, so:
 The treatment's target Skill must be approved for its exact body before any
 slot can arm; both target Skills are approved by the reviewed seed bootstrap.
 No confirmatory request has been made.
+
+## Trace-only slot on the system-role placement (2026-10-31)
+
+The owner approved item A of the approval packet only. `x-18-with-3`
+(exploration, trace-only, operator links semver-discipline → breaking-change,
+response-schema off) completed with one Run Review click: run `4fdedc2e-…`,
+$0.00022779, settlement PASS. Like `x-18-with-2`, it is excluded from every
+comparison. It documents the system-role trace for criteria 14, 19 and 20
+([evidence](evidence/criterion-14-system-role.md#live-system-role-run-trace-item-a-2026-10-31)).
+Ledger: $0.01404478 conservative. No confirmatory request has been made; for
+the re-freeze item B would need after the 2026-10-31 host restart, see
+[PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#status-of-the-spending-items-2026-10-31).

@@ -140,3 +140,15 @@ says which file a finding goes in.
   Evidence: `reviewer-core/src/prompt.ts` (`assemblePrompt`),
   `server/src/modules/_shared/skill-approval.ts`,
   `docs/homework/L02/prereg/rules-20261030.json`.
+
+- **2026-10-31 — HW2 item A: live system-role trace.** The live trace confirms the system-role
+  placement end to end. One owner-approved trace-only slot (`x-18-with-3`,
+  $0.00022779, settlement exact to the cent) produced a persisted trace,
+  read back through the API, SQL and the drawer. It holds both Skills inside
+  the system message in link order, ahead of the guard, and the switched-off
+  Skill appears nowhere, so #14 moved to Verified. The same session found
+  that a host restart silently invalidates a frozen HW2 manifest, because it
+  names the disposable stack's database; that durable rule is in
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
+  Evidence: `docs/homework/L02/evidence/criterion-14-system-role.md`
+  ("Live system-role run trace").

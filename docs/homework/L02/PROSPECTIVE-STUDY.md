@@ -290,3 +290,29 @@ its sealed judgment. Each receives only `packet.json` (finding text, anchors,
 the frozen rules and ground truth above) and the judgment format; never the
 condition, slot or run IDs, Skill bodies, prompts, the mapping or earlier
 outcomes. Unresolved ambiguity makes the experiment `incomplete`.
+
+### Status of the spending items (2026-10-31)
+
+- **Item A: approved and executed.** One trace-only slot `x-18-with-3` ran
+  at $0.00022779; the capability was revoked and settlement passed. It is
+  exploration and trace evidence for #14, #19 and #20 only, never a
+  confirmatory observation. See
+  [criterion-14-system-role.md](evidence/criterion-14-system-role.md#live-system-role-run-trace-item-a-2026-10-31).
+  Ledger after it: $0.01404478 conservative ($0.00404478 confirmed + $0.01
+  held for `x-17-without-1`). Key usage: $0.00445266 of $2.00.
+- **Item B: not authorized.** No confirmatory slot exists in the ledger.
+- **The frozen manifest no longer matches a running stack.** A host restart
+  on 2026-10-31 at 11:03 destroyed the disposable stack `hw2f-1fe1aeec`, and
+  `manifest-20261030.json` names that stack's database. `run --phase
+  confirmatory` compares the full manifest, so it would refuse on any other
+  stack. A candidate re-freeze on the rebuilt stack `hw2f-cc928441` is in
+  [`prereg/manifest-20261031.json`](prereg/manifest-20261031.json) (sha256
+  `306fb0c9707726f4952437e90b594cbf7a3062026abbe9ba52fe2f3d1eeb325b`,
+  manifest fingerprint
+  `286d9db4fcdd6966df078df4e110d3a4db23e9194610760c822cae21809a1678`).
+  Apart from `stack.database`, it is byte-identical to the frozen manifest:
+  same implementation and non-Skill fingerprints, fixtures, Skill digests,
+  rules, seed, schedule and reservation. The re-freeze is a candidate only:
+  item B needs a fresh explicit approval naming it. Its ceilings are
+  $0.10000000 reserved, cumulative $0.11404478 after the executed item A. A
+  later restart would again require a re-freeze before item B.

@@ -365,6 +365,21 @@ correction. Repo-intel remains server-scoped;
   (`experimentOutcome`), `server/test/hw2-adjudication.test.ts` ("five
   surviving slots do not stand in for a larger schedule with a gap").
 
+- **2026-10-31** — An HW2 pre-registration does not outlive its stack. The
+  frozen manifest includes `stack.database`
+  (`server/src/experiments/hw2/manifest.ts:22`), and `run --phase
+  confirmatory` compares the whole manifest fingerprint. The
+  `scripts/e2e.sh --serve` stack is disposable: an `--rm` container started
+  from tmux. A host restart therefore removes the database the freeze names,
+  and confirmatory runs refuse on every rebuilt stack. That is what happened
+  on 2026-10-31: `hw2f-1fe1aeec` was gone after an 11:03 restart. A rebuild
+  from the same commit gave a manifest that differed only in
+  `stack.database`. Before a paid confirmatory session, check `uptime -s`
+  and that the named database exists. A rebuilt stack needs a re-freeze and a
+  fresh approval; never edit the frozen manifest. Evidence:
+  `docs/homework/L02/prereg/manifest-20261030.json` versus
+  `manifest-20261031.json`.
+
 ## Session Notes
 
 ## Open Questions
