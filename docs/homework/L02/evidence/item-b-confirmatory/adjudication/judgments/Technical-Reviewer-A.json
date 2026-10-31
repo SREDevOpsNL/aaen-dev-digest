@@ -1,0 +1,48 @@
+{
+  "adjudicator": "Technical-Reviewer-A",
+  "packet_sha256": "9e798175776c0ed7e4eb3b13cc4b4044e720c90d00e80abc837e0a07e8512cc0",
+  "verdicts": [
+    {
+      "case_id": "case-22da25c10c26",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "Element (a) met: f1 (unknown code) and f2 (expired coupon) name missing error-branch tests. Element (b) missing: f2 quotes `now >= coupon.expiresAt` but only says the test date is well before expiry; no finding names a missing test at now == expiresAt."
+    },
+    {
+      "case_id": "case-6f8d3ce292a9",
+      "detected": "no",
+      "finding_refs": [
+        "f1"
+      ],
+      "reason": "f1 names only the :id to :reference placeholder rename (parameter-name contract) and states the route pattern is unchanged; it never says the lookup moved from payment ID to public reference or that existing ID requests now 404."
+    },
+    {
+      "case_id": "case-733ced5c04a6",
+      "detected": "no",
+      "finding_refs": [],
+      "reason": "No findings."
+    },
+    {
+      "case_id": "case-abd44b7d77f7",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "Element (a) met: f1 (expired) and f2 (unknown code) name missing error-branch tests. Element (b) missing: no finding names the now == expiresAt boundary."
+    },
+    {
+      "case_id": "case-b178165d828f",
+      "detected": "yes",
+      "finding_refs": [
+        "f1",
+        "f2",
+        "f7"
+      ],
+      "reason": "Element (a): f1 (unknown code) and f2 (expired coupon) name missing error-branch tests. Element (b): f7 explicitly names the missing test where now equals expiresAt, the >= boundary."
+    }
+  ]
+}

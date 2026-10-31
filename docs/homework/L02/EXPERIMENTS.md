@@ -375,3 +375,17 @@ decision. See [the audit record](evidence/item-b-predispatch-halt.md) and
 [approval packet v3](PROSPECTIVE-STUDY.md#approval-packet-v3-2026-10-31).
 No confirmatory request has been made. The Phase 1 results above are
 unchanged and stay separate.
+
+## Item B v3 confirmatory run (2026-10-31)
+
+Executed under the owner's approval of packet v3. It stopped at slot 6 of 20
+on a truncated response (`finish_reason=length`), and both experiments are
+`incomplete`.
+
+- Adjudicated #17: 1/5 *with*, 0/5 *without*.
+- Adjudicated #18: 0/5 versus 0/5.
+- The runner report labels #17 `invalid`. That label is a recording gap in
+  the failure-path trace, not a request without the Skill.
+
+The Phase 1 results above are unchanged. See
+[the record](evidence/item-b-confirmatory/README.md).

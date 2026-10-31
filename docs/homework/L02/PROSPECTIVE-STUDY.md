@@ -404,3 +404,20 @@ cli.ts run --phase confirmatory --authorized-gate 4 --confirm-spend --via-ui --p
 the first slot, unless the live manifest equals this file. Then `revoke` and
 `settle` follow. After that comes `report --adjudication-input`, then the
 sealed adjudication with two independent sessions as specified above.
+
+### Item B v3 outcome (2026-10-31)
+
+The owner authorized item B v3 as packaged. Every binding matched when
+rechecked immediately before authorization. The schedule then stopped on its
+sixth slot, `c-17-with-2`, whose response reached the 4,000-token output cap.
+No retry or replacement followed.
+
+- 5 slots completed, 1 failed, 14 not dispatched.
+- $0.00234162 spent; settlement PASS.
+- Sealed blinded adjudication, two agreeing adjudicators:
+  - #17: 1/5 *with* versus 0/5 *without*, **incomplete**.
+  - #18: 0/5 versus 0/5, **incomplete**.
+
+This study is closed as incomplete. Running the missing slots would need a
+new pre-registration and a new owner decision. Full record:
+[evidence/item-b-confirmatory/README.md](evidence/item-b-confirmatory/README.md).

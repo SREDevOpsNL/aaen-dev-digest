@@ -163,3 +163,15 @@ says which file a finding goes in.
   fingerprints are unchanged. Durable rules are in
   [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes); the
   audit record is `docs/homework/L02/evidence/item-b-predispatch-halt.md`.
+- **2026-10-31 — HW2 item B v3: the output cap ended the confirmatory study.**
+  Every binding held, but slot 6 of 20 (a *with* response) reached the
+  4,000-token output cap, and the no-retry rule stopped the schedule. Both
+  experiments are `incomplete`: #17 was adjudicated 1/5 versus 0/5, #18
+  0/5 versus 0/5. The completed #17 *with* slot used 1,736 output tokens,
+  and its twin reached 4,000: the length of a response with the Skill
+  varies by more than 2×. A future
+  pre-registration should size the cap from the longest response seen with
+  the Skill, not from the pilot mean. The recording gap that mislabelled the
+  failed slot is in
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
+  Record: `docs/homework/L02/evidence/item-b-confirmatory/README.md`.

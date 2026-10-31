@@ -408,6 +408,18 @@ correction. Repo-intel remains server-scoped;
   `server/test/hw2-manifest.test.ts`,
   `docs/homework/L02/evidence/item-b-predispatch-halt.md`.
 
+- **2026-10-31** — A failed review run's trace does not record the prompt
+  that was sent. The failure path in `run-executor.ts` (line 622) stores
+  `{ system: agent.systemPrompt, skills: null, user: '' }`, so any check
+  that reads `prompt_assembly.skills` from a failed run will show 0 Skills.
+  The HW2 report did this and labelled experiment 17 `invalid`, although the
+  run's experiment metadata held the frozen *with* Skill fingerprint and the
+  same input token count as a completed *with* slot (1,142, against 1,034
+  without). For a failed run, take the request's provenance from the
+  experiment fingerprints and the attempt's token counts, not from the trace's
+  prompt assembly. Better, record the assembled prompt before dispatch.
+  Evidence: `docs/homework/L02/evidence/item-b-confirmatory/README.md`.
+
 ## Session Notes
 
 ## Open Questions

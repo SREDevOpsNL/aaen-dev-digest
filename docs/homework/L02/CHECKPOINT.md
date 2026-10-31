@@ -133,3 +133,14 @@ needs a corrected freeze and a fresh approval.
   [approval packet v3](PROSPECTIVE-STUDY.md#approval-packet-v3-2026-10-31).
 - No paid call, capability or dispatch. Ledger 24 records, $0.01404478
   conservative; key usage $0.00445266.
+
+## 2026-10-31: item B v3 executed, incomplete
+
+- Capability issued at 18:28:58Z and revoked at 18:36:34Z. 6 dispatches;
+  stopped on a truncated *with* response. Settlement PASS.
+- Ledger: 42 records, $0.0163864 conservative. Key usage $0.00679428 of
+  $2.00.
+- Sealed adjudication: #17 1/5 vs 0/5, #18 0/5 vs 0/5; both incomplete. #17
+  and #18 stay Implemented. #21 is still Blocked on the owner's interactive
+  run.
+- Stack `hw2f-19ef1f13` is still up; tear it down after review.

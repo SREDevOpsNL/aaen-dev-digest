@@ -220,3 +220,12 @@ At `2799caf`:
 | Live read-back | `prereg-check` on `hw2f-19ef1f13` matches `manifest-20261031-v3.json`; the 2026-10-30 and first 2026-10-31 manifests are refused as version 2 |
 
 reviewer-core and client are unchanged by this commit.
+
+## Item B v3 confirmatory run (2026-10-31, paid)
+
+| Check | Result |
+| --- | --- |
+| Pre-authorization recheck | `check`, `prereg-check`, four previews, the live endpoint price and the key reading all matched packet v3 |
+| Slots | 5 completed and provenance-verified; 1 failed (output-token cap); 14 not dispatched |
+| Settlement | PASS: key usage rose $0.00638640 since the opening reading, within [$0.00638640, $0.01638640] |
+| Adjudication | 2 sealed judgments, 0 disputes, `verify` intact. #17 and #18 are `incomplete` |

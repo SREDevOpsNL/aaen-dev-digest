@@ -1,0 +1,269 @@
+{
+  "version": 1,
+  "nonce": "e0d71084bdf1db4d6a8a4903f1112b3e40dc37c6f3c94a2596d87d006169c74d",
+  "packet_sha256": "9e798175776c0ed7e4eb3b13cc4b4044e720c90d00e80abc837e0a07e8512cc0",
+  "design": {
+    "manifest_fingerprint": "2f13ad1ce7f5ad5bfcf3b90d2ecd4cb0ba78cd3ad61eb4499da43627684d79d5",
+    "experiments": [
+      "17",
+      "18"
+    ],
+    "per_condition": 5,
+    "slots": [
+      {
+        "slot_id": "c-18-with-5",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-18-without-5",
+        "experiment": "18",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-17-with-1",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-without-1",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-17-without-2",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-17-with-2",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-with-5",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-without-5",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-without-1",
+        "experiment": "18",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-with-1",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-18-without-3",
+        "experiment": "18",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-with-3",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-without-4",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-17-with-4",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-with-3",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-without-3",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-with-2",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-18-without-2",
+        "experiment": "18",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-with-4",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-18-without-4",
+        "experiment": "18",
+        "condition": "without"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "slot_id": "c-18-with-5",
+      "experiment": "18",
+      "condition": "with",
+      "case_id": "case-6f8d3ce292a9",
+      "not_counted_reason": null
+    },
+    {
+      "slot_id": "c-18-without-5",
+      "experiment": "18",
+      "condition": "without",
+      "case_id": "case-733ced5c04a6",
+      "not_counted_reason": null
+    },
+    {
+      "slot_id": "c-17-with-1",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": "case-b178165d828f",
+      "not_counted_reason": null
+    },
+    {
+      "slot_id": "c-17-without-1",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": "case-abd44b7d77f7",
+      "not_counted_reason": null
+    },
+    {
+      "slot_id": "c-17-without-2",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": "case-22da25c10c26",
+      "not_counted_reason": null
+    },
+    {
+      "slot_id": "c-17-with-2",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "a \"with\" slot sent 0 skills instead of exactly the target skill"
+    },
+    {
+      "slot_id": "c-17-with-5",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-17-without-5",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-18-without-1",
+      "experiment": "18",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-18-with-1",
+      "experiment": "18",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-18-without-3",
+      "experiment": "18",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-18-with-3",
+      "experiment": "18",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-17-without-4",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-17-with-4",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-17-with-3",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-17-without-3",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-18-with-2",
+      "experiment": "18",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-18-without-2",
+      "experiment": "18",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-18-with-4",
+      "experiment": "18",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    },
+    {
+      "slot_id": "c-18-without-4",
+      "experiment": "18",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)"
+    }
+  ],
+  "blinding_warnings": [
+    {
+      "case_id": "case-6f8d3ce292a9",
+      "ref": "f1",
+      "term": "skill"
+    },
+    {
+      "case_id": "case-6f8d3ce292a9",
+      "ref": "f1",
+      "term": "breaking-change"
+    }
+  ]
+}
