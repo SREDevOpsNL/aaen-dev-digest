@@ -316,3 +316,91 @@ outcomes. Unresolved ambiguity makes the experiment `incomplete`.
   item B needs a fresh explicit approval naming it. Its ceilings are
   $0.10000000 reserved, cumulative $0.11404478 after the executed item A. A
   later restart would again require a re-freeze before item B.
+
+## Approval packet v3 (2026-10-31)
+
+The owner authorized item B on 2026-10-31. The run stopped before any
+capability existed, because the first freeze could not be read and no longer
+matched ([audit record](evidence/item-b-predispatch-halt.md)). That
+authorization has lapsed. This packet replaces the candidate re-freeze above.
+**Nothing in it is authorized until the owner approves it.** The study
+design, the frozen adjudication text, the fixtures, the target Skills, the
+seed and the schedule are unchanged. Only the implementation (deterministic
+manifest, fail-closed authorize) and the stack are new.
+
+### Bindings
+
+| Item | Value |
+| --- | --- |
+| Implementation commit | `2799caf` on `homework/l02-mentor-submission` (PR #53, Draft) |
+| Implementation fingerprint | `fa59aa4c7ad29913eec12b055a47e0a9c8399d55fbfd964b0b3b9888a6de81ad` |
+| Pre-registration | [`prereg/manifest-20261031-v3.json`](prereg/manifest-20261031-v3.json), committed in `c539cc0`, written unchanged by `cli.ts manifest --out` |
+| Pre-registration sha256 | `47c58433ce0da6ee8367d758a3f3ff2db3a61a2513f7ffb494809b2bb29f5d5b` |
+| Manifest version / fingerprint | 3 / `2f13ad1ce7f5ad5bfcf3b90d2ecd4cb0ba78cd3ad61eb4499da43627684d79d5` |
+| Read-back through the runner path | `cli.ts prereg-check --prereg docs/homework/L02/prereg/manifest-20261031-v3.json --rules docs/homework/L02/prereg/rules-20261030.json`: "pre-registration matches … 20 slots, seed 20261030"; "no scheduled slot is in the ledger" |
+| Screening rules (provisional) | [`prereg/rules-20261030.json`](prereg/rules-20261030.json), unchanged, sha256 `bb8fb1d080708bb98b057737316e90f6e78237637bc05961d0394cf9b9737a6a` |
+| Stack | `hw2f-19ef1f13`, database `devdigest_hw2f_19ef1f13`, container `devdigest-hw2f-19ef1f13` (Postgres 127.0.0.1:5450, ephemeral), API `127.0.0.1:3251`, web `localhost:3250`, tmux session `hw2-freeze`; identity and isolation checks pass |
+| Model / provider | `deepseek/deepseek-v4-flash`; sole endpoint `deepinfra/fp8`, provider name `DeepInfra`, served model `deepseek/deepseek-v4-flash-20260423`; fallbacks off |
+| Settings | temperature 0, single-pass, repo-intel off, output cap 4,000 tokens, transport and structured retries 0, one generation per slot |
+| Pricing | frozen $0.00000009 input, $0.00000018 output per token, $0 per request; the live DeepInfra endpoint showed the same on 2026-10-31 |
+| Reviewers (frozen) | API Contract Reviewer (prompt `234bd58a…c276`) and Test Quality Reviewer (prompt `8ad1660b…c3ad`); both enabled, provider `openrouter`, output schema `74234e98…b90b` |
+| Target Skills (frozen) | Edge Cases and Error Paths, body `82a7461ebbbe62468b147ed04fb2571b0bf7d8d1adeb794839739e77d48ed17f`; breaking-change, body `0d3d2e49739250a4c085e9287f9d0c76e48d2158d8bbf0d08c17369a155c6770`; both enabled, approved, version 1 |
+| Fixtures | PR #501 diff `8e0ba13345806d37f29233f6ba28057f52fd17c010ce0a482267b8cbc527d186`; PR #502 diff `db6475df8244efc5ef4a323a07bf0b1433abf0a6bc820ef2229dc409868116fc` |
+
+### Request fingerprints (free previews, phase confirmatory)
+
+They are identical to the 2026-10-30 packet, because the correction does not
+touch prompt assembly.
+
+| Condition | Prompted Skills | Non-Skill fingerprint | Skill fingerprint | Input bound | Worst case ×1.5 |
+| --- | --- | --- | --- | --- | --- |
+| 17 with | Edge Cases and Error Paths | `c6010d90c44151bb6cc144d21cdbd9493dab1947cbf40e5791860c9a71d1a860` | `18efa8660db55161b35cb59dc198210af01a90d2eccf607ca542f2d55c3d83f2` | 9,474 | $0.00235899 |
+| 17 without | — | `c6010d90c44151bb6cc144d21cdbd9493dab1947cbf40e5791860c9a71d1a860` | `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945` | 8,967 | $0.00229054 |
+| 18 with | breaking-change | `e72553e45551e83d63d5cda58aafb8c40dcdbb2edb4b6c64d7cdd112b07b479c` | `03214820cdbc9c3cda85f055c23adf337bcc5abdfa341c795ba62039d9f95136` | 10,921 | $0.00255433 |
+| 18 without | — | `e72553e45551e83d63d5cda58aafb8c40dcdbb2edb4b6c64d7cdd112b07b479c` | `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945` | 8,879 | $0.00227867 |
+
+The largest worst case × the 1.2 reservation margin is $0.00306520, below
+$0.005.
+
+### Schedule (seed 20261030, unchanged)
+
+`c-18-with-5`, `c-18-without-5`, `c-17-with-1`, `c-17-without-1`,
+`c-17-without-2`, `c-17-with-2`, `c-17-with-5`, `c-17-without-5`,
+`c-18-without-1`, `c-18-with-1`, `c-18-without-3`, `c-18-with-3`,
+`c-17-without-4`, `c-17-with-4`, `c-17-with-3`, `c-17-without-3`,
+`c-18-with-2`, `c-18-without-2`, `c-18-with-4`, `c-18-without-4`.
+None of these 20 IDs is in the global ledger.
+
+### State before any decision
+
+- Ledger: 24 records, sha256 `dc05246859d66817…`. $0.01404478 is charged
+  conservatively: $0.00404478 confirmed plus $0.01 held for `x-17-without-1`.
+  No unresolved slot.
+- No live capability on any stack. The last authorization event is the item
+  A revoke.
+- Key: usage $0.00445266 of a $2.00 limit, $1.99554734 remaining, read live
+  without recording. That equals the last settlement.
+
+### Exact authorization requested (item B v3)
+
+| Value | |
+| --- | --- |
+| Gate / phase | Gate 4, confirmatory |
+| Calls | at most the 20 scheduled slots above, in the frozen order, one Run Review click each |
+| Per-slot reservation | $0.005 |
+| New reservations (capability budget) | $0.10000000 |
+| Cumulative conservative ceiling | $0.11404478 |
+| Capability lifetime | 3 hours; revoked after the schedule |
+| Retries, reprompts, fallbacks, replacements | none; the first infrastructure, provenance, truncation, schema or 429 failure stops the schedule and leaves the experiment `incomplete` |
+
+The commands, with the stack flags added:
+
+```bash
+cli.ts authorize --phase confirmatory --authorized-gate 4 --confirm-spend --budget 0.10 --ceiling 0.11404478 --hours 3 --prereg ../docs/homework/L02/prereg/manifest-20261031-v3.json --rules ../docs/homework/L02/prereg/rules-20261030.json
+cli.ts run --phase confirmatory --authorized-gate 4 --confirm-spend --via-ui --prereg ../docs/homework/L02/prereg/manifest-20261031-v3.json --rules ../docs/homework/L02/prereg/rules-20261030.json
+```
+
+`authorize` refuses before writing a capability, and `run` refuses before
+the first slot, unless the live manifest equals this file. Then `revoke` and
+`settle` follow. After that comes `report --adjudication-input`, then the
+sealed adjudication with two independent sessions as specified above.

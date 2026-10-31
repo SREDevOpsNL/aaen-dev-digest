@@ -118,3 +118,18 @@ failed, so **no capability was issued and no request was sent**:
 
 Under the approval's terms neither file nor stack was substituted. Item B
 needs a corrected freeze and a fresh approval.
+
+## Item B corrected and re-frozen (v3), awaiting decision - 2026-10-31
+
+- The owner approved Option 1. The implementation is `2799caf`: deterministic
+  manifest v3, a `.json` pre-registration reader and fail-closed confirmatory
+  `authorize`. Details and tests:
+  [item-b-predispatch-halt.md](evidence/item-b-predispatch-halt.md). CI green
+  on `2799caf`.
+- Fresh stack `hw2f-19ef1f13` (tmux `hw2-freeze`); the old `hw2f-cc928441`
+  is torn down. New freeze: `prereg/manifest-20261031-v3.json` (sha256
+  `47c58433…`, manifest `2f13ad1c…`, implementation `fa59aa4c…`), read back
+  by `prereg-check`. The packet is
+  [approval packet v3](PROSPECTIVE-STUDY.md#approval-packet-v3-2026-10-31).
+- No paid call, capability or dispatch. Ledger 24 records, $0.01404478
+  conservative; key usage $0.00445266.

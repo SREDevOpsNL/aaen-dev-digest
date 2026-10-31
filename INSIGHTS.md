@@ -152,3 +152,14 @@ says which file a finding goes in.
   [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
   Evidence: `docs/homework/L02/evidence/criterion-14-system-role.md`
   ("Live system-role run trace").
+
+- **2026-10-31 — HW2 item B: a freeze that could not run, found for free.**
+  Verifying every binding before issuing a capability caught two defects that
+  had existed since the first freeze, at $0. The committed `.json` freeze was
+  unreadable by `--prereg`, and the manifest hash followed Postgres heap
+  order, which item A's link edits had changed. The fix freezes content, not
+  row order. It refuses duplicate names, and `authorize` now compares the
+  freeze before it writes a capability. The study design and the prompt
+  fingerprints are unchanged. Durable rules are in
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes); the
+  audit record is `docs/homework/L02/evidence/item-b-predispatch-halt.md`.

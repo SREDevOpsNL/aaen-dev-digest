@@ -365,3 +365,13 @@ comparison. It documents the system-role trace for criteria 14, 19 and 20
 Ledger: $0.01404478 conservative. No confirmatory request has been made; for
 the re-freeze item B would need after the 2026-10-31 host restart, see
 [PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#status-of-the-spending-items-2026-10-31).
+
+## Item B: halt, correction and v3 freeze (2026-10-31)
+
+The first item B authorization stopped before any capability or request,
+because the freeze could not be read and no longer matched the stack. After
+the owner-approved correction, a new freeze on a fresh stack awaits a
+decision. See [the audit record](evidence/item-b-predispatch-halt.md) and
+[approval packet v3](PROSPECTIVE-STUDY.md#approval-packet-v3-2026-10-31).
+No confirmatory request has been made. The Phase 1 results above are
+unchanged and stay separate.

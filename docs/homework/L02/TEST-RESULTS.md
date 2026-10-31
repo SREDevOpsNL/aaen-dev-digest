@@ -202,3 +202,21 @@ drawer and SQL agree. They show Skills in the system message in link order,
 the guard after them, the switched-off Skill absent, and `skills_tokens` 831.
 Details: [criterion-14-system-role.md](evidence/criterion-14-system-role.md#live-system-role-run-trace-item-a-2026-10-31).
 This docs-only commit does not change the implementation fingerprint.
+
+## Deterministic manifest and fail-closed pre-registration (2026-10-31)
+
+At `2799caf`:
+
+| Check | Result |
+| --- | --- |
+| server typecheck | pass |
+| `hw2-manifest.test.ts` (new) | 40 / 40 |
+| server hermetic unit tests | **438 / 438**, 42 files |
+| server DB-backed tests | **172 / 172**, 20 files, including the drag-reorder prompt test |
+| Agent-instruction checker | pass |
+| Mutation checks | deleting the agent sort, the Skill sort, the approval field, the version check, the early prereg read, the post-stack comparison in `authorize` or the symlink guard each fails 1–3 tests |
+| Independent review | 7 findings and 2 nits, all addressed; the re-review found no regressions |
+| GitHub CI on `2799caf` | server unit, server integration, client, reviewer-core and agent-instructions pass. The e2e run was cancelled when the next commit (the pre-registration only) arrived; that commit's e2e result is on the PR |
+| Live read-back | `prereg-check` on `hw2f-19ef1f13` matches `manifest-20261031-v3.json`; the 2026-10-30 and first 2026-10-31 manifests are refused as version 2 |
+
+reviewer-core and client are unchanged by this commit.

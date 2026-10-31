@@ -395,6 +395,19 @@ correction. Repo-intel remains server-scoped;
   reviewers). Before a freeze, generate it with the command the runner will
   read back, and sort every manifest array by a stable key.
 
+- **2026-10-31** — Sorting a frozen set is not enough when the runner looks
+  records up by name. After the HW2 manifest began sorting agents and Skills,
+  an independent review found that duplicate names had become invisible to
+  the fingerprint. The manifest froze both rows, sorted, while
+  `slotRuns`/`find()` used whichever row came first in heap order. A
+  canonicalized freeze needs both halves: sort for the hash, and refuse a
+  lookup key that does not match exactly one row (`exactlyOne`,
+  `server/src/experiments/hw2/manifest.ts`). Also freeze every field that
+  gates execution, not only content: a Skill's global `enabled` flag, which
+  `enabledSkillsForPrompt` reads, was missing. Evidence:
+  `server/test/hw2-manifest.test.ts`,
+  `docs/homework/L02/evidence/item-b-predispatch-halt.md`.
+
 ## Session Notes
 
 ## Open Questions
