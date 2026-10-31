@@ -99,3 +99,22 @@ full local matrix at `17241a3` and subsequent CI are in
   $2.00. No live capability.
 - #21 unchanged: the owner must type `/pr-self-review --base HEAD` in a
   Code-tab session rooted at `aaen-dev-digest-l02-self-review`.
+
+## Item B authorized, halted before any capability - 2026-10-31
+
+The owner authorized item B against `prereg/manifest-20261031.json` (sha256
+`306fb0c9…`). The pre-dispatch verification passed for the source
+(`964a4a2`, implementation fingerprint `201ffa9a…`), the prereg hash, the stack
+and database identity, and all four request fingerprints (they equal the
+packet). The ledger had no `c-*` slot and no live capability. Two bindings
+failed, so **no capability was issued and no request was sent**:
+
+1. The runner's `--prereg` reader refuses the approved file: it needs a
+   committed file with a `json manifest` fenced block, and the freeze was
+   written as bare JSON.
+2. The manifest recomputed on the same stack has fingerprint `53fe5f20…`, not
+   `286d9db4…`. The only difference is the order of the two reviewers in
+   `agents`: `/agents` is unordered, and item A's link edits moved a row.
+
+Under the approval's terms neither file nor stack was substituted. Item B
+needs a corrected freeze and a fresh approval.

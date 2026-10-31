@@ -380,6 +380,21 @@ correction. Repo-intel remains server-scoped;
   `docs/homework/L02/prereg/manifest-20261030.json` versus
   `manifest-20261031.json`.
 
+- **2026-10-31** — Two HW2 freeze defects surfaced only in a pre-dispatch
+  binding check. Neither shows up in tests:
+  (1) `run --phase confirmatory --prereg` reads only a committed file with a
+  ```json manifest` block (`preregisteredManifest`,
+  `server/src/experiments/hw2/source.ts:71`), but `cli.ts manifest --out`
+  writes bare JSON. The committed `prereg/manifest-2026103{0,1}.json` files
+  are therefore refused outright.
+  (2) `buildManifest` keeps the `/agents` order, and `AgentsRepository.list`
+  has no `ORDER BY` (`server/src/modules/agents/repository.ts:102`). Any
+  agent update (here the item A link edits) moves the row in heap order and
+  changes the manifest fingerprint without changing any content
+  (`286d9db4…` became `53fe5f20…`, differing only in the order of the two
+  reviewers). Before a freeze, generate it with the command the runner will
+  read back, and sort every manifest array by a stable key.
+
 ## Session Notes
 
 ## Open Questions
