@@ -14,8 +14,10 @@
 // Prompt assembly + prompt-injection hardening.
 export {
   assemblePrompt,
+  renderSkillsSection,
   wrapUntrusted,
   type PromptParts,
+  type SkillsSection,
   type AssembledPrompt,
 } from './prompt.js';
 
@@ -37,6 +39,10 @@ export { reduceReviews, sliceDiff } from './review/reduce.js';
 // The engine entry point: given (diff + resolved agent inputs + LLM) → grounded Review.
 export {
   reviewPullRequest,
+  reviewPromptParts,
+  singlePassMessages,
+  REVIEW_SCHEMA_NAME,
+  type ReviewPromptInput,
   DEFAULT_MAP_THRESHOLD_LINES,
   DEFAULT_REVIEW_MAX_RETRIES,
   type ReviewInput,
@@ -56,4 +62,20 @@ export {
 
 // The single OpenAI-compatible structured provider (OpenRouter), shared by the
 // CI runner and the server's openrouter path. Owns session grouping + guards.
-export { OpenRouterProvider, type OpenRouterProviderOptions } from './llm/openrouter.js';
+export {
+  GENERATION_LOOKUP_READ_TIMEOUT_MS,
+  METADATA_TIMEOUT_MS,
+  OPENROUTER_DEFAULT_TIMEOUT_MS,
+  OpenRouterProvider,
+  experimentRequestBody,
+  generationLookupDeadlineMs,
+  type OpenRouterProviderOptions,
+} from './llm/openrouter.js';
+// Pure parsers of OpenRouter's provenance metadata (HW2 experiment mode).
+export {
+  GENERATION_ID,
+  experimentOptionsProblem,
+  parseEndpoints,
+  summarizeGeneration,
+  summarizeRouterMetadata,
+} from './llm/openrouter-metadata.js';

@@ -4,6 +4,9 @@ import type {
   PromptAssembly,
   Review,
   RunEventKind,
+  ChatMessage,
+  StructuredAttemptTelemetry,
+  StructuredExperimentOptions,
   UnifiedDiff,
 } from '@devdigest/shared';
 import { Review as ReviewSchema } from '@devdigest/shared';
@@ -82,14 +85,23 @@ export interface ReviewInput {
    * review group into one session in the OpenRouter dashboard.
    */
   sessionId?: string;
+  /**
+   * HW2 experiment mode (opt-in): forwarded to the one structured call. It
+   * requires strategy 'single-pass' so a slot makes exactly one request.
+   */
+  experiment?: StructuredExperimentOptions;
+  /** Per-attempt telemetry sink, forwarded with `experiment`. */
+  onAttempt?: (attempt: StructuredAttemptTelemetry) => void;
   /** Progress sink. */
   onEvent?: (e: ReviewEvent) => void;
   /**
-   * Cancellation checkpoint, called before each (expensive) chunk LLM call.
-   * Supply a function that THROWS to abort mid-run (the caller owns the error
-   * type, e.g. the server's RunCancelledError); the engine stays agnostic.
+   * Cancellation checkpoint, awaited before each (expensive) chunk LLM call.
+   * Supply a function that THROWS (or returns a rejecting promise) to abort
+   * mid-run; the caller owns the error type (e.g. the server's
+   * RunCancelledError) and the engine stays agnostic. Synchronous checkpoints
+   * keep working unchanged: awaiting `void` only adds one microtask.
    */
-  checkCancelled?: () => void;
+  checkCancelled?: () => void | Promise<void>;
 }
 
 export interface ReviewOutcome {
@@ -123,14 +135,15 @@ function selectMode(strategy: ReviewStrategy, diff: UnifiedDiff, threshold: numb
   return totalLines > threshold && diff.files.length > 1 ? 'map-reduce' : 'single-pass';
 }
 
-export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutcome> {
-  const threshold = input.mapThresholdLines ?? DEFAULT_MAP_THRESHOLD_LINES;
-  const maxRetries = input.maxRetries ?? DEFAULT_REVIEW_MAX_RETRIES;
-  const mode = selectMode(input.strategy ?? 'auto', input.diff, threshold);
-  const emit = (kind: RunEventKind, msg: string, data?: unknown) =>
-    input.onEvent?.({ kind, msg, data });
+/** Inputs that shape the review prompt (everything except the model call itself). */
+export type ReviewPromptInput = Pick<
+  ReviewInput,
+  'systemPrompt' | 'skills' | 'memory' | 'specs' | 'callers' | 'repoMap' | 'prDescription' | 'task' | 'diff'
+>;
 
-  const promptParts = {
+/** The prompt parts reviewPullRequest assembles from its input, minus the diff. */
+export function reviewPromptParts(input: ReviewPromptInput) {
+  return {
     system: input.systemPrompt,
     skills: input.skills,
     memory: input.memory,
@@ -140,6 +153,31 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     prDescription: input.prDescription,
     task: input.task,
   };
+}
+
+/**
+ * The messages of a single-pass review request, exactly as reviewPullRequest
+ * sends them. The studio's experiment preflight measures and fingerprints these.
+ */
+export function singlePassMessages(input: ReviewPromptInput): ChatMessage[] {
+  return assemblePrompt({ ...reviewPromptParts(input), diff: input.diff.raw }).messages;
+}
+
+/** Schema name of the structured review call. */
+export const REVIEW_SCHEMA_NAME = 'Review';
+
+export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutcome> {
+  if (input.experiment && input.strategy !== 'single-pass') {
+    throw new Error("Experiment mode requires strategy 'single-pass' (one request per slot)");
+  }
+  const threshold = input.mapThresholdLines ?? DEFAULT_MAP_THRESHOLD_LINES;
+  // Experiment mode never reprompts; the provider enforces it, this keeps the count honest.
+  const maxRetries = input.experiment ? 0 : (input.maxRetries ?? DEFAULT_REVIEW_MAX_RETRIES);
+  const mode = selectMode(input.strategy ?? 'auto', input.diff, threshold);
+  const emit = (kind: RunEventKind, msg: string, data?: unknown) =>
+    input.onEvent?.({ kind, msg, data });
+
+  const promptParts = reviewPromptParts(input);
 
   // Whole-diff assembly is the trace default; overwritten below for single-pass.
   let assembly: PromptAssembly = assemblePrompt({ ...promptParts, diff: input.diff.raw }).assembly;
@@ -165,7 +203,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
 
   for (const chunk of chunks) {
     // Cancellation checkpoint — stop before the next (expensive) LLM call.
-    input.checkCancelled?.();
+    await input.checkCancelled?.();
     // 'map:' prefix only for the map-reduce path (one call per file). In
     // single-pass there is exactly one chunk (the whole diff) — don't mislabel it.
     emit(
@@ -178,10 +216,12 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     const res = await input.llm.completeStructured<Review>({
       model: input.model,
       schema: ReviewSchema,
-      schemaName: 'Review',
+      schemaName: REVIEW_SCHEMA_NAME,
       messages: a.messages,
       maxRetries,
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.experiment ? { experiment: input.experiment } : {}),
+      ...(input.onAttempt ? { onAttempt: input.onAttempt } : {}),
     });
     tokensIn += res.tokensIn;
     tokensOut += res.tokensOut;

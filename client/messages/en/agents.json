@@ -1,7 +1,8 @@
 {
   "card": {
     "noDescription": "No description",
-    "skillCount": "{count} skills"
+    "skillCount": "{count, plural, one {# skill} other {# skills}}",
+    "delete": "Delete agent {name}"
   },
   "list": {
     "breadcrumbLab": "Skills Lab",
@@ -90,10 +91,67 @@
   "skills": {
     "title": "Skills",
     "enabledCount": "{linked} of {total} enabled",
+    "attachedCount": "{linked} / {max} attached",
     "filterPlaceholder": "Filter skills…",
-    "orderHint": "Order matters — earlier skills appear earlier in the assembled prompt. Toggle to attach."
+    "orderHint": "Earlier skills appear earlier in the review prompt: drag an enabled skill to reorder by its ≡ handle, or use the arrows.",
+    "limitReached": "This agent already has the maximum of {max} skills attached.",
+    "loadError": "Could not load skills.",
+    "emptyTitle": "No skills yet",
+    "emptyBody": "Create a reusable skill before attaching guidance to this agent.",
+    "emptyCta": "Go to Skills",
+    "manage": "Manage skills",
+    "saving": "Saving…",
+    "autoSaved": "Changes save automatically.",
+    "disabledGlobally": "Disabled globally",
+    "disabledForAgent": "Off for this agent",
+    "moveUp": "Move {name} up",
+    "moveDown": "Move {name} down",
+    "type": {
+      "rubric": "rubric",
+      "convention": "convention",
+      "security": "security",
+      "custom": "custom"
+    },
+    "dragHint": "Drag to reorder",
+    "linkLabel": "Attach {name} to this agent",
+    "enabledLabel": "Use {name} in this agent's reviews",
+    "attachedTooltip": "Attached to agent: links {name} to this agent. Switch off to detach it from this agent only.",
+    "enabledTooltip": "Enabled for this agent: puts {name} in this agent's review prompt. Switch off to leave it out of this agent's reviews. It stays attached, keeps its place, and stays on for other agents.",
+    "enabledNeedsAttach": "Attach the skill first.",
+    "enabledState": {
+      "on": "On",
+      "off": "Off"
+    },
+    "disabledForAgentTooltip": "Attached, but left out of this agent's review prompt. Switch “Enabled for this agent” back on to include it again.",
+    "disabledGloballyTooltip": "Switched off on the Skills page, so no agent uses it until it is switched back on there.",
+    "columns": {
+      "attached": "Attached",
+      "skill": "Skill",
+      "enabled": "Enabled for this agent",
+      "type": "Type",
+      "order": "Order"
+    },
+    "legend": {
+      "title": "What the controls do",
+      "attachedTerm": "Attached",
+      "attached": "Links the skill to this agent (up to {max}). Switching it off detaches the skill from this agent only.",
+      "enabledTerm": "Enabled for this agent",
+      "enabled": "Shown only for attached skills. When it is on, the skill is part of this agent's review prompt. Switching it off marks the row “{off}” and leaves the skill out of this agent's reviews, without detaching it, losing its place in the order, or switching it off for other agents. Switch it back on to include it again.",
+      "orderTerm": "Order",
+      "approvedTerm": "Approved",
+      "approved": "Separate from Enabled: a workspace owner must approve each skill's exact content before it can enter the system prompt. Approve it on the skill's Preview tab."
+    },
+    "blockedByApproval": "Reviews with this agent are blocked: these enabled skills are not approved for the system prompt: {names}. Approve them on the Skills page, or switch them off for this agent."
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
+  },
+  "delete": {
+    "title": "Delete agent",
+    "body": "Delete agent “{name}”? This cannot be undone.",
+    "confirm": "Delete",
+    "deleting": "Deleting…",
+    "cancel": "Cancel",
+    "failed": "The agent could not be deleted. Try again."
   }
 }

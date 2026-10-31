@@ -2,7 +2,7 @@
 // Run from anywhere: `node scripts/verify-agent-instructions.mjs`. CI runs it on
 // every pull request (.github/workflows/agent-instructions.yml).
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,9 +16,17 @@ const rootInstructions = "AGENTS.md";
 const packageInstructions = ["client/AGENTS.md", "server/AGENTS.md", "reviewer-core/AGENTS.md", "e2e/AGENTS.md"];
 const instructionPaths = [rootInstructions, ...packageInstructions];
 
-// Some agents prefer these names over AGENTS.md, so any of them in an
-// instruction directory would hide the shared instructions from that agent.
-const shadowingNames = ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"];
+// Claude Code reads CLAUDE.md and, once any exists, no longer reads AGENTS.md.
+// Next to every canonical AGENTS.md there must therefore be a CLAUDE.md that is
+// a symlink to it, so it can never carry instructions of its own. A symlink, not
+// an `@AGENTS.md` import: Claude Code 2.1.278 expands an import only in the
+// starting directory's CLAUDE.md, so a session started below a package root lost
+// the instructions (see LEARNINGS.md). The stored target must be exactly
+// `AGENTS.md`; an earlier attempt stored `AGENTS.md\n` and resolved to nothing.
+// Any other Claude-specific name would hide the shared instructions.
+const compatibilityName = "CLAUDE.md";
+const compatibilityTarget = "AGENTS.md";
+const forbiddenNames = ["CLAUDE.local.md", ".claude/CLAUDE.md"];
 
 // Nearest AGENTS.md walking up from a path, as a hierarchical loader resolves it.
 const discoveryCases = [
@@ -109,7 +117,27 @@ for (const packagePath of packageInstructions) {
 }
 
 for (const directory of instructionPaths.map((p) => path.posix.dirname(p))) {
-  for (const name of shadowingNames) {
+  const compatibilityPath = path.posix.join(directory, compatibilityName);
+  check(() => {
+    const [mode, blob] = git("ls-files", "--stage", "--", compatibilityPath).split(/\s+/);
+    if (mode !== "120000") fail(`${compatibilityPath}: Git mode is ${mode || "untracked"}, expected symlink 120000`);
+    const storedTarget = execFileSync("git", ["-c", `safe.directory=${repoRoot}`, "cat-file", "blob", blob], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    if (storedTarget !== compatibilityTarget) {
+      fail(`${compatibilityPath}: Git stores target ${JSON.stringify(storedTarget)}, expected "${compatibilityTarget}"`);
+    }
+    const absolutePath = path.join(repoRoot, compatibilityPath);
+    if (!existsSync(absolutePath) || !lstatSync(absolutePath).isSymbolicLink()) {
+      fail(`${compatibilityPath}: not a symlink in the worktree`);
+    }
+    if (readlinkSync(absolutePath) !== compatibilityTarget || !statSync(absolutePath).isFile()) {
+      fail(`${compatibilityPath}: does not resolve to the sibling ${compatibilityTarget}`);
+    }
+    return `${compatibilityPath} is a symlink to ${compatibilityTarget}`;
+  });
+  for (const name of forbiddenNames) {
     const relativePath = path.posix.join(directory, name);
     check(() => {
       if (git("ls-files", "--", relativePath)) fail(`${relativePath}: tracked; it would shadow AGENTS.md`);

@@ -17,6 +17,10 @@ workflow — and deliberately skips the rest. Concretely:
   `server/src/adapters/mocks.ts` so unit tests are hermetic and key-free.
 - **One real integration per data-backed workflow**, against a real Postgres —
   not a mock DB — because the bugs there live in SQL, migrations, and wiring.
+  That Postgres is always a disposable, marked container. Server tests never
+  read `server/.env` or the developer's key files. In a test run, `buildApp`
+  accepts only the closed test URL or a marked testcontainers database
+  (`server/test/setup/isolate-database.ts`, `server/src/db/disposable.ts`).
 - **A few end-to-end browser flows** over the *main* user journeys, on seeded
   data, with no LLM in the loop.
 
@@ -94,7 +98,8 @@ cd e2e && npm install && npm test
 - **Agent instructions are checked on every change.**
   `agent-instructions.yml` runs `node scripts/verify-agent-instructions.mjs`
   without a path filter or dependencies: the five canonical project/package `AGENTS.md` files are regular files, an
-  explicit hierarchy, resolvable links, and no shadowing `CLAUDE.md`-style file.
+  explicit hierarchy, resolvable links, a `CLAUDE.md` symlink beside each that
+  points to it, and no other shadowing `CLAUDE`-style file.
   It is a repository check, not a test suite.
 - **`server/clones/**` is runtime data** (git-ignored) and never collected by
   any suite.

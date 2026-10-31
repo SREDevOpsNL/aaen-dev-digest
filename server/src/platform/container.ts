@@ -7,11 +7,13 @@ import type {
   Embedder,
   LLMProvider,
 } from '@devdigest/shared';
-import type { AppConfig } from './config.js';
+import { EXPERIMENT_REQUEST_TIMEOUT_MS, type AppConfig } from './config.js';
 import type { Db } from '../db/client.js';
 import { JobRunner } from './jobs.js';
 import { runBus, type RunBus } from './sse.js';
 import { LocalSecretsProvider } from '../adapters/secrets/local.js';
+import { ExperimentGuardedProvider, ExperimentSpendGate } from './experiment-spend-gate.js';
+import { ExperimentArms } from './experiment-arms.js';
 import { LocalNoAuthProvider } from '../adapters/auth/local.js';
 import { OctokitGitHubClient } from '../adapters/github/octokit.js';
 import { SimpleGitClient } from '../adapters/git/simple-git.js';
@@ -25,6 +27,7 @@ import { PriceBook } from './price-book.js';
 import { ConfigError } from './errors.js';
 import { AgentsRepository } from '../modules/agents/repository.js';
 import { ReviewRepository } from '../modules/reviews/repository.js';
+import { RepoRepository } from '../modules/repos/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
@@ -72,6 +75,7 @@ export class Container {
   // `container.agentsRepo` instead of reaching into another module's folder.
   private _agentsRepo?: AgentsRepository;
   private _reviewRepo?: ReviewRepository;
+  private _reposRepo?: RepoRepository;
   private _repoIntel?: RepoIntel;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
@@ -80,7 +84,8 @@ export class Container {
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
     this.db = db;
-    this.secrets = overrides.secrets ?? new LocalSecretsProvider(config.secretsPath);
+    // Experiment mode: the dedicated key file only, never a process.env fallback.
+    this.secrets = overrides.secrets ?? new LocalSecretsProvider(config.secretsPath, config.experiment ? {} : process.env);
     this.auth = overrides.auth ?? new LocalNoAuthProvider(db);
     this.runBus = runBus;
     this.jobs = new JobRunner(db);
@@ -98,6 +103,11 @@ export class Container {
 
   get reviewRepo(): ReviewRepository {
     return (this._reviewRepo ??= new ReviewRepository(this.db));
+  }
+
+  /** Shared workspace-scoped access to repositories. */
+  get reposRepo(): RepoRepository {
+    return (this._reposRepo ??= new RepoRepository(this.db));
   }
 
   get codeIndex(): CodeIndex {
@@ -159,15 +169,23 @@ export class Container {
     return this._github;
   }
 
-  /** Resolve an LLM provider by id; constructs from the secret key, cached. */
+  /** HW2 experiment mode: the one door to paid generation (see experiment-spend-gate.ts). */
+  readonly experimentSpendGate = new ExperimentSpendGate();
+  /** HW2: the slot armed for one Run Review click on the PR page (experiment mode only). */
+  readonly experimentArms = new ExperimentArms();
+
+  /**
+   * Resolve an LLM provider by id; constructs from the secret key, cached. In
+   * experiment mode every provider (built or injected) is wrapped so that only
+   * the authorized experiment slot can generate; free metadata still passes.
+   */
   async llm(id: 'openai' | 'anthropic' | 'openrouter'): Promise<LLMProvider> {
-    const injected = this.overrides.llm?.[id];
-    if (injected) return injected;
     const cached = this.llmCache.get(id);
     if (cached) return cached;
-    const provider = await this.buildLlm(id);
-    this.llmCache.set(id, provider);
-    return provider;
+    const provider = this.overrides.llm?.[id] ?? (await this.buildLlm(id));
+    const resolved = this.config.experiment ? new ExperimentGuardedProvider(provider, this.experimentSpendGate) : provider;
+    this.llmCache.set(id, resolved);
+    return resolved;
   }
 
   private async buildLlm(id: 'openai' | 'anthropic' | 'openrouter'): Promise<LLMProvider> {
@@ -185,6 +203,8 @@ export class Container {
       return new OpenRouterProvider(key, {
         estimateCost: (model, tokensIn, tokensOut) =>
           this.priceBook.estimate(model, tokensIn, tokensOut),
+        // Experiment answers can take minutes at the frozen endpoint's throughput.
+        ...(this.config.experiment ? { timeoutMs: EXPERIMENT_REQUEST_TIMEOUT_MS } : {}),
       });
     }
     const key = await this.secrets.get('ANTHROPIC_API_KEY');

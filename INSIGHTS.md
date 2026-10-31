@@ -82,3 +82,96 @@ says which file a finding goes in.
   Evidence: `server/test/reviews.it.test.ts` (PR-list FINDINGS matrix),
   `server/src/modules/pulls/status.ts:81` (`compareReviewRuns`), and
   `e2e/specs/written/01-pr-findings-ui.md`.
+
+- **2026-10-16** — Homework 2: the approved plan used one-line `@AGENTS.md`
+  imports for the required `CLAUDE.md` files, and a sentinel probe below a
+  package root showed that this would have stopped Claude Code loading project
+  instructions in nested sessions (none at all from `client/src/app`). The
+  repository uses symlinks instead, after approval. A probe started only at the
+  root or a package root would have passed the broken setup. Details and
+  evidence: the 2026-10-16 correction in `LEARNINGS.md`.
+
+- **2026-10-22 — HW2 Gate 3 on stack X2.** Two separately authorized slots ran:
+  - experiment 18 without Skill completed;
+  - experiment 17 with Skill failed with a 429, attributed by PR #31's
+    diagnostics to DeepInfra's shared pool.
+
+  Two unpaid audits found problems that a paid run would only have revealed
+  later:
+  - **Offline settlement:** the guide's example merged duplicate slot ids
+    across stacks and undercharged by up to $0.01, depending on the order of
+    the ledgers.
+  - **Gate 4 eligibility:** the rule cannot verify any slot under OpenRouter's
+    observed metadata and the current 4 s generation-lookup window.
+
+  Details: [`server/LEARNINGS.md`](server/LEARNINGS.md#codebase-patterns--tool--library-notes)
+  (2026-10-22, both entries) and
+  `docs/plans/HW2-gate3-plan.md` on `main`.
+
+- **2026-10-23 — HW2 Gate 4 provenance blocker: two causes, one draft fix.**
+  Applying the eligibility rule to the generation records that Gate 3 read
+  29–38 s after each response showed that a longer lookup alone would not
+  have been enough. The rule also compared the record's dated model with the
+  requested slug, so even a found record failed. The draft fix bounds the
+  lookup at about 65 s and freezes the served model. Details:
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#codebase-patterns--tool--library-notes)
+  (2026-10-23, the extension of the eligibility entry) and
+  [`reviewer-core/LEARNINGS.md`](reviewer-core/LEARNINGS.md#codebase-patterns--tool--library-notes)
+  (what OpenRouter documents).
+
+- **2026-10-30 — L02 criterion 14: Skills in the system-role message.** The
+  mentor ruled that "system prompt" means the literal system message.
+  Moving the fenced Skills section there was a small change. The real work
+  was the trust step the mentor asked for: an owner approval bound to the
+  exact body digest, failing closed before any model call. Findings worth
+  keeping:
+  - **Rendered-Markdown approval is not content review.** The first approval
+    panel sat under the Markdown preview, which hides HTML comments, so an
+    owner could approve text they never saw. Approval now happens from the
+    raw body.
+  - **Draft experiment rules drift from redesigned fixtures.** Both draft
+    screening-rule files anchored experiment 18 at `payments.ts:18`, but the
+    redesigned fixture's route and lookup are at lines 12–13. A new,
+    re-anchored rules file was frozen; regex screening stays provisional.
+  - Two environment traps (card overflow hiding a control from pointer
+    clicks; concurrent `next dev` sharing `client/.next`) are in
+    [`client/LEARNINGS.md`](client/LEARNINGS.md#recurring-errors--fixes) and
+    [`e2e/LEARNINGS.md`](e2e/LEARNINGS.md#recurring-errors--fixes).
+  Evidence: `reviewer-core/src/prompt.ts` (`assemblePrompt`),
+  `server/src/modules/_shared/skill-approval.ts`,
+  `docs/homework/L02/prereg/rules-20261030.json`.
+
+- **2026-10-31 — HW2 item A: live system-role trace.** The live trace confirms the system-role
+  placement end to end. One owner-approved trace-only slot (`x-18-with-3`,
+  $0.00022779, settlement exact to the cent) produced a persisted trace,
+  read back through the API, SQL and the drawer. It holds both Skills inside
+  the system message in link order, ahead of the guard, and the switched-off
+  Skill appears nowhere, so #14 moved to Verified. The same session found
+  that a host restart silently invalidates a frozen HW2 manifest, because it
+  names the disposable stack's database; that durable rule is in
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
+  Evidence: `docs/homework/L02/evidence/criterion-14-system-role.md`
+  ("Live system-role run trace").
+
+- **2026-10-31 — HW2 item B: a freeze that could not run, found for free.**
+  Verifying every binding before issuing a capability caught two defects that
+  had existed since the first freeze, at $0. The committed `.json` freeze was
+  unreadable by `--prereg`, and the manifest hash followed Postgres heap
+  order, which item A's link edits had changed. The fix freezes content, not
+  row order. It refuses duplicate names, and `authorize` now compares the
+  freeze before it writes a capability. The study design and the prompt
+  fingerprints are unchanged. Durable rules are in
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes); the
+  audit record is `docs/homework/L02/evidence/item-b-predispatch-halt.md`.
+- **2026-10-31 — HW2 item B v3: the output cap ended the confirmatory study.**
+  Every binding held, but slot 6 of 20 (a *with* response) reached the
+  4,000-token output cap, and the no-retry rule stopped the schedule. Both
+  experiments are `incomplete`: #17 was adjudicated 1/5 versus 0/5, #18
+  0/5 versus 0/5. The completed #17 *with* slot used 1,736 output tokens,
+  and its twin reached 4,000: the length of a response with the Skill
+  varies by more than 2×. A future
+  pre-registration should size the cap from the longest response seen with
+  the Skill, not from the pilot mean. The recording gap that mislabelled the
+  failed slot is in
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
+  Record: `docs/homework/L02/evidence/item-b-confirmatory/README.md`.

@@ -67,6 +67,15 @@ export class RunLogger {
   }
 
   /**
+   * Server-side diagnostics only: written to the process log (pino), never to
+   * the run's stream or persisted trace. For raw internal errors (DB driver
+   * messages, etc.) that must not reach the UI or the run record.
+   */
+  serverError(msg: string, data?: unknown): void {
+    this.base?.error({ ...this.ctx, runIds: this.runIds, ...(data !== undefined ? { data } : {}) }, msg);
+  }
+
+  /**
    * Time an async operation: emits `"<label>…"` up front, then
    * `"<label> done (Nms)"` on success or `"<label> failed (Nms): <err>"` on
    * throw (re-throws). `kind` styles the start/done lines (default 'info';

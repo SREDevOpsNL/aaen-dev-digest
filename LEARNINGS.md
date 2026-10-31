@@ -86,6 +86,47 @@ typecheck and tests. Do not treat the earlier absence as current state.
 Evidence: client/eslint.config.mjs:15, client/package.json:10,
 .github/workflows/client.yml:47.
 
+- **2026-10-02** — `CLAUDE.md → AGENTS.md` compatibility symlinks failed
+  silently. During L02 development the five Git symlink blobs stored
+  `AGENTS.md\n`, so every native checkout pointed at a file named with a
+  trailing newline, and the verifier of that time accepted them by trimming the
+  target. They are not needed: Claude Code loads `AGENTS.md` itself when no
+  `CLAUDE.md` exists (verified 2026-10-07 under What Works). Keep `AGENTS.md` as
+  the only instruction file; `node scripts/verify-agent-instructions.mjs`
+  rejects symlinks and `CLAUDE.md`-style files. Evidence:
+  `git cat-file -p 1be590e:CLAUDE.md | od -c` → `A G E N T S . m d \n`, from the
+  original L02 branch. That commit is not part of the rewritten PR #4 history,
+  which never contains the symlinks, so the blob is reproducible only where
+  `1be590e` is still held (a local reflog or an older clone).
+
+- **2026-10-16** — Correction to the 2026-10-02 `CLAUDE.md` symlink entry: the
+  Homework 2 rubric requires a `CLAUDE.md` next to each `AGENTS.md`, so the five
+  are back as symlinks, and they work when the stored target is exactly
+  `AGENTS.md`. The rubric's other allowed form, a one-line `@AGENTS.md` import,
+  fails: Claude Code 2.1.278 expands an `@` import only in the starting
+  directory's `CLAUDE.md`, not in an ancestor's, and once any `CLAUDE.md` exists
+  it no longer reads `AGENTS.md` directly. With imports, a session started in
+  `client/` lost the root `AGENTS.md`, and one started in `client/src/app` got
+  no project instructions at all. With symlinks, sessions started at the root,
+  `client/`, `client/src/app` and `server/src/modules` each received the root
+  and package sentinels exactly once; without any `CLAUDE.md` the same nested
+  probe also passes. Probe below a package root, not only at it. Evidence:
+  headless `claude -p --tools ""` sentinel runs (0 tool calls), sentinels
+  removed afterwards; `scripts/verify-agent-instructions.mjs` (requires Git
+  mode 120000 and the exact stored target).
+
+- **2026-10-19** — A committed document cannot freeze the commit it lives in.
+  The first PR-F2 runner refused a confirmatory run unless the
+  pre-registration's frozen `git rev-parse HEAD` equalled the current `HEAD`,
+  but committing the pre-registration creates a new `HEAD`, so the check
+  could never pass. Freeze a fingerprint of the implementation instead: the
+  committed blob ids (`git ls-tree -r HEAD -- <paths>`) of the paths that
+  determine behaviour, which a docs-only commit leaves unchanged, and refuse
+  uncommitted changes in those paths so the fingerprint describes the running
+  code. Evidence: `server/src/experiments/hw2/source.ts`
+  (`implementationFingerprint`), `server/test/hw2-source.test.ts` (a real Git
+  lifecycle: HEAD moves when the pre-registration is committed, the
+  fingerprint does not; a mutation back to HEAD fails it).
 
 ## Codebase Patterns & Tool / Library Notes
 
@@ -157,6 +198,14 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   `reviewer-core/src/review/run.ts:159-184` (`reviewPullRequest`),
   `server/src/platform/container.ts:181-188` (`Container.buildLlm`).
 
+- **2026-09-25** — The reverted history contains a complete Conventions
+  Extractor specification, implementation, and tests in commit `641b637`, but
+  that commit also bundles an older Skills implementation and migrations
+  `0011`-`0015`. Use it as a porting reference against the current L02 Skills
+  contracts and generate a new migration from the current schema; do not
+  cherry-pick it wholesale. Evidence: `git show
+  641b637:docs/specs/conventions.md`; `git show --stat 641b637`.
+
 ## Decisions
 
 - **2026-09-21** — Use the Ubuntu 24.04 WSL2 checkout at
@@ -188,6 +237,16 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   multi-step experiments. Evidence: `devdigest-final-review-db` was healthy,
   then exited with code 0 before the next migration command; the same sequence
   completed when kept in one session (`migrate` → `seed` → API → two reviews).
+
+- **2026-10-13** — In a fresh worktree, `server` `pnpm typecheck` fails with
+  `TS2322: Type 'unknown' is not assignable to type 'T'` in
+  `src/adapters/llm/anthropic.ts` and `openai.ts` even when the code is
+  unchanged, because the server compiles `reviewer-core` source through a path
+  alias and `reviewer-core/node_modules` is missing, so its Zod types do not
+  resolve. Run `npm ci` in `reviewer-core/` before typechecking `server/` in a
+  new worktree. Evidence: the same commit typechecked cleanly after
+  `npm ci` in `reviewer-core/`, with identical `typescript` and `zod`
+  versions in `server/`.
 
 ## Session Notes
 

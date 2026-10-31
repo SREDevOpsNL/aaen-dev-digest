@@ -61,6 +61,159 @@ export interface StructuredRequest<T> {
   maxTokens?: number;
   timeoutMs?: number;
   maxRetries?: number;
+  /**
+   * Cancels the call: the in-flight provider request is aborted and no further
+   * attempt starts. Omit it to keep the default behaviour.
+   */
+  signal?: AbortSignal;
+  /**
+   * HW2 controlled-experiment mode (opt-in; absent for every ordinary call).
+   * A request carrying it makes exactly one HTTP request (no SDK transport
+   * retry, no structured-output reprompt), is routed to one frozen upstream
+   * provider with fallbacks disabled, asks OpenRouter for routing metadata,
+   * and reports every attempt through `onAttempt`, also when it throws.
+   */
+  experiment?: StructuredExperimentOptions;
+  /** Receives one record per dispatched (or refused) attempt; experiment mode only. */
+  onAttempt?: (attempt: StructuredAttemptTelemetry) => void;
+}
+
+/** Routing for one frozen OpenRouter provider; a provider that is unavailable fails the request. */
+export interface ExperimentRouting {
+  /** One-item list with the frozen routing slug, e.g. `deepinfra` or `deepinfra/fp8`. */
+  order: string[];
+  /** The same one-item list: an allow-list, so no other provider can serve it. */
+  only: string[];
+  allowFallbacks: false;
+}
+
+export interface StructuredExperimentOptions {
+  /** The authorized experiment slot this request belongs to (one generation per slot). */
+  slotId: string;
+  /** Must be 0: the OpenAI SDK may not retry a request on its own. */
+  transportMaxRetries: 0;
+  /** Must be 0: a schema-invalid answer is the slot's outcome, never reprompted. */
+  maxRetries: 0;
+  routing: ExperimentRouting;
+  /** Bounded output; sent as `max_tokens`. */
+  maxTokens: number;
+  /** Ask OpenRouter for `openrouter_metadata` (`X-OpenRouter-Metadata: enabled`). */
+  routerMetadata: true;
+  /**
+   * Poll `GET /generation?id=…` after a response to corroborate provider,
+   * model, tokens and cost. Null = do not look up.
+   */
+  generationLookup: { attempts: number; delayMs: number } | null;
+}
+
+/** What one attempt actually did, from OpenRouter's own metadata, never inferred from the request. */
+export interface StructuredAttemptTelemetry {
+  sequence: number;
+  /** `refused` = blocked before any HTTP request (zero cost). */
+  dispatch: 'refused' | 'dispatched';
+  outcome:
+    | 'valid'
+    | 'schema_invalid'
+    | 'truncated'
+    | 'http_error'
+    | 'network_error'
+    | 'cancelled'
+    | 'refused';
+  failureReason: string | null;
+  httpStatus: number | null;
+  startedAt: string;
+  durationMs: number;
+  requested: { model: string; routing: ExperimentRouting | null; maxTokens: number | null };
+  /** Response `id`; the generation id when it has the `gen-` form. */
+  responseId: string | null;
+  /** `X-Generation-Id` response header, when present (undocumented; recorded only). */
+  generationIdHeader: string | null;
+  /** Response top-level `model` ("model used for completion"). */
+  servedModel: string | null;
+  finishReason: string | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  /** Provider-reported USD cost (`usage.cost`); null when not reported. */
+  costUsd: number | null;
+  router: RouterMetadataSummary | null;
+  generation: GenerationMetadataSummary | null;
+  /** Raw `openrouter_metadata` object as received (secret-free). */
+  routerMetadataRaw: unknown;
+  /** What a failed request said about itself; null on success, refusal and cancellation. */
+  errorDetail: AttemptErrorDetail | null;
+}
+
+/**
+ * The allowlisted, sanitized part of a failed experiment request: an HTTP
+ * error, or an HTTP 200 whose body holds only an `error`. Never a raw body,
+ * never a raw header: every field is length-bounded, and free text has secrets
+ * and the request's own key redacted.
+ */
+export interface AttemptErrorDetail {
+  /**
+   * Who the error body names as its source. `upstream_provider`: OpenRouter
+   * surfaced the provider's name or code. `openrouter`: an OpenRouter limit
+   * (`metadata.limit_source` starting with `openrouter_`). `unattributed`: a
+   * body without either (OpenRouter documents no rule that marks a 429 as its
+   * own). `no_body`: no error body at all (network error, empty response).
+   */
+  origin: 'upstream_provider' | 'openrouter' | 'unattributed' | 'no_body';
+  /** `error.code` of the body. */
+  code: number | string | null;
+  /** `error.message`, sanitized, at most 300 characters. */
+  message: string | null;
+  /** `error.metadata.error_type`, e.g. `rate_limit_exceeded`. */
+  errorType: string | null;
+  /** `error.metadata.provider_code`: the upstream's own error code, when surfaced. */
+  providerCode: string | null;
+  /** `error.metadata.provider_name`. */
+  providerName: string | null;
+  /** `error.metadata.limit_source`, e.g. `openrouter_key_limit`. */
+  limitSource: string | null;
+  /** Whether the body carried the upstream's verbatim payload (`metadata.raw`); its content is never kept. */
+  upstreamRawPresent: boolean;
+  /** The SDK's request id (`x-request-id`). */
+  requestId: string | null;
+  /** The `Retry-After` header. */
+  retryAfter: string | null;
+  /** Allowlisted `x-ratelimit-*` headers, lowercase names. */
+  rateLimit: Record<string, string>;
+  /** True when a value was redacted, truncated or dropped as unsafe. */
+  redacted: boolean;
+}
+
+export interface RouterMetadataSummary {
+  /** Entries of `endpoints.available` with `selected: true`. */
+  selected: Array<{ provider: string; model: string }>;
+  /** `attempt` (router-internal attempt number) and `attempts.length`, when present. */
+  attempt: number | null;
+  attemptsCount: number | null;
+  requested: string | null;
+  strategy: string | null;
+}
+
+export interface GenerationMetadataSummary {
+  /** `found` = the lookup returned the generation; `not_found` after bounded polling; `unavailable` = no usable id or error. */
+  status: 'found' | 'not_found' | 'unavailable';
+  providerName: string | null;
+  model: string | null;
+  finishReason: string | null;
+  tokensPrompt: number | null;
+  tokensCompletion: number | null;
+  totalCost: number | null;
+  /** `provider_responses[]`, including fallback attempts. */
+  providerResponses: Array<{ providerName: string | null; endpointId: string | null; modelPermaslug: string | null; status: number | null }>;
+}
+
+/** One OpenRouter endpoint of a model (`GET /models/{author}/{slug}/endpoints`). */
+export interface OpenRouterEndpointInfo {
+  providerName: string;
+  tag: string | null;
+  quantization: string | null;
+  contextLength: number | null;
+  maxCompletionTokens: number | null;
+  /** USD per token (input), per token (output), per request. */
+  pricing: { prompt: number; completion: number; request: number };
 }
 
 export interface StructuredResult<T> {
