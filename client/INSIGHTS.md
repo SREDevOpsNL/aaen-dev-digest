@@ -62,6 +62,19 @@ client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/FindingsPreview.
 (`onScroll`), FindingsPreview.tsx:78 (`onBlur`),
 FindingsPreview.test.tsx:90, e2e/specs/07a-findings-preview-scroll.flow.json:33.
 
+- **2026-10-31** — The run-trace drawer header showed "completed" for every
+run that was not streaming, including a run refused before model dispatch
+(`skill_not_approved`, `agent_runs.status = 'failed'`, 0 tokens). The
+`RunTrace` document carries no status at all, so the drawer had nothing to
+read and assumed success; refused runs still get a trace, so "has a trace"
+does not mean "succeeded". The persisted status comes from `RunSummary.status`
+(`/pulls/:id/runs`), which the page now passes in; an unknown status shows no
+label rather than a guess. Note the page never passes the drawer's `running`
+prop, so its live-log default is unused there. Evidence:
+client/src/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer/helpers.ts
+(`runStatusLabel`), RunTraceDrawer.test.tsx ("shows the persisted run
+status"), server/src/vendor/shared/contracts/trace.ts (`RunTrace`),
+docs/homework/L02/evidence/screenshots/41-refused-run-trace-drawer.png.
 
 ## Session Notes
 

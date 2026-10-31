@@ -12,7 +12,7 @@ import type { FindingRecord } from "@devdigest/shared";
 import { useRunTrace } from "@/lib/hooks/trace";
 import { useRunEvents } from "@/lib/hooks/reviews";
 import { DRAWER_WIDTH, LOG_HEIGHT, TABS } from "./constants";
-import { eventsToLog, traceLog } from "./helpers";
+import { eventsToLog, runStatusLabel, traceLog } from "./helpers";
 import { s } from "./styles";
 import { TraceBody } from "./_components/TraceBody";
 
@@ -23,6 +23,9 @@ export interface RunTraceDrawerProps {
   prNumber?: number | null;
   /** Persisted findings of this run (shown in the Findings section). */
   findings?: FindingRecord[];
+  /** Persisted agent_runs.status (running | done | failed | cancelled), shown in
+      the header; the trace document itself carries no status. */
+  status?: string | null;
   /** When true, the drawer defaults to the live log and streams SSE. */
   running?: boolean;
   onClose: () => void;
@@ -38,6 +41,7 @@ export default function RunTraceDrawer({
   agentName,
   prNumber,
   findings = [],
+  status = null,
   running = false,
   onClose,
 }: RunTraceDrawerProps) {
@@ -63,8 +67,13 @@ export default function RunTraceDrawer({
   const persistedLog: LogLine[] = traceLog(trace);
   const shownLog = running ? log : persistedLog;
 
-  const prCtx = prNumber != null ? `${t("drawer.pr", { number: prNumber })} · ` : "";
-  const subtitle = `${prCtx}${stillRunning ? t("drawer.running") : t("drawer.completed")}`;
+  const statusLabel = runStatusLabel(status, stillRunning);
+  const subtitle = [
+    prNumber != null ? t("drawer.pr", { number: prNumber }) : null,
+    statusLabel ? t(`drawer.${statusLabel}`) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <Drawer

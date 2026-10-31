@@ -17,6 +17,25 @@ export function traceLog(trace: RunTrace | undefined): LogLine[] {
   return trace?.log.map((l) => ({ t: l.t, k: l.kind as LogLine["k"], m: l.msg })) ?? [];
 }
 
+export type RunStatusLabel = "running" | "completed" | "failed" | "cancelled";
+
+/** Header status label from the persisted agent_runs.status (running | done |
+   failed | cancelled). A live SSE stream overrides it with "running"; an
+   unknown status yields null so the header never claims success it can't see. */
+export function runStatusLabel(status: string | null | undefined, live: boolean): RunStatusLabel | null {
+  if (live) return "running";
+  switch (status) {
+    case "running":
+    case "failed":
+    case "cancelled":
+      return status;
+    case "done":
+      return "completed";
+    default:
+      return null;
+  }
+}
+
 /** Seconds-formatted duration. */
 export function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
