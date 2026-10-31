@@ -133,3 +133,79 @@ the *with* condition.
 - #17 and #18 stay **Implemented**, not Verified. Completing them needs a new
   owner decision and a new pre-registration (for example, a different output
   cap). That would be a new study, not a continuation of this one.
+
+## Failure-path trace limitation (forensic check, 2026-10-31)
+
+This section records, read-only from the stack `hw2f-19ef1f13`, what the
+saved trace of the failed slot `c-17-with-2` (run `10d35e6f…`) holds. The
+frozen records and the adjudication are unchanged.
+
+**The saved trace does not contain the request sent to the provider.** The
+failure path (`server/src/modules/reviews/run-executor.ts`, line 622) writes
+these fields:
+
+| Trace field | Saved value |
+| --- | --- |
+| `prompt_assembly.system` | 771 characters, byte-identical to the agent's raw `system_prompt`. This is **not** the assembled system message: no Skill block, no injection guard. |
+| `prompt_assembly.skills`, `.memory`, `.specs` | `null` |
+| `prompt_assembly.user` | empty string |
+| `raw_output` | empty string (the truncated response was not kept) |
+| `stats` | tokens 0 / 0, cost `null` |
+
+For comparison, the completed `c-17-with-1` trace has a 2,373-character
+system message with the Skill at offset 1,018.
+
+What *was* recorded at dispatch, and is the only original evidence about the
+failed request:
+
+- the `agent_runs` row: 1,142 input and 4,000 output tokens, $0.00082278,
+  status `failed`;
+- the experiment metadata:
+  - Skill fingerprint `18efa866…`, the frozen *with* value;
+  - non-Skill fingerprint `c6010d90…` and the diff hash, both as frozen;
+- the attempt record:
+  - routing (only `deepinfra/fp8`, no fallbacks) and the router metadata
+    (DeepInfra);
+  - response ID `gen-1793471676-…` and `finish_reason=length`.
+
+The generation lookup returned `not_found`.
+
+The assembled prompt for this slot can be rebuilt from the frozen inputs, and
+its fingerprints match. **A rebuilt prompt is a reconstruction. It is not the
+recorded request, and nothing in this record presents it as one.** The
+statement that the Skill was sent rests only on the fingerprint and
+token-count evidence above.
+
+## Preserved forensic evidence
+
+Before teardown, the following were exported read-only into the private run
+directory `~/.devdigest/hw2-experiments/itemb-v3-20261031/` (mode 0700,
+outside Git):
+
+- a full `pg_dump` of `devdigest_hw2f_19ef1f13` (`pg_restore --list` shows
+  42 tables' data);
+- JSON exports of the six runs' `agent_runs`, `run_traces`, `reviews` and
+  their 20 `findings`;
+- `agents`, `agent_skills`, `skills`, `skill_approvals` and
+  `skill_versions`;
+- the API's `/experiments/slots/<id>` views of the six dispatched slots;
+- the stack server log;
+- the runner and driver logs, the authorization, revoke and settlement logs;
+- the full adjudication directory, including the sealed private judgments;
+- the adjudicators' session IDs.
+
+`SHA256SUMS` lists 51 files, including the global `ledger.jsonl`,
+`authorizations.jsonl` and `key-usage.jsonl` as of the export. Its own
+sha256 is `a47daf86450556d3348409de5defb1d419d42682dafd7dd82efa1ce9925735b1`.
+`sha256sum -c` passed, every copy committed here is byte-identical to its
+private original, and `adjudication-cli.ts verify` reports the record
+intact. The dump stays private because it holds the full prompts and
+responses.
+
+State before teardown:
+
+- no capability file, and the last authorization event is the revoke;
+- all 15 ledger slots are in a terminal state;
+- no `running` review run, and no runner or browser-driver process.
+
+`c-17-with-2` was not retried, and the 14 undispatched slots were not run.
