@@ -1,0 +1,13 @@
+2026-10-31T18:30:43Z c-18-with-5: clicked "API Contract Reviewer" on PR #502 (ref e25)
+2026-10-31T18:31:13Z c-18-with-5: completed
+2026-10-31T18:31:16Z c-18-without-5: clicked "API Contract Reviewer" on PR #502 (ref e24)
+2026-10-31T18:31:49Z c-18-without-5: completed
+2026-10-31T18:31:52Z c-17-with-1: clicked "Test Quality Reviewer" on PR #501 (ref e25)
+2026-10-31T18:32:51Z c-17-with-1: completed
+2026-10-31T18:32:54Z c-17-without-1: clicked "Test Quality Reviewer" on PR #501 (ref e24)
+2026-10-31T18:33:42Z c-17-without-1: completed
+2026-10-31T18:33:45Z c-17-without-2: clicked "Test Quality Reviewer" on PR #501 (ref e25)
+2026-10-31T18:34:36Z c-17-without-2: completed
+2026-10-31T18:34:39Z c-17-with-2: clicked "Test Quality Reviewer" on PR #501 (ref e24)
+2026-10-31T18:36:27Z c-17-with-2: failed — output reached the max_tokens cap (finish_reason=length) for Review; experiment mode does not reprompt
+runner finished/stopped before slot 7

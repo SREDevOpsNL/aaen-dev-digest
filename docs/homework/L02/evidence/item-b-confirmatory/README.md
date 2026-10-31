@@ -29,10 +29,10 @@ refuted.**
   records, sha256 `dc052468…6f4fbc`, no live capability.
 
 The capability was issued at 18:28:58Z: Gate 4, budget $0.10, ceiling
-$0.11404478, 3 hours ([authorize.log](authorize.log)). `authorize` printed
+$0.11404478, 3 hours ([authorize.log](authorize-log.txt)). `authorize` printed
 "pre-registration matches" before writing it.
 
-## Execution ([run.log](run.log), [clicks.log](clicks.log))
+## Execution ([run.log](run-log.txt), [clicks.log](clicks-log.txt))
 
 The runner armed each slot in the frozen order. A browser driver
 (agent-browser) clicked **Run Review → the named reviewer** on the PR page
@@ -55,14 +55,14 @@ carried the frozen fingerprints ([runner-report.md](runner-report.md)).
 
 ## Spending and settlement
 
-- The capability was revoked at 18:36:34Z ([revoke.log](revoke.log)).
+- The capability was revoked at 18:36:34Z ([revoke.log](revoke-log.txt)).
   `reconcile` found no unresolved slot.
 - New confirmatory charge: $0.00234162 confirmed, which is also the
   conservative figure. Totals are $0.0163864 conservative ($0.0063864
   confirmed plus the $0.01 still held for `x-17-without-1`), within the
   $0.11404478 ceiling and the $1.50 cap. The ledger has 42 records, sha256
   `cc70a7ed…51b0`.
-- `settle` **PASS** ([settle.log](settle.log)): key usage rose $0.00638640
+- `settle` **PASS** ([settle.log](settle-log.txt)): key usage rose $0.00638640
   from the opening reading, within [$0.00638640, $0.01638640]. Key usage is
   now $0.00679428 of $2.00 ($1.99320572 remaining). That is a rise of
   exactly $0.00234162 since the check before authorization.
@@ -209,3 +209,17 @@ State before teardown:
 - no `running` review run, and no runner or browser-driver process.
 
 `c-17-with-2` was not retried, and the 14 undispatched slots were not run.
+
+**Public-evidence review (2026-10-31).** The runner, driver, authorization,
+revoke and settlement logs are committed as `*-log.txt`. The repository's
+`*.log` ignore rule had silently left them out of the first commit, which
+broke the links above. Each is byte-identical to its private original. The
+committed files in this directory hold:
+
+- slot IDs, run IDs, amounts and fingerprints;
+- the model-written finding text and the adjudicators' judgments.
+
+A scan found no credential, key, capability token, email address or local
+path in them. The database dump, raw traces and responses, the run records,
+the global ledger and the sealed private judgments stay private, outside
+Git.

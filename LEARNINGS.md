@@ -248,6 +248,14 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   `npm ci` in `reviewer-core/`, with identical `typescript` and `zod`
   versions in `server/`.
 
+- **2026-10-31** — The root `.gitignore` rule `*.log` (line 18) silently drops
+  any `.log` file copied into `docs/` as evidence: `git add` of the directory
+  skips it without a warning, and Markdown links to it break only on the
+  remote. Commit evidence logs as `.txt`, and check with `git ls-files <dir>`
+  that every linked file is tracked. Evidence:
+  `docs/homework/L02/evidence/item-b-confirmatory/` (five logs missing from
+  `a782927`, restored as `*-log.txt`).
+
 ## Session Notes
 
 ## Open Questions

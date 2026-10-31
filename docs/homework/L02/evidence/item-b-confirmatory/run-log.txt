@@ -1,0 +1,15 @@
+Slot c-18-with-5 is armed until 2026-10-31T18:40:14.825Z: open PR #502 and click Run Review for "API Contract Reviewer" once.
+c-18-with-5: completed
+Slot c-18-without-5 is armed until 2026-10-31T18:41:13.321Z: open PR #502 and click Run Review for "API Contract Reviewer" once.
+c-18-without-5: completed
+Slot c-17-with-1 is armed until 2026-10-31T18:41:48.990Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-17-with-1: completed
+Slot c-17-without-1 is armed until 2026-10-31T18:42:50.190Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-17-without-1: completed
+Slot c-17-without-2 is armed until 2026-10-31T18:43:42.045Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-17-without-2: completed
+Slot c-17-with-2 is armed until 2026-10-31T18:44:35.964Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-17-with-2: failed — output reached the max_tokens cap (finish_reason=length) for Review; experiment mode does not reprompt
+charged: confirmatory $0.002342 of $1, total $0.016386 of $1.5
+STOPPED: confirmatory slot c-17-with-2 is incomplete: output reached the max_tokens cap (finish_reason=length) for Review; experiment mode does not reprompt
+EXIT=0
