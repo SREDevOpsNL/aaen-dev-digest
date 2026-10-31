@@ -89,6 +89,16 @@ cross-package findings belong in [`../LEARNINGS.md`](../LEARNINGS.md).
   Evidence: `scripts/e2e.sh` (`NEXT_PUBLIC_API_BASE`, `next dev` in
   `client/`), the 2026-10-30 runs in `docs/homework/L02/TEST-RESULTS.md`.
 
+- **2026-10-31** — Open an isolated stack's UI as `http://localhost:<web>`,
+  never `http://127.0.0.1:<web>`, even when `next dev` is bound with
+  `-H 127.0.0.1`. The API's CORS allow-list is exactly
+  `http://localhost:${WEB_PORT}`, so from a `127.0.0.1` origin every browser
+  API call is rejected and the PR page shows "PR #502 could not be loaded"
+  although `curl` against the API works. Evidence:
+  `server/src/platform/config.ts:206` (`webOrigin`), `server/src/app.ts:98`
+  (`cors`); a 2026-10-31 run-trace drawer check on :3300/:3301 (no
+  `access-control-allow-origin` for `Origin: http://127.0.0.1:3300`).
+
 ## Session Notes
 
 ## Open Questions
