@@ -3,10 +3,12 @@
  *
  *   pnpm exec tsx src/experiments/hw2/cli.ts <command> [--flag value …]
  *
- * Unpaid: endpoints · check · plan · manifest · reconcile · report · revoke ·
- *   key-usage --opening · settle
+ * Unpaid: endpoints · check · plan · manifest · prereg-check · reconcile ·
+ *   report · revoke · key-usage --opening · settle
  * Authorization: authorize (writes the server-side spending capability for one
- *   phase; only after that phase's gate was explicitly authorized)
+ *   phase; only after that phase's gate was explicitly authorized; confirmatory
+ *   also needs --prereg and refuses before writing anything unless the
+ *   committed pre-registration equals the manifest recomputed now)
  * Paid:   run (refuses unless --authorized-gate matches the phase, --confirm-spend
  *   is set, the dedicated key exists, the capability token exists, the ledger
  *   lock is free, every identity check passes and the ledger is reconciled;
@@ -29,12 +31,12 @@ import { CAPS, scheduleFits, spent } from './budget.js';
 import { containerLabels, identityProblems, type StackIdentity } from './identity.js';
 import { Ledger } from './ledger.js';
 import { KeyUsageLog, keyUsageVerdict, readKeyUsage, settleKeyUsage } from './key-usage.js';
-import { EXPERIMENT_FIXTURE, buildManifest, fixtureDiffSha, manifestFingerprint, type Manifest } from './manifest.js';
+import { EXPERIMENT_FIXTURE, buildManifest, exactlyOne, fixtureDiffSha, frozenSkillProblems, manifestFingerprint, readFrozen, verifyPreregistration, type Manifest, type SkillApprovalState } from './manifest.js';
 import { buildReport, renderReport, type SlotRunData } from './report.js';
 import type { ExpectedRule, FindingLike } from './rules.js';
 import { reconcile, runSchedule, type SlotRun } from './runner.js';
 import { buildSchedule, slotId, type Phase, type Slot } from './schedule.js';
-import { implementationFingerprint, preregisteredManifest, repoRoot } from './source.js';
+import { implementationFingerprint, repoRoot } from './source.js';
 import {
   authorizeExtraction, extractionPreviewProblems, reconcileExtraction, runExtraction, verifyExtractionStack,
   type ExtractionStack,
@@ -236,7 +238,7 @@ function experimentKey(flags: Flags): string {
   return key;
 }
 
-interface Stack {
+export interface Stack {
   api: ExperimentApi;
   identity: StackIdentity;
   stackId: string;
@@ -259,8 +261,8 @@ async function lookupIds(api: ExperimentApi) {
   const repo = repos.find((r) => r.full_name === 'acme/payments-api');
   if (!repo) throw new Error('acme/payments-api not found');
   const pulls = await api.get<Array<{ id?: string | null; number: number }>>(`/repos/${repo.id}/pulls`);
-  const agents = await api.get<Array<{ id: string; name: string; system_prompt: string; model: string; strategy: string; repo_intel: boolean }>>('/agents');
-  const skills = await api.get<Array<{ id: string; name: string; body: string }>>('/skills');
+  const agents = await api.get<Array<{ id: string; name: string; enabled: boolean; provider: string; system_prompt: string; output_schema: unknown; model: string; strategy: string; repo_intel: boolean }>>('/agents');
+  const skills = await api.get<Array<{ id: string; name: string; body: string; enabled: boolean; approval?: SkillApprovalState | null }>>('/skills');
   const prId = (n: number) => pulls.find((p) => p.number === n)?.id ?? null;
   return { prId, agents, skills };
 }
@@ -530,12 +532,49 @@ async function currentManifest(flags: Flags, stack: Stack, root: string): Promis
       prices: identity.prices,
       generationLookup: identity.generation_lookup,
     },
-    skills: skills.filter((s) => targets.includes(s.name)).map((s) => ({ name: s.name, body: s.body })),
-    agents: agents.filter((a) => reviewers.includes(a.name)),
+    skills: targets.map((name) => exactlyOne(skills, name, 'Skill')).map((s) => ({ id: s.id, name: s.name, body: s.body, enabled: s.enabled, approval: s.approval ?? null })),
+    agents: reviewers.map((name) => exactlyOne(agents, name, 'agent')),
     schedule: { seed, slots },
     rules,
     perSlotReservationUsd: reservation,
   });
+}
+
+/**
+ * `authorize`: writes the spending capability. For the confirmatory phase it
+ * first reads the pre-registration (before touching the stack) and then
+ * compares it with the manifest the stack builds now; any failure throws
+ * before a capability exists. `deps` lets tests stand in for the stack.
+ */
+export async function authorize(
+  flags: Flags,
+  phase: Phase,
+  deps: { stack: () => Promise<Stack>; verify: (stack: Stack) => Promise<{ fingerprint: string }>; root: string; log: (m: string) => void; home?: string },
+): Promise<ExperimentCapability> {
+  if (phase === 'confirmatory') readFrozen(need(flags, 'prereg'), deps.root);
+  const stack = await deps.stack();
+  if (phase === 'confirmatory') {
+    const { fingerprint } = await deps.verify(stack);
+    deps.log(`pre-registration matches: manifest fingerprint ${fingerprint}`);
+  }
+  const capability = writeCapability({
+    stackId: stack.stackId,
+    phase,
+    budgetUsd: Number(need(flags, 'budget')),
+    hours: Number(flags.hours ?? 12),
+    // The approved cumulative ceiling (USD) for everything charged so far plus this budget.
+    ceilingUsd: Number(need(flags, 'ceiling')),
+    ...(deps.home ? { home: deps.home } : {}),
+  });
+  deps.log(`capability for ${phase} (Gate ${capability.gate}) on ${stack.stackId}: budget $${capability.budget_usd}, expires ${capability.expires_at}`);
+  return capability;
+}
+
+/** The committed pre-registration (`--prereg`), verified against the manifest this stack builds now. */
+function verifiedPreregistration(flags: Flags, stack: Stack, root: string) {
+  return verifyPreregistration(need(flags, 'prereg'), root, (frozen) =>
+    currentManifest({ ...flags, seed: String(frozen.schedule.seed), reservation: String(frozen.per_slot_reservation_usd) }, stack, root),
+  );
 }
 
 async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, reservationUsd: number, fingerprint: string, keepLinks = false): Promise<SlotRun[]> {
@@ -543,10 +582,13 @@ async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, re
   return Promise.all(
     slots.map(async (slot) => {
       const fixture = fixtureFor(slot.experiment);
-      const agent = agents.find((a) => a.name === fixture.reviewer);
-      const target = skills.find((s) => s.name === fixture.targetSkill);
+      const agent = exactlyOne(agents, fixture.reviewer, 'agent');
+      const target = exactlyOne(skills, fixture.targetSkill, 'Skill');
       const pr = prId(fixture.number);
-      if (!agent || !target || !pr) throw new Error(`Experiment ${slot.experiment}: reviewer, target skill or PR missing`);
+      if (!pr) throw new Error(`Experiment ${slot.experiment}: fixture PR #${fixture.number} missing`);
+      // The slots are built from a second read: the target must still be the frozen one.
+      const changed = frozen ? frozenSkillProblems(frozen, { ...target, approval: target.approval ?? null }) : [];
+      if (changed.length > 0) throw new Error(changed.join('; '));
       return {
         slot,
         prId: pr,
@@ -707,6 +749,16 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       log(`stack ${stack.stackId} on ${stack.identity.database}: isolation checks passed`);
       return;
     }
+    case 'prereg-check': {
+      // Free: the exact check `authorize` and `run` make, plus the ledger state of the schedule.
+      const stack = await verifiedStack(flags);
+      const { frozen, fingerprint } = await verifiedPreregistration(flags, stack, repoRoot());
+      const taken = new Ledger(experimentsRoot()).slots();
+      const used = frozen.schedule.slots.filter((s) => taken.has(s.slot_id)).map((s) => s.slot_id);
+      log(`pre-registration matches: manifest fingerprint ${fingerprint}, ${frozen.schedule.slots.length} slots, seed ${frozen.schedule.seed}`);
+      log(used.length ? `slots already in the ledger: ${used.join(', ')}` : 'no scheduled slot is in the ledger');
+      return;
+    }
     case 'plan': {
       const slots = buildSchedule({ seed: Number(need(flags, 'seed')), phase: 'confirmatory', experiments: ['17', '18'], trials: Number(flags.trials ?? 5) });
       const json = JSON.stringify(slots, null, 2);
@@ -727,16 +779,9 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
     }
     case 'authorize': {
       const phase = assertPaidAuthorization(flags);
-      const stack = await verifiedStack(flags);
-      const capability = writeCapability({
-        stackId: stack.stackId,
-        phase,
-        budgetUsd: Number(need(flags, 'budget')),
-        hours: Number(flags.hours ?? 12),
-        // The approved cumulative ceiling (USD) for everything charged so far plus this budget.
-        ceilingUsd: Number(need(flags, 'ceiling')),
-      });
-      log(`capability for ${phase} (Gate ${capability.gate}) on ${stack.stackId}: budget $${capability.budget_usd}, expires ${capability.expires_at}`);
+      // Confirmatory: read the pre-registration before touching the stack, and
+      // compare it with the manifest built now before any capability exists.
+      await authorize(flags, phase, { stack: () => verifiedStack(flags), verify: (stack) => verifiedPreregistration(flags, stack, repoRoot()), root: repoRoot(), log });
       return;
     }
     case 'revoke': {
@@ -819,12 +864,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
         await reconcile(deps);
         let runs: SlotRun[];
         if (phase === 'confirmatory') {
-          const root = repoRoot();
-          const frozen = preregisteredManifest<Manifest>(need(flags, 'prereg'), root);
-          const current = await currentManifest({ ...flags, seed: String(frozen.schedule.seed), reservation: String(frozen.per_slot_reservation_usd) }, stack, root);
-          if (manifestFingerprint(current) !== manifestFingerprint(frozen)) {
-            throw new Error('The current implementation, stack or content does not match the pre-registered manifest');
-          }
+          const { frozen } = await verifiedPreregistration(flags, stack, repoRoot());
           const slots = buildSchedule({ seed: frozen.schedule.seed, phase, experiments: ['17', '18'], trials: 5 });
           runs = await slotRuns(stack, slots, frozen, frozen.per_slot_reservation_usd, manifestFingerprint(frozen));
         } else {
@@ -864,7 +904,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
     case 'report': {
       const stack = await verifiedStack(flags);
       const root = repoRoot();
-      const frozen = preregisteredManifest<Manifest>(need(flags, 'prereg'), root);
+      const frozen = readFrozen(need(flags, 'prereg'), root);
       if (!frozen.stack.providerName) throw new Error('The pre-registration has no frozen serving-provider name');
       if (!frozen.stack.servedModel) throw new Error('The pre-registration has no frozen served model');
       const ledger = new Ledger(experimentsRoot());
@@ -941,7 +981,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       return;
     }
     default:
-      log('commands: preview-conventions | authorize-conventions | run-conventions | reconcile-conventions | endpoints | check | preview | phase0-check | plan | manifest | authorize | revoke | key-usage | settle | reconcile | run | report (see docs/homework/L02/EXPERIMENTS.md)');
+      log('commands: preview-conventions | authorize-conventions | run-conventions | reconcile-conventions | endpoints | check | preview | phase0-check | plan | manifest | prereg-check | authorize | revoke | key-usage | settle | reconcile | run | report (see docs/homework/L02/EXPERIMENTS.md)');
   }
 }
 

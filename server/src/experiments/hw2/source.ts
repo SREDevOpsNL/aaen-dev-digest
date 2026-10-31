@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { sha256 } from '../../modules/_shared/experiment.js';
 
@@ -67,7 +67,11 @@ export function implementationFingerprint(root: string): { sha256: string; files
   return { sha256: sha256(entries.join('\n')), files: entries.length };
 }
 
-/** The ```json manifest block of a pre-registration that is committed and unmodified. */
+/**
+ * The manifest of a pre-registration that is committed and unmodified: the
+ * whole file for a `.json` file (what `cli.ts manifest --out` writes),
+ * otherwise its ```json manifest block.
+ */
 export function preregisteredManifest<T>(file: string, root: string): T {
   const path = relative(root, resolve(file));
   try {
@@ -78,7 +82,23 @@ export function preregisteredManifest<T>(file: string, root: string): T {
   if (uncommittedChanges(root, [path])) {
     throw new Error(`${path} has uncommitted changes; commit the pre-registration before any confirmatory run`);
   }
-  const match = /```json manifest\n([\s\S]*?)\n```/.exec(readFileSync(resolve(root, path), 'utf8'));
-  if (!match) throw new Error(`${path} has no \`\`\`json manifest block`);
-  return JSON.parse(match[1]!) as T;
+  // A committed symlink would read whatever untracked file it points at.
+  if (lstatSync(resolve(root, path)).isSymbolicLink()) throw new Error(`${path} is a symlink; commit the pre-registration itself`);
+  const text = readFileSync(resolve(root, path), 'utf8');
+  let json: string;
+  if (path.endsWith('.json')) {
+    json = text;
+  } else {
+    const match = /```json manifest\n([\s\S]*?)\n```/.exec(text);
+    if (!match) throw new Error(`${path} has no \`\`\`json manifest block`);
+    json = match[1]!;
+  }
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(json);
+  } catch (err) {
+    throw new Error(`${path} is not valid JSON: ${(err as Error).message}`);
+  }
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error(`${path} does not hold a manifest object`);
+  return manifest as T;
 }

@@ -140,10 +140,19 @@ are placeholders until the approved phase fixes them.
 6. **After the phase:** `cli.ts revoke --stack …`, then
    `cli.ts settle` (key usage against the ledger).
 7. **Confirmatory phase:** commit the pre-registration, which holds the rules,
-   n per condition, seed, fixture and skill hashes and the manifest.
-   `run --phase confirmatory --authorized-gate 4 --prereg <path>` refuses any
-   mismatch, and any uncommitted change, in the fingerprinted implementation
-   (`server/src`, `reviewer-core/src`, lockfiles, `scripts/e2e.sh`).
+   n per condition, seed, fixture and skill hashes and the manifest. Since
+   2026-10-31 it is the file `cli.ts manifest --out <file>.json` writes,
+   committed as is (manifest version 3); a Markdown file with a `json manifest`
+   fenced block is also read. `cli.ts prereg-check … --prereg <path> --rules
+   <rules>` runs, for free, the same comparison that
+   `authorize --phase confirmatory --prereg <path>` makes before it writes a
+   capability and that `run --phase confirmatory --authorized-gate 4 --prereg
+   <path>` makes before the first slot. Each refuses, naming the differing
+   fields, on any mismatch, and on any uncommitted change in the fingerprinted
+   implementation (`server/src`, `reviewer-core/src`, lockfiles,
+   `scripts/e2e.sh`). Agents and Skills are sorted by name, then ID, in the
+   manifest, so database row order cannot change it; the schedule keeps its
+   seeded order.
    `cli.ts report` builds the result table from the stored traces.
 
 ## Earlier record on main
