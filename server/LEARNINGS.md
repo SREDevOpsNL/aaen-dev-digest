@@ -508,6 +508,23 @@ correction. Repo-intel remains server-scoped;
   trace"). Removing the sanitizer fails 3 of those tests; removing the
   retry, the cancelled-usage fill or the status guard fails 1 each.
 
+- **2026-11-01** — The v4 "a truncation continues" rule only helps when a
+  truncated generation's provenance is complete, and the one real truncation
+  on record was not. The v4 runner and report treat a `truncated` slot as
+  continuable only when everything strict eligibility asks for holds apart
+  from the truncation itself (`truncationCheck`,
+  `server/src/experiments/hw2/eligibility.ts`). That is the coordinator's
+  rule that a provenance gap still stops the schedule. v3's `c-17-with-2`
+  showed `unverified (router_metadata)` with "a single upstream attempt is
+  not proven": the generation did not corroborate it, and the router metadata
+  did not carry `attempt`/`attempts` = 1. Run under v4, that same slot would
+  stop the schedule, not be imputed. Before a v4 run, check on a free or
+  recorded truncation that the generation lookup shows exactly one provider
+  response. Otherwise expect `incomplete` again. Evidence:
+  `docs/homework/L02/evidence/item-b-confirmatory/runner-report.md` (row
+  `c-17-with-2`), `server/test/hw2-study-v4.test.ts` ("a truncation with a
+  provenance gap … still stops the schedule").
+
 ## Session Notes
 
 ## Open Questions
