@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { canScanProcesses, leftovers, ProcessOwner } from './helpers/owned-process.js';
+import { canScanProcesses, CHILD_ENV_ALLOWLIST, ERROR_OUTPUT_BYTES, leftovers, OWNER_ENV, ProcessOwner } from './helpers/owned-process.js';
 
 /**
  * The ownership helper behind the crash-recovery tests: every child it
@@ -126,6 +126,36 @@ describe('ProcessOwner', () => {
     await expect(c.ready('ready')).rejects.toThrow(/exited \(code null, signal null\)/);
     expect(c.pid).toBeUndefined();
     await expect(owner.cleanupAll()).resolves.toBeUndefined();
+  });
+
+  it('a secret-like variable in the parent does not reach the child; an explicit one does', async () => {
+    const key = 'DEVDIGEST_TEST_FAKE_API_KEY';
+    process.env[key] = 'sk-test-must-not-leak';
+    try {
+      const c = owner.spawn(node, ['-e', `console.log(JSON.stringify(process.env))`]);
+      expect(await c.exited).toEqual({ code: 0, signal: null });
+      const seen = JSON.parse(c.output()) as Record<string, string>;
+      expect(seen[key]).toBeUndefined();
+      expect(c.output()).not.toContain('sk-test-must-not-leak');
+      expect(Object.keys(seen).every((k) => k === OWNER_ENV || (CHILD_ENV_ALLOWLIST as readonly string[]).includes(k))).toBe(true);
+      expect(seen[OWNER_ENV]).toBe(owner.marker);
+
+      const explicit = owner.spawn(node, ['-e', `console.log(process.env.EXTRA ?? 'missing')`], { env: { EXTRA: 'opted-in' } });
+      await explicit.exited;
+      expect(explicit.output().trim()).toBe('opted-in');
+    } finally {
+      delete process.env[key];
+    }
+  });
+
+  it('an error message quotes only the end of a long output', async () => {
+    const c = owner.spawn(node, ['-e', `process.stdout.write('HEAD' + 'x'.repeat(10000) + 'TAIL'); process.exit(1);`]);
+    const err = (await c.ready('ready').catch((e: unknown) => e)) as Error;
+    expect(err.message).toContain('TAIL');
+    expect(err.message).not.toContain('HEAD');
+    expect(err.message).toMatch(/\[…\d+ bytes cut\]/);
+    expect(err.message.length).toBeLessThan(ERROR_OUTPUT_BYTES + 200);
+    expect(c.output().length).toBe(10008); // the full output stays available to the test itself
   });
 
   it('leftovers() finds a process that escaped its owner, and only reports it', async () => {

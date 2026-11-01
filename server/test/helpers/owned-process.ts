@@ -14,7 +14,12 @@ import { fileURLToPath } from 'node:url';
  * - only a pid this owner spawned itself is ever signalled, and only while
  *   its `exit` has not been observed (so a reused pid is never hit);
  * - every wait for `exit` is bounded;
- * - `leftovers()` only reports; it never signals anything.
+ * - `leftovers()` only reports; it never signals anything;
+ * - a child gets a minimal environment (`CHILD_ENV_ALLOWLIST`), never the
+ *   whole parent environment, so a child that prints its environment cannot
+ *   put a developer's or CI's keys into test output. Extra variables are
+ *   passed explicitly through `opts.env`;
+ * - output quoted in an error message is cut to its last `ERROR_OUTPUT_BYTES`.
  *
  * No `pkill`, no pattern matching on command lines.
  */
@@ -24,6 +29,33 @@ export const OWNER_ENV = 'HW2_TEST_OWNER';
 const SERVER_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 export const DEFAULT_EXIT_TIMEOUT_MS = 5_000;
+
+/**
+ * The only parent variables a child inherits by default (each copied only if
+ * set). None of them is required for correctness: the crash-recovery tests
+ * passed 4/4 with an empty environment, but took about 12 s instead of about
+ * 4 s. These keep that runtime: PATH for binaries, HOME and TMPDIR for tsx's
+ * cache, and NODE_OPTIONS so a deliberate node flag still applies. None of
+ * them holds a secret.
+ */
+export const CHILD_ENV_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'NODE_OPTIONS'] as const;
+
+/** How much of a child's output an error message quotes (the end, where the failure usually is). */
+export const ERROR_OUTPUT_BYTES = 2_048;
+
+/** The allowlisted subset of `from`. */
+export function minimalEnv(from: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of CHILD_ENV_ALLOWLIST) if (from[key] !== undefined) env[key] = from[key];
+  return env;
+}
+
+/** The last `ERROR_OUTPUT_BYTES` of `out`, marked when cut. */
+export function boundedOutput(out: string): string {
+  const buf = Buffer.from(out, 'utf8');
+  if (buf.length <= ERROR_OUTPUT_BYTES) return out;
+  return `[…${buf.length - ERROR_OUTPUT_BYTES} bytes cut] ${buf.subarray(buf.length - ERROR_OUTPUT_BYTES).toString('utf8')}`;
+}
 
 export interface ExitStatus {
   code: number | null;
@@ -51,6 +83,7 @@ export interface OwnedChild {
 }
 
 export interface SpawnOptions {
+  /** Variables added to the minimal environment, explicitly, by the caller. */
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   /** Aborting it kills the child with SIGKILL (parent-side cancellation). */
@@ -107,7 +140,7 @@ export class ProcessOwner {
     let out = '';
     const proc = spawn(command, args, {
       cwd: opts.cwd ?? SERVER_ROOT,
-      env: { ...(opts.env ?? process.env), [OWNER_ENV]: this.marker },
+      env: { ...minimalEnv(), ...opts.env, [OWNER_ENV]: this.marker },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let done = false;
@@ -154,11 +187,11 @@ export class ProcessOwner {
           void exited.then(({ code, signal }) =>
             out.includes(text)
               ? resolve(out)
-              : reject(new Error(`child exited (code ${code}, signal ${signal}) before "${text}": ${out}`)),
+              : reject(new Error(`child exited (code ${code}, signal ${signal}) before "${text}": ${boundedOutput(out)}`)),
           );
         }),
         timeoutMs,
-        () => `child ${proc.pid} printed no "${text}" within ${timeoutMs} ms: ${out}`,
+        () => `child ${proc.pid} printed no "${text}" within ${timeoutMs} ms: ${boundedOutput(out)}`,
       );
 
     const child: OwnedChild = { proc, pid: proc.pid, exited, hasExited, output: () => out, ready, kill };
