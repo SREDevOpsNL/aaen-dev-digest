@@ -1,6 +1,6 @@
 import type { Container } from '../../platform/container.js';
 import type { ExperimentRunTrace, PromptAssembly, Provider, Review, RunTrace, TraceDispatch, UnifiedDiff } from '@devdigest/shared';
-import { reviewPullRequest, countBlockers, ReviewRefusedError } from '@devdigest/reviewer-core';
+import { reviewPullRequest, countBlockers, ReviewRefusedError, sanitizeErrorText } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
@@ -121,8 +121,10 @@ export class ReviewRunExecutor {
         kind: 'tool',
       });
     } catch (err) {
-      runLog.error(`Failed to load PR diff: ${(err as Error).message}`);
-      await failAll(`Failed to load PR diff: ${(err as Error).message}`);
+      // Sanitized once, before it reaches the rows, the bus, the logs and the traces.
+      const msg = `Failed to load PR diff: ${errorText(err)}`;
+      runLog.error(msg);
+      await failAll(msg);
       return;
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
@@ -155,7 +157,7 @@ export class ReviewRunExecutor {
         // trace) and completed the bus; here we only log at the run level.
         const cancelled = err instanceof RunCancelledError;
         logger?.[cancelled ? 'info' : 'error'](
-          { runId, agent: agent.name, err: (err as Error).message, durationMs: Date.now() - agentStart },
+          { runId, agent: agent.name, err: errorText(err), durationMs: Date.now() - agentStart },
           `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
         );
       }
@@ -334,7 +336,10 @@ export class ReviewRunExecutor {
       // run (and WHY it failed) is visible on the UI after a reload.
       const cancelled = err instanceof RunCancelledError;
       const status = cancelled ? 'cancelled' : 'failed';
-      const msg = cancelled ? 'Cancelled by user' : (err as Error).message;
+      // Sanitized and bounded once, before the row, the bus, the logs and
+      // refusal_reason. Classification below reads the error's type and
+      // code, never this text.
+      const msg = cancelled ? 'Cancelled by user' : errorText(err);
       runLog.error(cancelled ? 'Run cancelled by user' : `Run failed: ${msg}`);
       if (cancelled) recorder.cancelOpenStages();
 
@@ -351,7 +356,7 @@ export class ReviewRunExecutor {
       let experimentBlock: ExperimentRunTrace | undefined;
       let usage: RunUsage = dispatched ? recorder.totals() : { tokensIn: 0, tokensOut: 0, costUsd: null, state: 'none' };
       if (err instanceof ExperimentRefusedError) {
-        experimentBlock = err.block;
+        experimentBlock = { ...err.block, refusal_reason: err.block.refusal_reason === null ? null : (sanitizeErrorText(err.block.refusal_reason, ERROR_TEXT_MAX) ?? 'refused') };
         usage = { tokensIn: 0, tokensOut: 0, costUsd: 0, state: 'none' };
       } else if (slot) {
         experimentBlock = finishBlock(slot, 'failed', msg);
@@ -687,7 +692,10 @@ export class ReviewRunExecutor {
         at: new Date().toISOString(),
         note: 'The full trace could not be persisted; this minimal trace keeps the terminal state and usage only.',
       },
-      ...(experimentBlock ? { experiment: experimentBlock } : {}),
+      // No untrusted provider blob in the retry: the attempts keep only their typed, sanitized fields.
+      ...(experimentBlock
+        ? { experiment: { ...experimentBlock, attempts: experimentBlock.attempts.map((a) => ({ ...a, routerMetadataRaw: null })) } }
+        : {}),
     };
   }
 
@@ -725,8 +733,20 @@ const PRE_DISPATCH_CODES = new Set(['config_error', 'skill_not_approved', 'exper
 
 /** The refusal an error represents when it stopped the run before dispatch, else null. */
 export function preDispatchRefusal(err: unknown): { code: string; reason: string } | null {
-  if (err instanceof ExperimentRefusedError) return { code: 'experiment_refused', reason: err.reason };
-  if (err instanceof ReviewRefusedError) return { code: err.code, reason: err.message };
-  if (err instanceof AppError && PRE_DISPATCH_CODES.has(err.code)) return { code: err.code, reason: err.message };
+  if (err instanceof ExperimentRefusedError) return { code: 'experiment_refused', reason: errorText({ message: err.reason }) };
+  if (err instanceof ReviewRefusedError) return { code: err.code, reason: errorText(err) };
+  if (err instanceof AppError && PRE_DISPATCH_CODES.has(err.code)) return { code: err.code, reason: errorText(err) };
   return null;
+}
+
+/** Bound on an error message persisted in agent_runs.error, a trace or a refusal reason. */
+export const ERROR_TEXT_MAX = 500;
+
+/**
+ * An error's message as the run record may show it: credential shapes and
+ * control characters redacted, at most ERROR_TEXT_MAX characters. A provider
+ * SDK error can carry the upstream's body; this is the only form any sink gets.
+ */
+export function errorText(err: unknown): string {
+  return sanitizeErrorText((err as { message?: unknown } | null)?.message, ERROR_TEXT_MAX) ?? 'error without a message';
 }

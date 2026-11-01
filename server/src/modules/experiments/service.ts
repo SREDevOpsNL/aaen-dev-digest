@@ -19,7 +19,7 @@ import {
   type ExperimentRunRequest,
 } from '../_shared/experiment.js';
 import { ExperimentsRepository } from './repository.js';
-import { promptEvidence } from '../_shared/trace-evidence.js';
+import { promptEvidence, skillsRecorded } from '../_shared/trace-evidence.js';
 
 /** The demo repository the HW2 fixtures live in. */
 const FIXTURE_REPO = { owner: 'acme', name: 'payments-api', fullName: 'acme/payments-api' };
@@ -367,7 +367,12 @@ export class ExperimentsService {
       slot_id: slotId,
       // Set when the slot was armed for a Run Review click: armed, consumed, expired or disarmed.
       arm: this.container.experimentArms.stateOf(slotId),
-      runs: runs.map((run) => ({
+      runs: runs.map((run) => {
+        // What the trace proves about that prompt, derived now (the stored trace is never rewritten).
+        const evidence = promptEvidence(run.trace);
+        // A Skills section from a prompt the size bound cut is not presented as what was sent.
+        const skillsComplete = skillsRecorded(evidence);
+        return {
         run_id: run.runId,
         status: run.status,
         cost_usd: run.costUsd,
@@ -376,10 +381,11 @@ export class ExperimentsService {
         experiment: (run.trace as { experiment?: unknown }).experiment ?? null,
         // What actually ran: the reviewer and PR, and the Skills section the model received.
         config: (run.trace as { config?: { agent?: string; pr?: number | null } }).config ?? null,
-        skills_block: (run.trace as { prompt_assembly?: { skills?: string | null } }).prompt_assembly?.skills ?? null,
-        // What the trace proves about that prompt, derived now (the stored trace is never rewritten).
-        prompt_evidence: promptEvidence(run.trace),
-      })),
+        skills_block: evidence === 'dispatched_request_incomplete' ? null : ((run.trace as { prompt_assembly?: { skills?: string | null } }).prompt_assembly?.skills ?? null),
+        skills_block_complete: skillsComplete,
+        prompt_evidence: evidence,
+        };
+      }),
     };
   }
 

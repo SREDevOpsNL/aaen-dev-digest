@@ -4,6 +4,9 @@
  *
  * - `dispatched_request`: written with lifecycle evidence; the assembly is
  *   what one request passed to the provider.
+ * - `dispatched_request_incomplete`: written with lifecycle evidence, but the
+ *   stored assembly was cut by the size bound (`prompt_assembly_complete:
+ *   false`); it does not prove any section, the Skills section included.
  * - `dispatched_request_whole_diff`: a map-reduce success with lifecycle
  *   evidence; the top-level assembly is the whole-diff one, which no request
  *   sent as such, and the executed requests are in `stages[]`.
@@ -21,6 +24,7 @@
 export type PromptEvidence =
   | 'dispatched_request'
   | 'dispatched_request_whole_diff'
+  | 'dispatched_request_incomplete'
   | 'agent_config'
   | 'unrecorded'
   | 'legacy_single_pass'
@@ -30,13 +34,17 @@ export type PromptEvidence =
 interface TraceLike {
   prompt_assembly_source?: unknown;
   prompt_assembly_scope?: unknown;
+  prompt_assembly_complete?: unknown;
   tool_calls?: unknown;
 }
 
 export function promptEvidence(trace: unknown): PromptEvidence {
   const t = (trace ?? {}) as TraceLike;
   const source = t.prompt_assembly_source;
-  if (source === 'dispatched_request') return t.prompt_assembly_scope === 'whole_diff' ? 'dispatched_request_whole_diff' : 'dispatched_request';
+  if (source === 'dispatched_request') {
+    if (t.prompt_assembly_complete === false) return 'dispatched_request_incomplete';
+    return t.prompt_assembly_scope === 'whole_diff' ? 'dispatched_request_whole_diff' : 'dispatched_request';
+  }
   if (source === 'agent_config' || source === 'unrecorded') return source;
   // Legacy: only the success path ever wrote tool_calls (one per chunk, meta = mode).
   const calls = Array.isArray(t.tool_calls) ? (t.tool_calls as Array<{ meta?: unknown }>) : [];
@@ -65,6 +73,8 @@ export function promptNotRecordedReason(evidence: PromptEvidence): string | null
       return 'prompt not recorded (the run was reaped before its trace was written)';
     case 'agent_config':
       return 'prompt not recorded (no request was dispatched)';
+    case 'dispatched_request_incomplete':
+      return 'prompt recorded only in part (cut at the trace size bound)';
     default:
       return null;
   }

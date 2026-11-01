@@ -227,7 +227,8 @@ export class RunTraceRecorder {
    * complete only when the top-level copy is.
    */
   traceStages(top: { sha256: string; complete: boolean } | null): TraceStage[] {
-    const stored = new Set<string>();
+    // Each stored copy's completeness, so a later stage pointing at it reports it.
+    const stored = new Map<string, boolean>();
     let budget = STAGE_ASSEMBLIES_TOTAL_MAX_BYTES;
     return this.stages.map((record) => {
       const digest = assemblyDigest(record.assembly);
@@ -243,13 +244,14 @@ export class RunTraceRecorder {
         attempts: [...record.attempts.values()].sort((a, b) => a.attempt - b.attempt),
       };
       if (top && digest.sha256 === top.sha256) return top.complete ? stage : { ...stage, assembly_complete: false };
-      if (stored.has(digest.sha256)) return stage;
+      const earlier = stored.get(digest.sha256);
+      if (earlier !== undefined) return earlier ? stage : { ...stage, assembly_complete: false };
       const limit = Math.min(STAGE_ASSEMBLY_MAX_BYTES, budget);
       if (limit <= 0) return { ...stage, assembly_complete: false, stored_assembly_bytes: 0 };
       const bounded = digest.bytes > limit ? boundAssembly(record.assembly, limit) : { assembly: record.assembly, bytes: digest.bytes };
       budget -= bounded.bytes;
-      stored.add(digest.sha256);
       const complete = bounded.bytes === digest.bytes;
+      stored.set(digest.sha256, complete);
       return {
         ...stage,
         assembly: bounded.assembly,

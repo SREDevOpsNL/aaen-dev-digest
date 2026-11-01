@@ -71,7 +71,10 @@ function deferred() {
   return { promise, resolve };
 }
 
-type Step = 'ok' | 'invalid-then-ok' | 'truncate' | 'truncate-nul' | 'ok-nul' | 'ok-no-usage' | 'http-429' | 'hold';
+type Step = 'ok' | 'invalid-then-ok' | 'truncate' | 'truncate-nul' | 'ok-nul' | 'ok-no-usage' | 'http-429' | 'hold' | 'throw-secret';
+
+/** An SDK-style error message carrying an upstream body: a credential, a NUL and 3,000 characters. */
+const SECRET_ERROR = `502 upstream said: Authorization: Bearer sk-or-v1-itestsecret0123456789\u0000 ${'q'.repeat(3000)}`;
 
 /** Text with characters Postgres text/jsonb rejects: U+0000 and an unpaired surrogate. */
 const NUL_TEXT = 'before\u0000after \uD800 end';
@@ -94,6 +97,10 @@ class ScriptedLLM extends MockLLMProvider {
       data: CLEAN as T, model: req.model, tokensIn, tokensOut, providerCostUsd: cost, costUsd: cost, raw: JSON.stringify(CLEAN), attempts,
     });
     const usage = { tokens_in: 100, tokens_out: 50, cost_usd: 0.0001 };
+    if (step === 'throw-secret') {
+      recorder.submit('initial').failed('network_error');
+      throw new Error(SECRET_ERROR);
+    }
     if (step === 'http-429') {
       recorder.submit('initial').failed('http_error', { http_status: 429 });
       throw Object.assign(new Error('429 Provider returned error'), { status: 429 });
@@ -441,6 +448,8 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
       expect(trace).toMatchObject({ prompt_assembly_source: 'unrecorded', stats: { tokens_in: null, usage_state: 'unknown' } });
       expect(trace.prompt_assembly).toMatchObject({ system: '', user: '', skills: null });
       expect(promptEvidence(trace)).toBe('unrecorded');
+      // The row recorded no duration: 0 is a placeholder, flagged as not known.
+      expect(trace.stats).toMatchObject({ duration_ms: 0, duration_known: false });
       await app.close();
     });
 
@@ -630,7 +639,7 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
         persistence: { state: 'reaped', note: REAPED_CANCELLED_NOTE },
         prompt_assembly_source: 'unrecorded',
         prompt_assembly: { system: '', user: '', skills: null },
-        stats: { tokens_in: null, tokens_out: null, cost_usd: null, usage_state: 'unknown' },
+        stats: { tokens_in: null, tokens_out: null, cost_usd: null, usage_state: 'unknown', duration_ms: 0, duration_known: false },
         config: { agent: a.name, model: 'gpt-4.1' },
       });
       expect((bareTrace!.trace as RunTrace).dispatch).toBeUndefined();
@@ -638,6 +647,47 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
       expect(bareRow!.status).toBe('cancelled');
       const [ownTrace] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, traced!.id));
       expect(ownTrace!.trace).toEqual(own);
+      await app.close();
+    });
+  });
+
+  describe('error text is sanitized once, before every sink', () => {
+    it('a provider error carrying an upstream body: the row, the bus, the logs and the trace get a bounded, redacted message', async () => {
+      const { app, llm, pr, agent, service } = await setup();
+      llm.steps = ['throw-secret'];
+      const { runs } = await service.runReview(workspaceId, pr.id, [await agent()]);
+      const runId = runs[0]!.run_id;
+      const { run, trace } = await settled(runId);
+      expect(run.status).toBe('failed');
+      expect(run.error).toMatch(/^502 upstream said: Authorization: /);
+      expect(run.error!.length).toBeLessThanOrEqual(500);
+      for (const text of [run.error!, JSON.stringify(trace), JSON.stringify(app.container.runBus.buffer(runId))]) {
+        expect(text).not.toContain('sk-or-v1-itestsecret');
+        expect(text).not.toContain('\u0000');
+        expect(text).not.toContain('q'.repeat(600));
+      }
+      // Classification reads the error, not its text: still a dispatched failure.
+      expect(trace.dispatch).toEqual({ state: 'dispatched' });
+      await app.close();
+    });
+
+    it('a pre-work failure (loading the diff) is sanitized the same way for every queued run', async () => {
+      const { app, pr, agent, service } = await setup({ diff: '' });
+      const spy = vi.spyOn(ReviewRepository.prototype, 'getPrFiles').mockRejectedValueOnce(new Error(SECRET_ERROR));
+      try {
+        const { runs } = await service.runReview(workspaceId, pr.id, [await agent()]);
+        const runId = runs[0]!.run_id;
+        const { run, trace } = await settled(runId);
+        expect(run.error).toMatch(/^Failed to load PR diff: 502 upstream said/);
+        expect(run.error!.length).toBeLessThanOrEqual(530);
+        expect(trace.dispatch).toMatchObject({ state: 'not_dispatched', refusal: { code: 'diff_unavailable' } });
+        for (const text of [run.error!, JSON.stringify(trace), JSON.stringify(app.container.runBus.buffer(runId))]) {
+          expect(text).not.toContain('sk-or-v1-itestsecret');
+          expect(text).not.toContain('q'.repeat(600));
+        }
+      } finally {
+        spy.mockRestore();
+      }
       await app.close();
     });
   });
@@ -790,6 +840,69 @@ d('HW2 slot traces, slot view and report (Testcontainers pg, fake provider)', ()
     } finally {
       llm.mode = 'ok';
     }
+  });
+
+  it('deep provider metadata is depth-bounded in the full trace; the minimal retry carries no raw provider blob', async () => {
+    let deep: unknown = 'leaf';
+    for (let i = 0; i < 500; i++) deep = { next: deep };
+    llm.routerMetadataRaw = { requested: FAKE_MODEL, deep };
+    llm.mode = 'truncate';
+    try {
+      const full = await start();
+      const a = await settled(full.runId);
+      expect(a.run.status).toBe('failed');
+      const raw = (a.trace.experiment.attempts as Array<Record<string, unknown>>)[0]!.routerMetadataRaw;
+      expect(JSON.stringify(raw)).toContain('[omitted: nested too deep]');
+
+      const spy = vi.spyOn(ReviewRepository.prototype, 'saveRunTraceIn').mockRejectedValueOnce(new Error('injected trace write failure'));
+      try {
+        const retried = await start();
+        const b = await settled(retried.runId);
+        expect(b.run).toMatchObject({ status: 'failed', tokensIn: 1142, tokensOut: 4000, costUsd: 0.00082278 });
+        expect(b.trace.persistence).toMatchObject({ state: 'fallback' });
+        const attempt = (b.trace.experiment.attempts as Array<Record<string, unknown>>)[0]!;
+        expect(attempt.routerMetadataRaw).toBeNull();
+        expect(attempt).toMatchObject({ outcome: 'truncated', tokensIn: 1142, responseId: 'gen-1793471676-synthetic0001' });
+        expect(JSON.stringify(b.trace)).not.toContain('"next"');
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      llm.mode = 'ok';
+      llm.routerMetadataRaw = null;
+    }
+  });
+
+  it('the slot view does not present a cut prompt\'s Skills section as sent', async () => {
+    const slot = 'x-itrace-cut';
+    const [cut] = await pg.handle.db
+      .insert(t.agentRuns)
+      .values({ workspaceId, agentId: apiAgent, prId: pr502, provider: 'openrouter', model: FAKE_MODEL, status: 'failed', source: 'local' })
+      .returning();
+    await pg.handle.db.insert(t.runTraces).values({
+      runId: cut!.id,
+      trace: {
+        config: { agent: 'API Contract Reviewer', model: FAKE_MODEL, pr: 502, source: 'local' },
+        stats: { duration_ms: 1, tokens_in: 1, tokens_out: 1, cost_usd: 0, findings: 0, grounding: '0/0 passed', usage_state: 'measured' },
+        prompt_assembly: { system: 's', skills: '<untrusted source="skill-0">\n### breaking-change\ncut here', user: '' },
+        prompt_assembly_source: 'dispatched_request',
+        prompt_assembly_complete: false,
+        prompt_assembly_scope: 'single_stage',
+        tool_calls: [], raw_output: '', memory_pulled: [], specs_read: [], log: [],
+        experiment: { slot_id: slot, experiment: '18', condition: 'with' },
+      },
+    });
+    const view = await slotView(slot);
+    expect(view).toMatchObject({ prompt_evidence: 'dispatched_request_incomplete', skills_block: null, skills_block_complete: false });
+    const run: SlotRunData = { run_id: view.run_id, cost_usd: view.cost_usd, experiment: view.experiment, config: view.config, skills_block: view.skills_block, prompt_evidence: view.prompt_evidence, findings: [] };
+    expect(promptIssues(run)).toEqual(['prompt recorded only in part (cut at the trace size bound)']);
+    expect(executionIssues({ slot_id: slot, experiment: '18', condition: 'with' }, run, {
+      manifestFingerprint: 'a'.repeat(64), phase: 'exploration', fixture: () => ({ reviewer: 'API Contract Reviewer', prNumber: 502, targetSkill: 'breaking-change' }), skillFingerprint: () => 'x',
+    }).join(' ')).not.toMatch(/skill\(s\)|skills instead/);
+    // A complete trace still presents its Skills section.
+    const fresh = await slotView((await (async () => { const r = await start(); await settled(r.runId); return r; })()).slot);
+    expect(fresh).toMatchObject({ prompt_evidence: 'dispatched_request', skills_block_complete: true });
+    expect(fresh.skills_block).toMatch(/<untrusted source="skill-0">/);
   });
 
   it('report and slot view: a new failed with-slot counts its 1 Skill; a legacy failure trace reads "prompt not recorded"', async () => {

@@ -1,5 +1,6 @@
 import type { RunEventKind, RunLogLine } from '@devdigest/shared';
 import type { RunBus } from './sse.js';
+import { sanitizeErrorText } from '@devdigest/reviewer-core';
 
 /**
  * Structured run logger — the SINGLE sink for everything a run does.
@@ -94,7 +95,8 @@ export class RunLogger {
       this.event(kind, `${label} done (${Date.now() - t0}ms)`);
       return result;
     } catch (err) {
-      this.error(`${label} failed (${Date.now() - t0}ms): ${(err as Error).message}`);
+      // The error's text can come from an external service: sanitized and bounded before the stream and the logs.
+      this.error(`${label} failed (${Date.now() - t0}ms): ${sanitizeErrorText((err as Error)?.message, 500) ?? 'error without a message'}`);
       throw err;
     }
   }

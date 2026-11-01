@@ -81,6 +81,8 @@ export const RunStats = z.object({
   grounding: z.string(),
   /** Absent in traces written before it existed. */
   usage_state: UsageState.optional(),
+  /** False when `duration_ms` is a placeholder 0 (e.g. a reaped run with no recorded duration); absent = known. */
+  duration_known: z.boolean().optional(),
 });
 export type RunStats = z.infer<typeof RunStats>;
 

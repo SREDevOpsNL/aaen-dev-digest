@@ -35,7 +35,9 @@ export function reapedTrace(existing: unknown, row: ReapedRunRow, at: Date, note
   const persistence = { state: 'reaped' as const, at: at.toISOString(), note };
   const measured = row.tokensIn !== null && row.tokensOut !== null;
   const stats = {
+    // duration_ms is a required integer in the contract: an unknown duration is 0, flagged as not known.
     duration_ms: row.durationMs ?? 0,
+    ...(row.durationMs === null ? { duration_known: false } : {}),
     tokens_in: row.tokensIn,
     tokens_out: row.tokensOut,
     cost_usd: row.costUsd,

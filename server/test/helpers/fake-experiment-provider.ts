@@ -43,6 +43,8 @@ export class FakeExperimentProvider implements LLMProvider {
   private release?: () => void;
   held = new Promise<void>((resolve) => (this.release = resolve));
   endpoints: OpenRouterEndpointInfo[] = [FAKE_ENDPOINT];
+  /** The raw `openrouter_metadata` a response carries (provider-controlled). */
+  routerMetadataRaw: unknown = null;
 
   releaseHeld() {
     this.release?.();
@@ -84,7 +86,7 @@ export class FakeExperimentProvider implements LLMProvider {
       costUsd: failed ? null : usage.costUsd,
       router: failed ? null : { selected: [{ provider: 'DeepInfra', model: FAKE_MODEL }], attempt: 1, attemptsCount: 1, requested: FAKE_MODEL, strategy: 'direct' },
       generation: null,
-      routerMetadataRaw: null,
+      routerMetadataRaw: failed ? null : this.routerMetadataRaw,
       errorDetail: null,
     };
     req.onAttempt?.(attempt);

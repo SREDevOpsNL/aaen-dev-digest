@@ -12,14 +12,36 @@ export function pgSafeText(text: string): string {
   return text.replace(INVALID_PG_TEXT, '�');
 }
 
-/** `value` with every string in it (keys included) made storable; plain objects and arrays only. */
+/** Nesting below which a trace value is replaced instead of walked. */
+export const PG_SAFE_MAX_DEPTH = 64;
+export const PG_SAFE_DEPTH_MARKER = '[omitted: nested too deep]';
+export const PG_SAFE_CYCLE_MARKER = '[omitted: circular reference]';
+
+/**
+ * `value` with every string in it (keys included) made storable; plain
+ * objects and arrays only. Bounded and cycle-safe: a value nested deeper than
+ * PG_SAFE_MAX_DEPTH, or one that refers back to an ancestor, is replaced with
+ * a marker string, so provider metadata of any shape cannot overflow the
+ * stack (and fail the write, and its retry).
+ */
 export function pgSafeDeep<T>(value: T): T {
-  if (typeof value === 'string') return pgSafeText(value) as T;
-  if (Array.isArray(value)) return value.map((v) => pgSafeDeep(v)) as T;
-  if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+  return walk(value, 0, new Set()) as T;
+}
+
+function walk(value: unknown, depth: number, ancestors: Set<object>): unknown {
+  if (typeof value === 'string') return pgSafeText(value);
+  const container = Array.isArray(value) || (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype);
+  if (!container) return value;
+  const obj = value as object;
+  if (ancestors.has(obj)) return PG_SAFE_CYCLE_MARKER;
+  if (depth >= PG_SAFE_MAX_DEPTH) return PG_SAFE_DEPTH_MARKER;
+  ancestors.add(obj);
+  try {
+    if (Array.isArray(obj)) return obj.map((v) => walk(v, depth + 1, ancestors));
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[pgSafeText(k)] = pgSafeDeep(v);
-    return out as T;
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) out[pgSafeText(k)] = walk(v, depth + 1, ancestors);
+    return out;
+  } finally {
+    ancestors.delete(obj);
   }
-  return value;
 }
