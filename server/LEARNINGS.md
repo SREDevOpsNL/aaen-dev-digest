@@ -420,6 +420,28 @@ correction. Repo-intel remains server-scoped;
   prompt assembly. Better, record the assembled prompt before dispatch.
   Evidence: `docs/homework/L02/evidence/item-b-confirmatory/README.md`.
 
+- **2026-11-01** — A SIGKILL sent to a child started as `node_modules/.bin/tsx
+  -e <script>` kills only the tsx CLI. The CLI runs the script in an inner
+  `node` and relays only SIGINT and SIGTERM to it; SIGKILL cannot be relayed,
+  so the worker lives on, reparented to init. In
+  `hw2-crash-recovery.test.ts` this meant:
+  - the "dead" lock holder was still alive (`setInterval`), so the test never
+    exercised a dead holder;
+  - the "crashed" dispatch runner kept polling for up to 600 s, holding its
+    in-memory ledger lock, while the test reconciled the same ledger;
+  - the reservation-stage runner kept the fake stack's held request open, so
+    `server.close()` waited for the 60 s request timeout (64.9 s per file).
+
+  A run on `0c41f33` passed 4/4 and left two inner `node` workers alive, found
+  by an environment marker. A self-SIGKILL also showed up as `code 137` from
+  the wrapper rather than `signal SIGKILL`. Spawn the worker as one process,
+  `process.execPath ['--import', 'tsx', '-e', script]`, and assert after each
+  test that no process carrying the test's marker survives. Evidence:
+  `server/test/helpers/owned-process.ts` (`ProcessOwner`, `leftovers`),
+  `server/test/hw2-crash-recovery.test.ts` (4.5 s per file after the fix;
+  pointing `spawnTsx` back at the CLI fails all 4 tests),
+  `server/test/owned-process.test.ts`.
+
 ## Session Notes
 
 ## Open Questions

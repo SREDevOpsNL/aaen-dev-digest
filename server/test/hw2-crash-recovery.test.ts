@@ -1,6 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +9,7 @@ import { spent } from '../src/experiments/hw2/budget.js';
 import { experimentsRoot, revokeCapability, writeCapability } from '../src/experiments/hw2/cli.js';
 import { Ledger } from '../src/experiments/hw2/ledger.js';
 import { reconcile, runSlot, type SlotRun } from '../src/experiments/hw2/runner.js';
+import { ProcessOwner, type OwnedChild } from './helpers/owned-process.js';
 
 /**
  * Crash recovery and concurrency of the paid-slot lifecycle, with real
@@ -28,11 +28,21 @@ const cli = fileURLToPath(new URL('../src/experiments/hw2/cli.ts', import.meta.u
 const runnerTs = fileURLToPath(new URL('../src/experiments/hw2/runner.ts', import.meta.url));
 const ledgerTs = fileURLToPath(new URL('../src/experiments/hw2/ledger.ts', import.meta.url));
 const apiTs = fileURLToPath(new URL('../src/experiments/hw2/api.ts', import.meta.url));
-const tsx = fileURLToPath(new URL('../node_modules/.bin/tsx', import.meta.url));
-
+// Each worker is one node process (`node --import tsx -e`), not the `tsx` CLI:
+// the CLI runs the script in an inner node and relays only SIGINT and SIGTERM,
+// so a SIGKILL on it left the worker running (a lock holder forever, a runner
+// polling for 600 s that could still append to the ledger). The owner tags
+// every worker, kills what is still alive after each test, and checks that
+// nothing carrying its marker survives.
+const owner = new ProcessOwner();
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
-  for (const c of cleanups.splice(0).reverse()) await c();
+  try {
+    await owner.cleanupAll();
+  } finally {
+    for (const c of cleanups.splice(0).reverse()) await c();
+  }
+  expect(await owner.settledLeftovers()).toEqual([]);
 });
 function home() {
   const h = mkdtempSync(join(tmpdir(), 'hw2-crash-'));
@@ -40,28 +50,11 @@ function home() {
   return h;
 }
 
-/** Spawn a tsx child; resolves `ready` on the first stdout line containing `marker`. */
-function child(script: string, marker: string): { proc: ChildProcess; ready: Promise<string>; out: () => string; exited: Promise<number | null> } {
-  let out = '';
-  const proc = spawn(tsx, ['-e', script], { env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] });
-  cleanups.push(() => {
-    if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
-  });
-  const ready = new Promise<string>((resolve, reject) => {
-    proc.stdout!.on('data', (d) => {
-      out += d;
-      if (out.includes(marker)) resolve(out);
-    });
-    proc.on('exit', () => (out.includes(marker) ? resolve(out) : reject(new Error(`child exited before "${marker}": ${out}`))));
-  });
-  proc.stderr!.on('data', (d) => (out += d));
-  const exited = new Promise<number | null>((resolve) => proc.on('exit', (code) => resolve(code)));
-  return { proc, ready, out: () => out, exited };
+/** A SIGKILL at the crash point: the worker itself dies, and nothing it started outlives it. */
+async function killed(c: OwnedChild) {
+  expect(await c.kill('SIGKILL')).toEqual({ code: null, signal: 'SIGKILL' });
+  expect(await owner.settledLeftovers()).toEqual([]);
 }
-const killed = (c: ReturnType<typeof child>) => {
-  c.proc.kill('SIGKILL');
-  return c.exited;
-};
 
 /** Loopback stand-in for the stack API. Counts every dispatch; a run never settles until `settleLate`. */
 async function fakeStack(opts: { holdLinks?: boolean } = {}) {
@@ -136,16 +129,19 @@ async function waitForState(h: string, slotId: string, state: string) {
 }
 
 const lockFile = (h: string) => join(experimentsRoot(h), 'runner.lock');
+const lockHolderPid = (h: string) => (JSON.parse(readFileSync(lockFile(h), 'utf8')) as { pid: number }).pid;
 
 describe('paid-slot lifecycle: concurrency and crash recovery (real processes, SIGKILL)', () => {
   it('two runner processes: the second is refused while the first holds the shared lock, and a dead holder is never displaced', async () => {
     const h = home();
     const root = JSON.stringify(experimentsRoot(h));
-    const holder = child(`import(${JSON.stringify(ledgerTs)}).then((l) => { new l.Ledger(${root}).acquire({ pid: process.pid, stackId: 'hw2f-a' }); console.log('locked'); setInterval(() => {}, 1000); })`, 'locked');
-    await holder.ready;
-    const second = child(`import(${JSON.stringify(ledgerTs)}).then((l) => { try { new l.Ledger(${root}).acquire({ pid: process.pid, stackId: 'hw2f-b' }); console.log('acquired'); } catch (e) { console.log('refused: ' + e.message); } })`, ':');
-    await second.exited;
-    expect(second.out()).toMatch(/refused: Another runner holds .*runner\.lock/);
+    const holder = owner.spawnTsx(`import(${JSON.stringify(ledgerTs)}).then((l) => { new l.Ledger(${root}).acquire({ pid: process.pid, stackId: 'hw2f-a' }); console.log('locked'); setInterval(() => {}, 1000); })`);
+    await holder.ready('locked');
+    // The lock names the very process the test kills below.
+    expect(lockHolderPid(h)).toBe(holder.pid);
+    const second = owner.spawnTsx(`import(${JSON.stringify(ledgerTs)}).then((l) => { try { new l.Ledger(${root}).acquire({ pid: process.pid, stackId: 'hw2f-b' }); console.log('acquired'); } catch (e) { console.log('refused: ' + e.message); } })`);
+    expect(await second.exited).toEqual({ code: 0, signal: null });
+    expect(second.output()).toMatch(/refused: Another runner holds .*runner\.lock/);
 
     await killed(holder);
     // The dead runner's lock stays: recovery is an operator decision, never automatic.
@@ -155,12 +151,12 @@ describe('paid-slot lifecycle: concurrency and crash recovery (real processes, S
 
   it('a crash right after authorization leaves a capability with no slot: it can be revoked, then authorized again', async () => {
     const h = home();
-    const proc = child(
+    const proc = owner.spawnTsx(
       `import(${JSON.stringify(cli)}).then((m) => { m.writeCapability({ stackId: 'hw2f-crash01', phase: 'exploration', budgetUsd: 0.01, hours: 1, home: ${JSON.stringify(h)}, ceilingUsd: 0.05 }); console.log('authorized'); process.kill(process.pid, 'SIGKILL'); })`,
-      'authorized',
     );
-    await proc.ready;
-    await proc.exited;
+    await proc.ready('authorized');
+    // It died by its own SIGKILL, right after authorizing.
+    expect(await proc.exited).toEqual({ code: null, signal: 'SIGKILL' });
     const capDir = join(experimentsRoot(h), 'hw2f-crash01');
     expect(existsSync(join(capDir, 'capability.json'))).toBe(true);
     expect(new Ledger(experimentsRoot(h)).slots().size).toBe(0);
@@ -176,8 +172,9 @@ describe('paid-slot lifecycle: concurrency and crash recovery (real processes, S
   it('a crash after dispatch: the slot blocks authorization, is reconciled ambiguous at its reservation, and is never sent again, even when the provider answers late', async () => {
     const h = home();
     const stack = await fakeStack();
-    const runner = child(runnerScript(h, stack.url), 'locked');
-    await runner.ready;
+    const runner = owner.spawnTsx(runnerScript(h, stack.url));
+    await runner.ready('locked');
+    expect(lockHolderPid(h)).toBe(runner.pid);
     await waitForState(h, SLOT.slot.slot_id, 'dispatched');
     await killed(runner);
     expect(stack.state.dispatches).toBe(1);
@@ -214,8 +211,9 @@ describe('paid-slot lifecycle: concurrency and crash recovery (real processes, S
   it('a crash after the reservation but before any request is still charged in full and never sent', async () => {
     const h = home();
     const stack = await fakeStack({ holdLinks: true });
-    const runner = child(runnerScript(h, stack.url), 'locked');
-    await runner.ready;
+    const runner = owner.spawnTsx(runnerScript(h, stack.url));
+    await runner.ready('locked');
+    expect(lockHolderPid(h)).toBe(runner.pid);
     await waitForState(h, SLOT.slot.slot_id, 'reserved');
     await killed(runner);
     expect(stack.state.dispatches).toBe(0);
