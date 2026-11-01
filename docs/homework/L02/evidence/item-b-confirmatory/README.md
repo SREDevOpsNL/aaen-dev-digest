@@ -261,3 +261,36 @@ Then `docker ps -a --filter volume=18e62d4926ef…` returned no container, and
 The private judgments in `adjudication/private/` are byte-identical to the
 judgments published at the reveal. "Private" there means sealed until the
 reveal, not secret afterwards.
+
+## Independent audit (2026-11-01)
+
+A separate read-only session audited the run against the private archive,
+the global ledger and the sealed adjudication. All 10 checks pass:
+
+- the six-slot history matches the ledger, the run rows and the slot views;
+- the five cases map to the five completed slots;
+- the four copies of each judgment agree (only the adjudicator name's
+  spacing differs);
+- the rules hash matches, and the blinding compromise is recorded;
+- DeepInfra served every completed slot, and the charges total $0.00234162;
+- the truncated slot was not scored, there was no replacement call, and
+  Phase 1 stays separate;
+- `verify` reports the record intact.
+
+Full record: [independent-audit-20261101.md](independent-audit-20261101.md).
+Nothing here was rewritten.
+
+## Reporting-semantics revision (2026-11-01)
+
+The trace repair changed how the HW2 report reads a **legacy** failed trace.
+It now records "prompt not recorded (legacy failure trace)" as a prompt
+issue instead of the false "sent 0 skills" execution issue. If this report
+is regenerated with the current code from the restored dump, experiment 17
+reads `incomplete`, not `invalid`.
+
+- The committed [runner-report.md](runner-report.md) stays as it was
+  produced, `invalid` included, as the historical record.
+- The authoritative v3 outcome has always been the sealed adjudication's
+  `incomplete`, and that is unchanged.
+- Slot `c-17-with-2` stays uncounted either way. Eligibility, scoring and
+  the adjudication are unchanged.
