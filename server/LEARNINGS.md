@@ -442,6 +442,34 @@ correction. Repo-intel remains server-scoped;
   pointing `spawnTsx` back at the CLI fails all 4 tests),
   `server/test/owned-process.test.ts`.
 
+- **2026-11-01** — Correction to the 2026-10-31 entry above: a failed run's
+  trace now records what was sent. The engine reports each stage's exact
+  assembly before the provider call, and the failure path stores the failing
+  stage's assembly (`prompt_assembly_source: 'dispatched_request'`), the
+  ordered `stages[]` with their attempts and usage, and any bounded partial
+  output. The terminal row update and the trace upsert share one transaction.
+  Traces written before this have no `prompt_assembly_source`; the slot view
+  classifies them at read time, and a legacy failure trace yields "prompt not
+  recorded (legacy failure trace)" instead of "sent 0 skills". Two
+  non-obvious consequences:
+  - Moving the trace into the success transaction changes the observable
+    order: `saveRunTrace` is no longer called on success, and the trace now
+    commits *with* the `done` row. The run-lifecycle order test had to spy on
+    the new `saveRunTraceIn` seam. A cancel through the API still writes
+    `cancelled` before the executor's trace, so the 2026-10-14 "wait for the
+    trace" rule still holds for cancelled runs.
+  - For an API-cancelled run, the CAS-protected row keeps whatever the cancel
+    wrote (status only, null usage), while the trace records the measured
+    usage of a request that did go out. The row and the trace stats agree
+    for every executor-written terminal state, not for that one.
+
+  Evidence: `server/src/modules/reviews/run-executor.ts` (`runOneAgent`
+  catch), `server/src/modules/reviews/repository.ts` (`finalizeRunFailure`),
+  `server/src/modules/_shared/trace-evidence.ts`,
+  `server/test/run-failure-trace.it.test.ts`; removing the captured assembly,
+  the usage mirroring, the refusal classification or the transaction each
+  fails at least one of its tests.
+
 ## Session Notes
 
 ## Open Questions

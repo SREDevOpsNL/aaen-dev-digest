@@ -158,6 +158,27 @@ correction. Genuinely cross-package findings belong in
   errors", "Non-streaming requests"),
   `reviewer-core/test/openrouter-request-deadline.test.ts`.
 
+- **2026-11-01** — Correction to the 2026-09-17 map-reduce entry: the
+  whole-diff `ReviewOutcome.assembly` is still what the success trace shows,
+  but each executed request is now reported through `onStage` (`prepared`
+  with its exact assembly, then `completed` or `failed`), and the server
+  stores them as `stages[]`. Read a per-chunk prompt from `stages[]`, not
+  from `prompt_assembly`. Evidence: `reviewer-core/src/review/run.ts`
+  (`ReviewStageEvent`), `reviewer-core/test/lifecycle.test.ts`.
+
+- **2026-11-01** — Sanitize an identifier where it is read from a
+  response, not in each consumer. In an HTTP 200 whose body holds only an
+  `error`, OpenRouter's `id` is arbitrary text; the experiment telemetry
+  already scrubbed it in `failedResponseTelemetry`, but only on that path. A
+  new per-attempt sink that copied `data.id` at `response_received`, before
+  the error branch, persisted `gen-err Bearer sk-or-…` into the trace; the
+  existing DB-backed key-leak test caught it. Lifecycle ids and finish
+  reasons now pass `safeIdentifier` (a plain token of at most 128
+  characters, nothing key-like) inside `AttemptRecorder`, so every adapter
+  gets it. Evidence: `reviewer-core/src/llm/lifecycle.ts`
+  (`safeIdentifier`), `server/test/experiments.it.test.ts` ("an HTTP 200
+  error body persists no openrouter_metadata and no unsafe identifier").
+
 ## Decisions
 
 ## Recurring Errors & Fixes

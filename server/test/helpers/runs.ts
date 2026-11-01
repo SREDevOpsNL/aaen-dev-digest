@@ -34,9 +34,10 @@ export async function waitForPrRuns(
 }
 
 /**
- * A run's status commits before its trace is saved (terminal transition first,
- * then the trace, then stream completion). After `waitForPrRuns`, wait for the
- * trace too before reading `/runs/:id/trace`, or the read can race and 404.
+ * The executor commits a run's terminal status and its trace together, but a
+ * cancel through the API writes `cancelled` first and the executor's trace
+ * only later. After `waitForPrRuns`, wait for the trace too before reading
+ * `/runs/:id/trace`, or the read can race and 404.
  */
 export async function waitForRunTrace(
   db: PgFixture['handle']['db'],

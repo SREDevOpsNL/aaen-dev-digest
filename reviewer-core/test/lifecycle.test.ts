@@ -299,3 +299,15 @@ describe('boundUtf8', () => {
     expect(boundUtf8(text, 8)).toEqual({ text, totalBytes: 8, truncated: false });
   });
 });
+
+describe('safeIdentifier', () => {
+  it('keeps plain response ids and drops text or credentials where an id belongs', async () => {
+    const { safeIdentifier } = await import('../src/llm/lifecycle.js');
+    expect(safeIdentifier('gen-1793471676-xvdPCT5JneGc38vCFx0W')).toBe('gen-1793471676-xvdPCT5JneGc38vCFx0W');
+    expect(safeIdentifier('msg_01ABCdef')).toBe('msg_01ABCdef');
+    expect(safeIdentifier('gen-err Bearer sk-or-v1-abcdef0123456789')).toBeNull();
+    expect(safeIdentifier('sk-or-v1-abcdef0123456789')).toBeNull();
+    expect(safeIdentifier('x'.repeat(129))).toBeNull();
+    expect(safeIdentifier(42)).toBeNull();
+  });
+});
