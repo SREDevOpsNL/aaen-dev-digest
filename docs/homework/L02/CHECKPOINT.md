@@ -178,3 +178,28 @@ needs a corrected freeze and a fresh approval.
 - **Next executable action:** security and architecture review of the
   integrated change, then the v4 harness, the full matrix, push and CI, and
   the v4 freeze.
+
+## 2026-11-01: reliability pipeline integrated and pushed
+
+- **PR #53:** Draft. Code head `5f96fc1` (CI 7/7). The v4 pre-registration
+  and the docs follow on the same branch. Merge-base `5a3b496`.
+- **Integrated:**
+  - the trace repair (B), with three review-fix rounds;
+  - the crash-test leak fix and its env allowlist (C);
+  - the drawer status fix (E's review: READY);
+  - the v4 harness, with the router-metadata truncation rule (H).
+
+  Full matrix and the security/architecture re-reviews are clean (see
+  TEST-RESULTS).
+- **Stacks:**
+  - `hw2f-19ef1f13`'s orphaned volume was removed after the gate;
+  - the first v4 attempt `hw2f-14625582` was torn down by its own Ctrl-C,
+    because provider name and served model were not set;
+  - `hw2f-5b00487b` is up in tmux `hw2-freeze-v4` and holds the v4 freeze.
+- **Spending:** none. Ledger $0.0163864 conservative, key $0.00679428.
+- **Gates:**
+  - v4 spending (10 slots, $0.05, ceiling $0.0663864);
+  - #18 Skill v2 body review;
+  - #21 `/pr-self-review --base HEAD` by the owner.
+- **Next executable action:** the acceptance audit of all 53 rows at the
+  final head; the PR body; CI on the final head.

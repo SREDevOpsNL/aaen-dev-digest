@@ -229,3 +229,26 @@ reviewer-core and client are unchanged by this commit.
 | Slots | 5 completed and provenance-verified; 1 failed (output-token cap); 14 not dispatched |
 | Settlement | PASS: key usage rose $0.00638640 since the opening reading, within [$0.00638640, $0.01638640] |
 | Adjudication | 2 sealed judgments, 0 disputes, `verify` intact. #17 and #18 are `incomplete` |
+
+## Reliability pipeline (2026-11-01, unpaid)
+
+These results come from a detached verification checkout with its own
+database and ports, at `0945a18`; it is code-identical to the pushed
+`5f96fc1`.
+
+| Check | Result |
+| --- | --- |
+| reviewer-core typecheck / tests | pass / **137 / 137** |
+| server typecheck | pass |
+| server hermetic tests | **533 / 533** |
+| server DB-backed tests | **203 / 203** (`run-failure-trace.it.test.ts`: 31) |
+| `pnpm db:generate` | "No schema changes" |
+| client typecheck / lint / tests | pass / pass / **136 / 136** |
+| e2e typecheck / hermetic flows | pass / **14 / 14** |
+| agent-instruction checker | pass |
+| `git diff --check` from the L01 merge-base | clean |
+| crash-test process inventory | 5 consecutive hermetic runs, 0 test-owned processes left; the old code left 2 per run |
+| mutation checks | each removed guard (captured assembly, usage mirroring, refusal classification, transaction, sanitizers, retry, cancelled-usage fill, depth bound, v4 version gates, imputation, redaction, router-only provenance) fails at least one test |
+| independent reviews | security: 2 medium, 2 low and 3 info, then 6 follow-ups, then 5 follow-ups, all fixed and re-reviewed. Architecture: 2 medium, 3 low and 5 info, fixed; M2 (report semantics) documented. Drawer fix: READY |
+| GitHub CI on `5f96fc1` | 7 / 7 pass |
+| secret scan / L03 exclusion | no real secret in the tree; no intent code added |

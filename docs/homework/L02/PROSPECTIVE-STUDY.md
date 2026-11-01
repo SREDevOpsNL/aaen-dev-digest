@@ -421,3 +421,104 @@ No retry or replacement followed.
 This study is closed as incomplete. Running the missing slots would need a
 new pre-registration and a new owner decision. Full record:
 [evidence/item-b-confirmatory/README.md](evidence/item-b-confirmatory/README.md).
+
+## Successor study v4 for #17 (2026-11-01)
+
+Item B v3 is closed as `incomplete`. v4 is a **new study**: new slot IDs, a
+new seed, a new pre-registration. Nothing from v3 or Phase 1 is pooled. The
+design follows the independent analysis in
+[successor-study-analysis-20261101.md](evidence/successor-study-analysis-20261101.md).
+
+### Why v3 truncated, and what changes
+
+- **Cause.** `c-17-with-2` produced at least 4,000 output tokens; its twin
+  `c-17-with-1` produced 1,736 on an identical request (same fingerprints,
+  diff hash and 1,142 input tokens).
+  - The main causes are output-length nondeterminism at temperature 0 and too
+    little headroom.
+  - An unbounded findings list and structured-output overhead contribute.
+  - The system-role Skill made no difference to length.
+  - The gap between attempt tokens and generation tokens comes from the
+    native versus normalized tokenizers, not from hidden reasoning.
+  - The truncated text itself was discarded, so this cannot be checked
+    further.
+- **Changes.** v4 makes these changes:
+  - the output cap goes from 4,000 to **8,000** (3× the longest completed
+    response);
+  - a truncation is no longer retried, but it no longer stops the schedule;
+    it is imputed conservatively (*with* → no, *without* → yes) when it has
+    a known cost, the frozen fingerprints and single-attempt provenance
+    (`verified`, or `router_metadata_only`);
+  - failed-run traces keep the request that was sent and the bounded
+    partial output;
+  - adjudication uses packet v2 with redaction r1.
+- **Unchanged.** A findings cap was rejected, because the only detecting v3
+  finding was the 7th of 7. The reviewer, the prompts, the Skill (Edge Cases
+  and Error Paths, body `82a7461e…`), the fixture (#501 `8e0ba133…`), the
+  rule text and the model and provider all stay the same.
+
+### Scope: #17 only
+
+- **#18 is not in v4.** Skill v1 credits the exact claim the #18 rule
+  excludes, so rerunning it would test a mis-specified treatment. #18 under
+  Skill v1 is reported as **unresolved/unsupported**.
+- A disclosed, unapproved Skill v2 is proposed in
+  [proposal-breaking-change-skill-v2.md](prereg/proposal-breaking-change-skill-v2.md).
+  It needs the owner to review and approve a new seeded Skill body before
+  any #18 study.
+- v4 keeps n = 5 per condition and the frozen rule: detected if ≥ 4/5 with
+  the Skill and ≤ 1/5 without. Even at true rates of 0.8 / 0.2 the pass
+  probability is only about 0.54, so the result is not called significant.
+
+### Frozen pre-registration
+
+| Item | Value |
+| --- | --- |
+| Implementation | `5f96fc1` on `homework/l02-mentor-submission`, fingerprint `61145a400570094d81007e28abb06f2e14e0e17fe82971394d18da33cec25db1`. Docs-only commits after it do not change the fingerprint. CI passed on `5f96fc1` (7/7) |
+| Pre-registration | [`prereg/manifest-20261101-v4.json`](prereg/manifest-20261101-v4.json), written unchanged by `cli.ts manifest --study v4 --experiments 17 --out`, sha256 `dab95681c8189696a54f5f5ed55a32d9128b66ac9144128d3d9a8a90b2272803` |
+| Manifest version / fingerprint | 4 / `3ab26d81c66e0776620a1f7bef1263ae843c12d45d7fb89d7e5a26ade363a60a` |
+| Read-back | `prereg-check` on the committed file: "pre-registration matches … 10 slots, seed 4284451045"; "no scheduled slot is in the ledger" |
+| Study block | `itemb-v4`, tag `v4`, experiments `["17"]`, 5 per condition, truncation `continue-impute`, provenance `single-router-attempt`, packet 2, redaction r1; frozen text in [study-v4-frozen-text.md](prereg/study-v4-frozen-text.md) |
+| Seed | 4284451045, derived from sha256 of `"hw2-itemb-v4\|"` plus the manifest fingerprint without its schedule (recorded in `schedule.seed_derivation`) |
+| Schedule | `c-v4-17-without-2`, `c-v4-17-with-2`, `c-v4-17-with-1`, `c-v4-17-without-1`, `c-v4-17-without-5`, `c-v4-17-with-5`, `c-v4-17-with-3`, `c-v4-17-without-3`, `c-v4-17-with-4`, `c-v4-17-without-4` |
+| Stack | `hw2f-5b00487b`, database `devdigest_hw2f_5b00487b`, container `devdigest-hw2f-5b00487b` (Postgres 127.0.0.1:5450, ephemeral), API 127.0.0.1:3251, web localhost:3250, tmux `hw2-freeze-v4`; built from the verified detached checkout; identity and isolation checks pass |
+| Model / provider | `deepseek/deepseek-v4-flash`; only endpoint `deepinfra/fp8` (DeepInfra), served model `deepseek/deepseek-v4-flash-20260423`; fallbacks off; temperature 0, single-pass, repo-intel off, retries 0 |
+| Output cap | 8,000 (`stack.maxOutputTokens`; part of the non-Skill fingerprint) |
+| Prices | $0.00000009 input, $0.00000018 output, $0 per request; the live endpoint read on 2026-11-01 matched |
+| Rules | [`prereg/rules-20261030.json`](prereg/rules-20261030.json), unchanged (`bb8fb1d0…7a6a`) |
+
+**Request fingerprints and bounds** (free previews; phase-0 check passes):
+
+| Condition | Prompted Skills | Non-Skill fingerprint | Skill fingerprint | Input bound | Worst case × 1.5 |
+| --- | --- | --- | --- | --- | --- |
+| 17 with | Edge Cases and Error Paths | `7aea99454106fbd442970622e4bbd916445a7f05ac6910fd2646f2a914f48358` | `18efa8660db55161b35cb59dc198210af01a90d2eccf607ca542f2d55c3d83f2` | 9,474 | $0.00343899 |
+| 17 without | — | `7aea99454106fbd442970622e4bbd916445a7f05ac6910fd2646f2a914f48358` | `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945` | 8,967 | $0.00337054 |
+
+1.2 × the largest worst case is $0.00412679, below the $0.005 reservation.
+
+### State before any decision (read live 2026-11-01)
+
+- **Ledger:** 42 records, sha256 `cc70a7ed…51b0`. $0.0163864 conservative
+  ($0.01404478 exploration including the $0.01 held for `x-17-without-1`,
+  plus $0.00234162 confirmatory). No open slot and no live capability; the
+  last authorization event is the v3 revoke.
+- **Key:** $0.00679428 of $2.00 used, $1.99320572 remaining, read without
+  recording. That equals the last settlement.
+
+### Approval packet v4 (not authorized)
+
+| Value | |
+| --- | --- |
+| Gate / phase | Gate 4, confirmatory |
+| Calls | at most the 10 scheduled slots above, in the frozen order, one Run Review click each |
+| Per-slot reservation | $0.005 |
+| New reservations (capability budget) | $0.05000000 |
+| Cumulative conservative ceiling | $0.06638640 |
+| Capability lifetime | 3 hours; revoked after the schedule |
+| Retries, reprompts, fallbacks, replacements | none |
+| Stop rules | a 429, a timeout, unknown cost, a provenance gap, a fingerprint mismatch, a schema failure or ambiguity stops the schedule and leaves the study `incomplete`; an eligible truncation continues and is imputed |
+| Afterwards | `revoke`, `settle`, `report --adjudication-input`, then packet v2 / r1 with two independent sealed adjudicators |
+
+The 20-slot shape from the planning envelope would need #18. That waits on
+the Skill v2 decision above, and would be a separate free freeze. Expected
+actual spend for v4 is about $0.003–0.005.

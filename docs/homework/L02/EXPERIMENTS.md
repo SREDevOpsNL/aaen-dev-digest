@@ -389,3 +389,17 @@ on a truncated response (`finish_reason=length`), and both experiments are
 
 The Phase 1 results above are unchanged. See
 [the record](evidence/item-b-confirmatory/README.md).
+
+## Successor study v4 (2026-11-01, frozen, not authorized)
+
+A new study for #17 only:
+- 10 slots `c-v4-17-*`;
+- output cap 8,000;
+- truncations continue with conservative imputation;
+- redacted adjudication packet v2.
+
+It is frozen as `prereg/manifest-20261101-v4.json` on stack
+`hw2f-5b00487b`. The design and the approval packet are in
+[PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#successor-study-v4-for-17-2026-11-01).
+#18 under Skill v1 is unresolved/unsupported; a Skill v2 is proposed but not
+approved. Phase 1 and v3 stay separate.

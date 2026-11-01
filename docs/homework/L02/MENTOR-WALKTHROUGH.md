@@ -134,6 +134,17 @@ shows **Skills (dynamic) ~831 tokens**, with semver-discipline, then
 breaking-change, and no response-schema (34;
 [trace-evidence.md](evidence/trace-evidence.md)).
 
+### Item B v3 and the successor study (2026-11-01)
+
+- **Item B v3** (the confirmatory study) stopped at slot 6 of 20 on a
+  truncated response, so it is `incomplete`. The record, the independent
+  audit and the forensic teardown are in
+  [evidence/item-b-confirmatory/](evidence/item-b-confirmatory/README.md).
+- **Failed-run traces** now keep the request that was actually sent; see
+  [ARCHITECTURE.md](ARCHITECTURE.md#run-lifecycle-evidence-and-failure-traces-2026-11-01).
+- **The successor study v4** for #17 is frozen and waits for a spending
+  decision; see [PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md).
+
 ## Tests
 
 The suite commands and results are in [TEST-RESULTS.md](TEST-RESULTS.md).

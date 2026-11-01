@@ -175,3 +175,21 @@ says which file a finding goes in.
   failed slot is in
   [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
   Record: `docs/homework/L02/evidence/item-b-confirmatory/README.md`.
+- **2026-11-01 — A failed run's record was only as good as its weakest
+  write.** Item B v3's truncated slot was billed, and its row held the usage,
+  but its trace held a fallback prompt. A report trusting the trace inferred
+  "0 Skills". The repair records each stage's exact assembly before the
+  provider call and writes the row and the trace in one transaction. It
+  classifies legacy traces at read time instead of rewriting them. Two
+  independent reviews then found 22 issues in the repair itself, mostly
+  untrusted provider text reaching jsonb or logs (NUL bytes, ids, error
+  bodies, configured keys). Each was fixed with a test and a mutation check.
+  The successor study v4 changes only what the evidence supported:
+  - the output cap goes to 8,000;
+  - a truncation continues with conservative imputation;
+  - adjudication uses a redacted packet;
+  - #18 is set aside, because its Skill contradicts its own scoring rule.
+
+  Records: `docs/homework/L02/evidence/item-b-confirmatory/`,
+  `docs/homework/L02/PROSPECTIVE-STUDY.md` (v4),
+  [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
