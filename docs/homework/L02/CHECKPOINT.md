@@ -144,3 +144,37 @@ needs a corrected freeze and a fresh approval.
   and #18 stay Implemented. #21 is still Blocked on the owner's interactive
   run.
 - Stack `hw2f-19ef1f13` is still up; tear it down after review.
+
+## 2026-11-01: reliability and recovery pipeline (in progress)
+
+- **PR #53:** Draft, remote head `0c41f33`, merge-base `5a3b496`. Integration
+  is happening in the local branch `codex/l02-extraction-authorization` in
+  `aaen-dev-digest-l02-extraction`. Push with
+  `HEAD:homework/l02-mentor-submission`.
+- **Workstreams and branches:**
+  - **Trace repair** (`fix/l02-failed-run-trace`, worktree
+    `aaen-dev-digest-l02-trace-fix`, `77d4b96..0634723`): integrated.
+  - **Crash-test leak fix** (`fix/hw2-crash-test-leaks`, worktree
+    `aaen-dev-digest-l02-proc-leak`, `413aca7`): integrated.
+  - **Drawer status fix** (`fix/run-trace-drawer-status`, `e8119c9`,
+    `f235c76`): reviewed (READY) and integrated, as the owner approved.
+  - **v4 study harness** (`feat/hw2-study-v4-harness`, worktree
+    `aaen-dev-digest-l02-study-v4`): in progress.
+  - The idle `main`-based trace session (frosty-kepler) was left untouched,
+    as the owner decided.
+- **Teardown gate:** the trace-fix owner confirmed on 2026-11-01 that the
+  private archive was sufficient and that no further live evidence was
+  needed. The orphaned volume was then removed, and every other check
+  matched the baseline; see the
+  [teardown record](evidence/item-b-confirmatory/README.md#teardown-of-the-disposable-stack-2026-11-01).
+- **Archive:** `~/.devdigest/hw2-experiments/itemb-v3-20261031/` (private,
+  0700/0600, 51 hashes).
+- **Spending:** none. Ledger $0.0163864 conservative, 42 records; no live
+  capability.
+- **Gates:**
+  - #21 needs the owner to run `/pr-self-review --base HEAD`;
+  - #18 Skill v2 needs the owner to review and approve a new seeded Skill body;
+  - any successor study needs a spending approval.
+- **Next executable action:** security and architecture review of the
+  integrated change, then the v4 harness, the full matrix, push and CI, and
+  the v4 freeze.

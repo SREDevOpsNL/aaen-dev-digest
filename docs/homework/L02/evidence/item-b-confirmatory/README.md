@@ -223,3 +223,41 @@ A scan found no credential, key, capability token, email address or local
 path in them. The database dump, raw traces and responses, the run records,
 the global ledger and the sealed private judgments stay private, outside
 Git.
+
+## Teardown of the disposable stack (2026-11-01)
+
+A host restart at 11:28 on 2026-11-01 stopped and auto-removed the stack
+container `devdigest-hw2f-19ef1f13`, which had been started with `--rm`. Its
+anonymous data volume `18e62d4926ef…` (created 2026-10-31T18:07:09+01:00,
+the stack's start time) survived. The archive was verified before the volume
+was removed:
+
+- **Hashes:** all 51 `SHA256SUMS` lines pass.
+- **Restore test:** the dump restored into a throwaway container (`pg_restore`
+  exit 0). The 6 runs, their 6 traces, 5 reviews and 20 findings, and the
+  agent, Skill, link and approval tables all equal the JSON exports.
+- **Failed run:** the trace of `10d35e6f…` still holds the raw agent prompt,
+  `skills: null`, an empty user message and an empty `raw_output`.
+- **Permissions:** directories 0700 and files 0600 (one 0755 directory and
+  26 0644 files were tightened; contents and hashes unchanged).
+- **Public evidence:** every link resolves to a tracked file, and the secret
+  scan is clean. The adjudicator session IDs are absent from all history.
+- **Teardown gate:** the trace-fix owner confirmed that the private archive
+  was sufficient and that no further live evidence was needed.
+
+Then `docker ps -a --filter volume=18e62d4926ef…` returned no container, and
+`docker volume rm` removed that one volume. Afterwards:
+
+| Check | Result |
+| --- | --- |
+| Containers | only `devdigest-postgres`, untouched |
+| Its databases | `devdigest`, `postgres`, `template0`, `template1`; `agent_runs` 12, the same as the baseline |
+| `devdigest_pgdata` | present |
+| Volume set | the baseline minus `18e62d4926ef…`, plus one anonymous volume `739fc2d6…` created at 12:56 on 2026-11-01 by this session's test runs. It is unrelated to the stack and was left alone |
+| Global ledger / authorizations / key usage | sha256 `cc70a7ed…` / `4bd33fdc…` / `cd1f6484…`, unchanged |
+| Private archive | 51 / 51 hashes pass |
+| Processes | none references `19ef1f13` |
+
+The private judgments in `adjudication/private/` are byte-identical to the
+judgments published at the reveal. "Private" there means sealed until the
+reveal, not secret afterwards.
