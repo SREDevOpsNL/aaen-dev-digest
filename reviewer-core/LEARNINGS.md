@@ -190,6 +190,20 @@ correction. Genuinely cross-package findings belong in
   (2026-11-01). Evidence: `reviewer-core/src/llm/openrouter.ts`
   (`OpenRouterProvider` constructor and `completeStructured`).
 
+- **2026-11-01** — Do not reuse `sanitizeText` for run error messages.
+  Its last pattern redacts any run of 32 or more base64-like characters,
+  and that is exactly the shape of the studio's own evidence: a refusal
+  such as "non-Skill fingerprint <sha256> does not equal the frozen
+  <sha256>", or a run id. Errors now go through `sanitizeErrorText`, which
+  applies the same credential patterns, control-character removal and
+  length bound, but keeps long opaque tokens. Use `sanitizeText` for
+  provider-supplied free text (an error body's message), and
+  `sanitizeErrorText` for messages that can quote the studio's own hashes.
+  Evidence: `reviewer-core/src/llm/error-detail.ts` (`KEY_PATTERNS`,
+  `sanitizeErrorText`), `reviewer-core/test/lifecycle.test.ts`
+  ("sanitizeErrorText redacts credentials… and keeps fingerprints"),
+  `server/src/modules/reviews/run-executor.ts` (`errorText`).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
