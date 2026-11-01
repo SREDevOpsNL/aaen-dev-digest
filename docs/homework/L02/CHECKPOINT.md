@@ -203,3 +203,25 @@ needs a corrected freeze and a fresh approval.
   - #21 `/pr-self-review --base HEAD` by the owner.
 - **Next executable action:** the acceptance audit of all 53 rows at the
   final head; the PR body; CI on the final head.
+
+## 2026-11-01: pipeline complete
+
+- **Acceptance audit.** An independent audit of all 53 rows at `253e96f`
+  agrees with every status: 50 Verified, 2 Implemented (17, 18), 1 Blocked
+  (21). It found 0 broken links and 0 missing evidence files. Its README
+  finding is fixed in `6174935`.
+- **Owner actions remaining:**
+  1. Decide v4 spending: Gate 4, 10 slots, $0.005 each, $0.05 new
+     reservations, ceiling $0.0663864, 3 h, no retries.
+     - Recheck the bindings first.
+     - The freeze stays valid only while stack `hw2f-5b00487b` (tmux
+       `hw2-freeze-v4`) is up. A host restart destroys it and needs a free
+       re-freeze.
+  2. Review the #18 Skill v2 proposal.
+  3. Run `/pr-self-review --base HEAD` interactively in
+     `aaen-dev-digest-l02-self-review` (#21).
+- **Worktrees from this pipeline, kept for audit:**
+  - `aaen-dev-digest-l02-trace-fix` (`fix/l02-failed-run-trace`);
+  - `aaen-dev-digest-l02-proc-leak` (`fix/hw2-crash-test-leaks`);
+  - `aaen-dev-digest-l02-study-v4` (`feat/hw2-study-v4-harness`);
+  - `aaen-dev-digest-l02-verify-final` (detached, runs the v4 stack).
