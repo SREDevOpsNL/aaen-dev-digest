@@ -31,11 +31,24 @@ export const RATE_LIMIT_HEADERS = [
 ] as const;
 
 const REDACTED = '[redacted]';
-/** Credential shapes: bearer values, `sk-` keys, `key=value` secrets, URL query strings. */
+/**
+ * Credential shapes: bearer and basic credentials, `sk-` keys, GitHub tokens
+ * (classic `gh?_` and fine-grained `github_pat_`), Google API keys, URL
+ * userinfo, `key=value` secrets, URL query strings. Order matters: a full
+ * `Basic <credential>` is redacted before the `authorization: <word>` rule
+ * could stop at the scheme word.
+ */
 const KEY_PATTERNS: Array<[RegExp, string]> = [
   [/\bBearer\s+[^\s"',;]+/gi, `Bearer ${REDACTED}`],
+  // `Authorization: Basic <credential>` in full; elsewhere only a base64-looking value (a digit, `+`, `/` or `=`), so prose like "basic check" survives.
+  [/\b(authorization["']?\s*[:=]\s*["']?)Basic\s+[^\s"',;]+/gi, `$1Basic ${REDACTED}`],
+  [/\bBasic\s+(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+/]{8,}={0,2}/g, `Basic ${REDACTED}`],
   [/\bsk-[A-Za-z0-9_-]{8,}/g, REDACTED],
-  [/\b(api[_-]?key|access[_-]?token|token|secret|password|authorization)(["']?\s*[:=]\s*["']?)[^\s"',;&]+/gi, `$1$2${REDACTED}`],
+  [/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, REDACTED],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, REDACTED],
+  [/\bAIza[0-9A-Za-z_-]{30,}/g, REDACTED],
+  [/\/\/[^/\s:@]+:[^@\s]+@/g, `//${REDACTED}@`],
+  [/\b(api[_-]?key|access[_-]?token|token|secret|password|authorization)(["']?\s*[:=]\s*["']?)(?!(?:Bearer|Basic) \[redacted\])[^\s"',;&]+/gi, `$1$2${REDACTED}`],
   [/(https?:\/\/[^\s?"'<>]+)\?[^\s"'<>]*/g, `$1?${REDACTED}`],
 ];
 const SECRET_PATTERNS: Array<[RegExp, string]> = [...KEY_PATTERNS, [/[A-Za-z0-9+/_-]{32,}={0,2}/g, REDACTED]];

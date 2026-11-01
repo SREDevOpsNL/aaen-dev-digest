@@ -394,3 +394,24 @@ describe('review follow-ups: success telemetry and error text', () => {
     expect(sanitizeErrorText({ not: 'text' }, 500)).toBeNull();
   });
 });
+
+describe('sanitizeErrorText: credential shapes beyond sk- keys', () => {
+  it('redacts GitHub, Google, URL-userinfo and Basic credentials; keeps fingerprints, UUIDs and prose', async () => {
+    const { sanitizeErrorText } = await import('../src/llm/error-detail.js');
+    const clean = (s: string) => sanitizeErrorText(s, 500)!;
+    const ghp = `ghp_${'a'.repeat(36)}`;
+    const pat = `github_pat_11ABCDEFG0_${'b'.repeat(40)}`;
+    const google = `AIza${'C'.repeat(35)}`;
+    for (const secret of [ghp, `gho_${'d'.repeat(36)}`, `ghs_${'e'.repeat(36)}`, pat, google]) {
+      expect(clean(`401 Bad credentials ${secret} end`)).not.toContain(secret);
+    }
+    expect(clean('fetch https://user:hunter2pass@github.com/acme/repo.git failed')).toBe('fetch https://[redacted]@github.com/acme/repo.git failed');
+    expect(clean('Authorization: Basic dXNlcjpodW50ZXIy')).toBe('Authorization: Basic [redacted]');
+    expect(clean('upstream sent Basic dXNlcjpodW50ZXIy== back')).toBe('upstream sent Basic [redacted] back');
+    expect(clean('a basic check failed')).toBe('a basic check failed');
+    const sha = 'c6010d90c44151bb6cc144d21cdbd9493dab1947cbf40e5791860c9a71d1a860';
+    const uuid = '10d35e6f-7420-4561-94c8-162601ec4c98';
+    expect(clean(`fingerprint ${sha} for run ${uuid}`)).toBe(`fingerprint ${sha} for run ${uuid}`);
+    expect(clean(`401 ghp_${'a'.repeat(36)}`)).toBe('401 [redacted]');
+  });
+});

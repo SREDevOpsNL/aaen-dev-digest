@@ -71,7 +71,10 @@ function deferred() {
   return { promise, resolve };
 }
 
-type Step = 'ok' | 'invalid-then-ok' | 'truncate' | 'truncate-nul' | 'ok-nul' | 'ok-no-usage' | 'http-429' | 'hold' | 'throw-secret';
+type Step = 'ok' | 'invalid-then-ok' | 'truncate' | 'truncate-nul' | 'ok-nul' | 'ok-no-usage' | 'http-429' | 'hold' | 'throw-secret' | 'throw-configured-key';
+
+/** A configured key whose shape no credential pattern recognizes: only redaction by value can catch it. */
+const CONFIGURED_KEY = 'custom.shape:OPENAI~key0123';
 
 /** An SDK-style error message carrying an upstream body: a credential, a NUL and 3,000 characters. */
 const SECRET_ERROR = `502 upstream said: Authorization: Bearer sk-or-v1-itestsecret0123456789\u0000 ${'q'.repeat(3000)}`;
@@ -97,6 +100,10 @@ class ScriptedLLM extends MockLLMProvider {
       data: CLEAN as T, model: req.model, tokensIn, tokensOut, providerCostUsd: cost, costUsd: cost, raw: JSON.stringify(CLEAN), attempts,
     });
     const usage = { tokens_in: 100, tokens_out: 50, cost_usd: 0.0001 };
+    if (step === 'throw-configured-key') {
+      recorder.submit('initial').failed('http_error', { http_status: 401 });
+      throw Object.assign(new Error(`401 Incorrect API key provided: ${CONFIGURED_KEY}`), { status: 401 });
+    }
     if (step === 'throw-secret') {
       recorder.submit('initial').failed('network_error');
       throw new Error(SECRET_ERROR);
@@ -153,7 +160,7 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
     await pg?.stop();
   });
 
-  async function setup(opts: { diff?: string; llm?: boolean } = {}) {
+  async function setup(opts: { diff?: string; llm?: boolean; secrets?: Record<string, string> } = {}) {
     const llm = new ScriptedLLM('openai', { structured: CLEAN });
     const app = await buildApp({
       config: config(),
@@ -162,6 +169,7 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
         embedder: new MockEmbedder(),
         git: new MockGitClient({ diff: opts.diff ?? ONE_FILE }),
         ...(opts.llm === false ? {} : { llm: { openai: llm } }),
+        ...(opts.secrets ? { secrets: { get: async (key: string) => opts.secrets![key] } } : {}),
       },
     });
     const name = `trace-${++seq}`;
@@ -671,6 +679,26 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
       await app.close();
     });
 
+    it('a configured key of any shape is redacted from the row, the bus and the trace; a repo-intel failure line too', async () => {
+      const { app, llm, pr, agent, service } = await setup({ secrets: { OPENAI_API_KEY: CONFIGURED_KEY, GITHUB_TOKEN: 'gh-token-shape:abc123456' } });
+      llm.steps = ['throw-configured-key'];
+      const map = vi.spyOn(app.container.repoIntel, 'getRepoMap').mockRejectedValueOnce(new Error('clone failed for https://x:gh-token-shape:abc123456@github.com/acme/r'));
+      try {
+        const { runs } = await service.runReview(workspaceId, pr.id, [await agent({ repo_intel: true })]);
+        const runId = runs[0]!.run_id;
+        const { run, trace } = await settled(runId);
+        expect(run.error).toMatch(/^401 Incorrect API key provided: /);
+        expect(trace.log.some((l) => l.msg.includes('repo map: repoIntel failed — clone failed for https://[redacted]@github.com/acme/r'))).toBe(true);
+        for (const text of [run.error!, JSON.stringify(trace), JSON.stringify(app.container.runBus.buffer(runId))]) {
+          expect(text).not.toContain(CONFIGURED_KEY);
+          expect(text).not.toContain('gh-token-shape:abc123456');
+        }
+      } finally {
+        map.mockRestore();
+      }
+      await app.close();
+    });
+
     it('a pre-work failure (loading the diff) is sanitized the same way for every queued run', async () => {
       const { app, pr, agent, service } = await setup({ diff: '' });
       const spy = vi.spyOn(ReviewRepository.prototype, 'getPrFiles').mockRejectedValueOnce(new Error(SECRET_ERROR));
@@ -870,6 +898,29 @@ d('HW2 slot traces, slot view and report (Testcontainers pg, fake provider)', ()
     } finally {
       llm.mode = 'ok';
       llm.routerMetadataRaw = null;
+    }
+  });
+
+  it('an endpoints-read failure: the refusal reason and the free preview carry sanitized text only; the refusal is unchanged', async () => {
+    llm.endpointsError = new Error(`403 for https://u:p4ssw0rd@openrouter.ai/api?key=abc Authorization: Bearer sk-or-v1-itestsecret0123456789 \u0000${'w'.repeat(2000)}`);
+    try {
+      const { runId } = await start();
+      const { run, trace } = await settled(runId);
+      expect(run).toMatchObject({ status: 'failed', tokensIn: 0, tokensOut: 0, costUsd: 0 });
+      expect(trace.experiment).toMatchObject({ dispatch_state: 'refused' });
+      expect(trace.experiment.refusal_reason as string).toMatch(/^live endpoint prices unavailable: 403 /);
+      const preview = (await app.inject({
+        method: 'POST',
+        url: '/experiments/preview',
+        payload: { pr_id: pr502, agent_id: apiAgent, experiment: '18', condition: 'with', phase: 'exploration', reservation_usd: 0.05, expected_diff_sha256: await fixtureDiffSha(502) },
+      })).json();
+      expect(preview.ok).toBe(false);
+      expect(preview.reason).toMatch(/^live endpoint prices unavailable: 403 /);
+      for (const text of [JSON.stringify(trace), run.error!, JSON.stringify(preview)]) {
+        for (const leak of ['p4ssw0rd', 'sk-or-v1-itestsecret', 'key=abc', '\u0000', 'w'.repeat(600)]) expect(text).not.toContain(leak);
+      }
+    } finally {
+      llm.endpointsError = null;
     }
   });
 

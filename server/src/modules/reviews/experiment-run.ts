@@ -20,6 +20,7 @@ import {
   requestFingerprints,
   type ExperimentRunContext,
 } from '../_shared/experiment.js';
+import { errorText } from '../../platform/error-text.js';
 
 /**
  * HW2 experiment slot preparation for the review executor. Every check runs
@@ -87,6 +88,8 @@ export async function prepareExperimentSlot(args: {
   sessionId: string;
   /** A free preview computes the fingerprint the manifest will freeze, so it skips the frozen-value check. */
   preview?: boolean;
+  /** Error text as the run may persist it (sanitized, bounded, configured keys redacted). */
+  sanitize?: (err: unknown) => string;
 }): Promise<ExperimentSlot> {
   const { batch, agent, repo, llm } = args;
   const { config, request } = batch.ctx;
@@ -123,7 +126,8 @@ export async function prepareExperimentSlot(args: {
   try {
     live = await (llm as LLMProvider & ListEndpoints).listEndpoints(config.model);
   } catch (err) {
-    return refuse(`live endpoint prices unavailable: ${(err as Error).message}`);
+    // The provider's error text is external: sanitized before it becomes the refusal reason (and the preview's answer).
+    return refuse(`live endpoint prices unavailable: ${(args.sanitize ?? ((e: unknown) => errorText(e)))(err)}`);
   }
   const limits = effectivePriceLimits(config, live);
   if (!limits) return refuse(`no live endpoint matches the frozen provider ${config.provider}`);

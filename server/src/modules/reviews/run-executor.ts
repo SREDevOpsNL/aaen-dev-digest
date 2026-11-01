@@ -1,6 +1,7 @@
 import type { Container } from '../../platform/container.js';
 import type { ExperimentRunTrace, PromptAssembly, Provider, Review, RunTrace, TraceDispatch, UnifiedDiff } from '@devdigest/shared';
-import { reviewPullRequest, countBlockers, ReviewRefusedError, sanitizeErrorText } from '@devdigest/reviewer-core';
+import { reviewPullRequest, countBlockers, ReviewRefusedError } from '@devdigest/reviewer-core';
+import { configuredSecrets, errorText } from '../../platform/error-text.js';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
@@ -90,11 +91,14 @@ export class ReviewRunExecutor {
     // ONE logger fanned out over every queued run: shared pre-work (diff +
     // intent) is streamed into each target agent's Live Log and persisted into
     // each run's trace. Per-agent work below narrows it to a single run.
+    // The configured keys, so error text redacts a key of any shape. Never logged.
+    const secrets = await configuredSecrets(this.container.secrets);
     const runLog = new RunLogger(
       this.container.runBus,
       jobs.map((j) => j.runId),
       logger,
       { prId: pull.id },
+      secrets,
     );
 
     // Pre-work failure (e.g. diff load) fails EVERY queued run. The error was
@@ -122,7 +126,7 @@ export class ReviewRunExecutor {
       });
     } catch (err) {
       // Sanitized once, before it reaches the rows, the bus, the logs and the traces.
-      const msg = `Failed to load PR diff: ${errorText(err)}`;
+      const msg = `Failed to load PR diff: ${runLog.errorText(err)}`;
       runLog.error(msg);
       await failAll(msg);
       return;
@@ -157,7 +161,7 @@ export class ReviewRunExecutor {
         // trace) and completed the bus; here we only log at the run level.
         const cancelled = err instanceof RunCancelledError;
         logger?.[cancelled ? 'info' : 'error'](
-          { runId, agent: agent.name, err: errorText(err), durationMs: Date.now() - agentStart },
+          { runId, agent: agent.name, err: runLog.errorText(err), durationMs: Date.now() - agentStart },
           `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
         );
       }
@@ -215,6 +219,7 @@ export class ReviewRunExecutor {
           tokenizer: this.container.tokenizer,
           promptInput,
           sessionId,
+          sanitize: (e) => runLog.errorText(e),
         });
         // Durable before dispatch: a crash after this point leaves the slot on record.
         await this.repo.saveRunTrace(runId, {
@@ -339,14 +344,14 @@ export class ReviewRunExecutor {
       // Sanitized and bounded once, before the row, the bus, the logs and
       // refusal_reason. Classification below reads the error's type and
       // code, never this text.
-      const msg = cancelled ? 'Cancelled by user' : errorText(err);
+      const msg = cancelled ? 'Cancelled by user' : runLog.errorText(err);
       runLog.error(cancelled ? 'Run cancelled by user' : `Run failed: ${msg}`);
       if (cancelled) recorder.cancelOpenStages();
 
       // Did a request reach a provider? A stage the engine prepared was handed
       // to the provider adapter, unless a guard refused it before any HTTP
       // request (the spend gate, or the experiment provider's own refusal).
-      const refusal = preDispatchRefusal(err);
+      const refusal = preDispatchRefusal(err, (e) => runLog.errorText(e));
       const providerRefused = !!slot && slot.attempts.length > 0 && slot.attempts.every((a) => a.dispatch === 'refused');
       const dispatched = recorder.prepared && !refusal && !providerRefused;
 
@@ -356,7 +361,7 @@ export class ReviewRunExecutor {
       let experimentBlock: ExperimentRunTrace | undefined;
       let usage: RunUsage = dispatched ? recorder.totals() : { tokensIn: 0, tokensOut: 0, costUsd: null, state: 'none' };
       if (err instanceof ExperimentRefusedError) {
-        experimentBlock = { ...err.block, refusal_reason: err.block.refusal_reason === null ? null : (sanitizeErrorText(err.block.refusal_reason, ERROR_TEXT_MAX) ?? 'refused') };
+        experimentBlock = { ...err.block, refusal_reason: err.block.refusal_reason === null ? null : runLog.errorText({ message: err.block.refusal_reason }) };
         usage = { tokensIn: 0, tokensOut: 0, costUsd: 0, state: 'none' };
       } else if (slot) {
         experimentBlock = finishBlock(slot, 'failed', msg);
@@ -433,7 +438,7 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     experiment: ExperimentRunContext,
   ): Promise<{ ok: boolean; reason: string | null; block: ExperimentRunTrace }> {
-    const runLog = new RunLogger(this.container.runBus, [], undefined, { prId: pull.id });
+    const runLog = new RunLogger(this.container.runBus, [], undefined, { prId: pull.id }, await configuredSecrets(this.container.secrets));
     const diff = await loadDiff(this.container, this.repo, workspaceId, pull, repo);
     const llm = await this.container.llm(agent.provider as Provider);
     const { promptInput, sessionId } = await this.buildPromptInput(pull, repo, diff, agent, runLog);
@@ -448,6 +453,7 @@ export class ReviewRunExecutor {
         promptInput,
         sessionId,
         preview: true,
+        sanitize: (e) => runLog.errorText(e),
       });
       return { ok: true, reason: null, block: slot.block };
     } catch (err) {
@@ -576,7 +582,7 @@ export class ReviewRunExecutor {
       rows = await this.container.repoIntel.getCallerSignatures(repoId, changedFiles, 10);
     } catch (err) {
       // Never let an enrichment break the run — surface only as a Live Log info.
-      runLog.info(`callers digest: repoIntel failed — ${(err as Error).message}`);
+      runLog.info(`callers digest: repoIntel failed — ${runLog.errorText(err)}`);
       return undefined;
     }
     if (rows.length === 0) return undefined;
@@ -611,7 +617,7 @@ export class ReviewRunExecutor {
       runLog.info(`repo map: ${map.tokens} token(s) attached (cached=${map.cached})`);
       return map.text;
     } catch (err) {
-      runLog.info(`repo map: repoIntel failed — ${(err as Error).message}`);
+      runLog.info(`repo map: repoIntel failed — ${runLog.errorText(err)}`);
       return undefined;
     }
   }
@@ -732,21 +738,9 @@ export class ReviewRunExecutor {
 const PRE_DISPATCH_CODES = new Set(['config_error', 'skill_not_approved', 'experiment_spend_refused']);
 
 /** The refusal an error represents when it stopped the run before dispatch, else null. */
-export function preDispatchRefusal(err: unknown): { code: string; reason: string } | null {
-  if (err instanceof ExperimentRefusedError) return { code: 'experiment_refused', reason: errorText({ message: err.reason }) };
-  if (err instanceof ReviewRefusedError) return { code: err.code, reason: errorText(err) };
-  if (err instanceof AppError && PRE_DISPATCH_CODES.has(err.code)) return { code: err.code, reason: errorText(err) };
+export function preDispatchRefusal(err: unknown, text: (err: unknown) => string = (e) => errorText(e)): { code: string; reason: string } | null {
+  if (err instanceof ExperimentRefusedError) return { code: 'experiment_refused', reason: text({ message: err.reason }) };
+  if (err instanceof ReviewRefusedError) return { code: err.code, reason: text(err) };
+  if (err instanceof AppError && PRE_DISPATCH_CODES.has(err.code)) return { code: err.code, reason: text(err) };
   return null;
-}
-
-/** Bound on an error message persisted in agent_runs.error, a trace or a refusal reason. */
-export const ERROR_TEXT_MAX = 500;
-
-/**
- * An error's message as the run record may show it: credential shapes and
- * control characters redacted, at most ERROR_TEXT_MAX characters. A provider
- * SDK error can carry the upstream's body; this is the only form any sink gets.
- */
-export function errorText(err: unknown): string {
-  return sanitizeErrorText((err as { message?: unknown } | null)?.message, ERROR_TEXT_MAX) ?? 'error without a message';
 }

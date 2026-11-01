@@ -1,6 +1,6 @@
 import type { RunEventKind, RunLogLine } from '@devdigest/shared';
 import type { RunBus } from './sse.js';
-import { sanitizeErrorText } from '@devdigest/reviewer-core';
+import { errorText } from './error-text.js';
 
 /**
  * Structured run logger — the SINGLE sink for everything a run does.
@@ -40,11 +40,18 @@ export class RunLogger {
     private readonly runIds: string[],
     private readonly base?: PinoLike,
     private readonly ctx: Record<string, unknown> = {},
+    /** Configured key values to redact from error text; kept out of `ctx`, so never logged. */
+    private readonly secrets: readonly string[] = [],
   ) {}
+
+  /** Error text for this run's sinks: sanitized, bounded, the configured keys redacted. */
+  errorText(err: unknown): string {
+    return errorText(err, this.secrets);
+  }
 
   /** Narrow to a single run (drops the fan-out), optionally adding context. */
   forRun(runId: string, ctx: Record<string, unknown> = {}): RunLogger {
-    return new RunLogger(this.bus, [runId], this.base, { ...this.ctx, ...ctx });
+    return new RunLogger(this.bus, [runId], this.base, { ...this.ctx, ...ctx }, this.secrets);
   }
 
   /** Publish one event to every target run's stream + mirror to stdout. */
@@ -96,7 +103,7 @@ export class RunLogger {
       return result;
     } catch (err) {
       // The error's text can come from an external service: sanitized and bounded before the stream and the logs.
-      this.error(`${label} failed (${Date.now() - t0}ms): ${sanitizeErrorText((err as Error)?.message, 500) ?? 'error without a message'}`);
+      this.error(`${label} failed (${Date.now() - t0}ms): ${errorText(err, this.secrets)}`);
       throw err;
     }
   }

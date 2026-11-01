@@ -52,7 +52,10 @@ export class FakeExperimentProvider implements LLMProvider {
   async listModels(): Promise<ModelInfo[]> {
     return [];
   }
+  /** When set, the endpoints read fails with it (a provider-controlled message). */
+  endpointsError: Error | null = null;
   async listEndpoints(): Promise<OpenRouterEndpointInfo[]> {
+    if (this.endpointsError) throw this.endpointsError;
     return this.endpoints;
   }
   async complete(): Promise<never> {
