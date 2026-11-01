@@ -60,6 +60,7 @@ export {
 export {
   AttemptRecorder,
   reportedNumber,
+  safeIdentifier,
   type AttemptHandle,
   type AttemptLifecycle,
   type AttemptLifecycleEvent,

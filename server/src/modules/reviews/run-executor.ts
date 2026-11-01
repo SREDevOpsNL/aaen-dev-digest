@@ -1,6 +1,6 @@
 import type { Container } from '../../platform/container.js';
-import type { ExperimentRunTrace, Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
-import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
+import type { ExperimentRunTrace, PromptAssembly, Provider, Review, RunTrace, TraceDispatch, UnifiedDiff } from '@devdigest/shared';
+import { reviewPullRequest, countBlockers, ReviewRefusedError } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
@@ -10,7 +10,8 @@ import { skillsSectionTokens, taskLine, toSkillPromptBlock } from './helpers.js'
 import { loadDiff } from './diff-loader.js';
 import { sha256, type ExperimentRunContext } from '../_shared/experiment.js';
 import { assertSkillsApproved, SKILL_APPROVAL_UNAVAILABLE } from '../_shared/skill-approval.js';
-import { SkillNotApprovedError } from '../../platform/errors.js';
+import { AppError, SkillNotApprovedError } from '../../platform/errors.js';
+import { RunTraceRecorder, assemblyDigest, experimentTotals, partialOutputOf, type RunUsage } from './trace-recorder.js';
 import {
   ExperimentRefusedError,
   attemptTotals,
@@ -101,21 +102,15 @@ export class ReviewRunExecutor {
     // mark the rows failed and persist the buffered log so it survives a reload.
     const failAll = async (msg: string) => {
       for (const { runId, agent } of jobs) {
+        // Nothing was dispatched: the row and the trace say so, in one transaction.
+        const usage: RunUsage = { tokensIn: 0, tokensOut: 0, costUsd: null, state: 'none' };
         await this.repo
-          .completeAgentRun(runId, {
-            status: 'failed',
-            durationMs: 0,
-            tokensIn: 0,
-            tokensOut: 0,
-            costUsd: null,
-            findingsCount: 0,
-            grounding: '0/0 passed',
-            error: msg,
+          .finalizeRunFailure({
+            runId,
+            completion: { status: 'failed', durationMs: 0, ...this.usageColumns(usage), findingsCount: 0, grounding: '0/0 passed', error: msg },
+            trace: this.notDispatchedTrace(runId, pull, agent, 0, usage, { code: 'diff_unavailable', reason: msg }),
           })
-          .catch(() => undefined);
-        await this.repo
-          .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed'))
-          .catch(() => undefined);
+          .catch((err) => logger?.error({ runId, err: (err as Error).message }, 'review: terminal write failed'));
         this.container.runBus.complete(runId);
       }
     };
@@ -185,6 +180,10 @@ export class ReviewRunExecutor {
     // events are already in this run's buffer, so the persisted trace below
     // (built from the buffer) includes them too.
     const runLog = parentLog.forRun(runId, { agent: agent.name });
+    // The request lifecycle (stages, attempts, and the prompts they sent):
+    // held in memory and written to run_traces only, never to the bus or a log.
+    const recorder = new RunTraceRecorder();
+    let skillBlocks: string[] = [];
 
     runLog.info(`Starting review with agent "${agent.name}" (${agent.provider}/${agent.model})`);
 
@@ -200,7 +199,9 @@ export class ReviewRunExecutor {
         { kind: 'tool' },
       );
 
-      const { promptInput, sessionId, skillBlocks } = await this.buildPromptInput(pull, repo, diff, agent, runLog);
+      const built = await this.buildPromptInput(pull, repo, diff, agent, runLog);
+      const { promptInput, sessionId } = built;
+      skillBlocks = built.skillBlocks;
 
       if (experiment) {
         slot = await prepareExperimentSlot({
@@ -215,7 +216,7 @@ export class ReviewRunExecutor {
         });
         // Durable before dispatch: a crash after this point leaves the slot on record.
         await this.repo.saveRunTrace(runId, {
-          ...this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start),
+          ...this.notDispatchedTrace(runId, pull, agent, Date.now() - start, { tokensIn: 0, tokensOut: 0, costUsd: 0, state: 'none' }),
           experiment: slot.block,
         });
         runLog.info(`Experiment slot ${slot.block.slot_id} (${slot.block.condition}): checks passed, dispatching one request`);
@@ -231,6 +232,8 @@ export class ReviewRunExecutor {
         strategy: agent.strategy ?? REVIEW_STRATEGY,
         sessionId,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),
+        onStage: recorder.onStage,
+        onStageAttempt: recorder.onStageAttempt,
         checkCancelled: () => this.checkpoint(runId),
         ...(activeSlot
           ? { experiment: activeSlot.options, onAttempt: (attempt) => activeSlot.attempts.push(attempt) }
@@ -246,12 +249,19 @@ export class ReviewRunExecutor {
       // the timeline colors on, NOT the model's self-reported verdict.
       const blockers = countBlockers(keptFindings, agent.ciFailOn);
 
-      // ---- Persist atomically: run → done, review, findings, reviewed head ---
+      // ---- Persist atomically: run → done, review, findings, reviewed head, trace
       // One transaction guarded on status = 'running'. A cancel that landed
       // after the model returned wins: nothing is written and the run stays
       // cancelled. The reviewed head is marked so the PR list can tell
-      // reviewed / needs-review (head moved) / stale apart.
+      // reviewed / needs-review (head moved) / stale apart. The trace is part
+      // of the same transaction, so a crash cannot leave a done run without it.
       await this.checkpoint(runId);
+      const promptAssembly: PromptAssembly = {
+        ...outcome.assembly,
+        // Same renderer as assemblePrompt, so this is the section the model received.
+        skills_tokens: skillsSectionTokens(skillBlocks, this.container.tokenizer),
+      };
+      const assemblySha256 = assemblyDigest(outcome.assembly).sha256;
       const persisted = await this.repo.finalizeRunSuccess({
         runId,
         completion: {
@@ -279,51 +289,44 @@ export class ReviewRunExecutor {
         findings: keptFindings,
         prId: pull.id,
         headSha: pull.headSha,
+        // ---- Observability: ONE run_traces document, inside the transaction --
+        trace: ({ review, findings }): RunTrace => {
+          runLog.result(`Persisting review ${review.id} with ${findings.length} finding(s) and the run trace`);
+          return {
+            config: this.traceConfig(pull, agent),
+            stats: {
+              duration_ms: durationMs,
+              tokens_in: tokensIn,
+              tokens_out: tokensOut,
+              cost_usd: outcome.providerCostUsd,
+              findings: findings.length,
+              grounding,
+              usage_state: 'measured',
+            },
+            prompt_assembly: promptAssembly,
+            tool_calls: outcome.chunks.map((c) => ({
+              tool: 'review_file',
+              args: c.label,
+              meta: outcome.mode,
+              ms: Math.round(durationMs / Math.max(outcome.chunks.length, 1)),
+            })),
+            raw_output: outcome.raw,
+            memory_pulled: [],
+            specs_read: [],
+            // Persisted log = the run's FULL event buffer (incl. shared pre-work:
+            // diff load + intent), not just events recorded inside this method.
+            log: runLog.logFor(runId),
+            ...(slot ? { experiment: finishBlock(slot, 'completed') } : {}),
+            dispatch: { state: 'completed' },
+            prompt_assembly_source: 'dispatched_request',
+            prompt_assembly_sha256: assemblySha256,
+            stages: recorder.traceStages(assemblySha256),
+          };
+        },
       });
       if (!persisted.applied) throw new RunCancelledError();
       const { review, findings: findingRows } = persisted;
-      runLog.result(`Persisted review ${review.id} with ${findingRows.length} finding(s)`);
-
-      // ---- Observability: ONE run_traces document ---------------------------
-
-      const trace: RunTrace = {
-        config: {
-          agent: agent.name,
-          version: String(agent.version),
-          provider: agent.provider,
-          model: agent.model,
-          pr: pull.number,
-          source: 'local',
-        },
-        stats: {
-          duration_ms: durationMs,
-          tokens_in: tokensIn,
-          tokens_out: tokensOut,
-          cost_usd: outcome.providerCostUsd,
-          findings: findingRows.length,
-          grounding,
-        },
-        prompt_assembly: {
-          ...outcome.assembly,
-          // Same renderer as assemblePrompt, so this is the section the model received.
-          skills_tokens: skillsSectionTokens(skillBlocks, this.container.tokenizer),
-        },
-        tool_calls: outcome.chunks.map((c) => ({
-          tool: 'review_file',
-          args: c.label,
-          meta: outcome.mode,
-          ms: Math.round(durationMs / Math.max(outcome.chunks.length, 1)),
-        })),
-        raw_output: outcome.raw,
-        memory_pulled: [],
-        specs_read: [],
-        // Persisted log = the run's FULL event buffer (incl. shared pre-work:
-        // diff load + intent), not just events recorded inside this method.
-        log: runLog.logFor(runId),
-        ...(slot ? { experiment: finishBlock(slot, 'completed') } : {}),
-      };
       runLog.info('Run complete; trace persisted');
-      await this.repo.saveRunTrace(runId, trace);
       this.container.runBus.complete(runId);
 
       return { review, findings: findingRows, grounding, raw: outcome.review };
@@ -334,37 +337,73 @@ export class ReviewRunExecutor {
       const status = cancelled ? 'cancelled' : 'failed';
       const msg = cancelled ? 'Cancelled by user' : (err as Error).message;
       runLog.error(cancelled ? 'Run cancelled by user' : `Run failed: ${msg}`);
+      if (cancelled) recorder.cancelOpenStages();
+
+      // Did a request reach a provider? A stage the engine prepared was handed
+      // to the provider adapter, unless a guard refused it before any HTTP
+      // request (the spend gate, or the experiment provider's own refusal).
+      const refusal = preDispatchRefusal(err);
+      const providerRefused = !!slot && slot.attempts.length > 0 && slot.attempts.every((a) => a.dispatch === 'refused');
+      const dispatched = recorder.prepared && !refusal && !providerRefused;
+
+      // Usage: ONE totals object for the agent_runs row and the trace stats.
       // HW2 experiment: a refusal cost nothing; a dispatched failure records
       // only what the provider reported, never a synthesized zero.
       let experimentBlock: ExperimentRunTrace | undefined;
-      let usage: { tokensIn: number | null; tokensOut: number | null; costUsd: number | null } = {
-        tokensIn: 0,
-        tokensOut: 0,
-        costUsd: null,
-      };
+      let usage: RunUsage = dispatched ? recorder.totals() : { tokensIn: 0, tokensOut: 0, costUsd: null, state: 'none' };
       if (err instanceof ExperimentRefusedError) {
         experimentBlock = err.block;
-        usage = { tokensIn: 0, tokensOut: 0, costUsd: 0 };
+        usage = { tokensIn: 0, tokensOut: 0, costUsd: 0, state: 'none' };
       } else if (slot) {
         experimentBlock = finishBlock(slot, 'failed', msg);
-        usage = attemptTotals(slot.attempts);
+        usage = experimentTotals(slot.attempts, dispatched, attemptTotals(slot.attempts));
       }
+
+      const durationMs = Date.now() - start;
+      let trace: RunTrace;
+      const last = dispatched ? recorder.lastStage() : undefined;
+      if (last) {
+        const assemblySha256 = assemblyDigest(last.assembly).sha256;
+        trace = {
+          config: this.traceConfig(pull, agent),
+          stats: { duration_ms: durationMs, ...this.usageStats(usage), findings: 0, grounding: '0/0 passed' },
+          // The assembly the failing (last prepared) stage passed to the provider; never recomputed.
+          prompt_assembly: { ...last.assembly, skills_tokens: skillsSectionTokens(skillBlocks, this.container.tokenizer) },
+          prompt_assembly_source: 'dispatched_request',
+          prompt_assembly_sha256: assemblySha256,
+          dispatch: { state: 'dispatched' },
+          stages: recorder.traceStages(assemblySha256),
+          // Truncated or schema-invalid output: kept privately here, never parsed into findings.
+          partial_output: partialOutputOf(err, last.stage.stage_id),
+          tool_calls: [],
+          raw_output: '',
+          memory_pulled: [],
+          specs_read: [],
+          log: runLog.logFor(runId),
+        };
+      } else {
+        trace = this.notDispatchedTrace(
+          runId,
+          pull,
+          agent,
+          durationMs,
+          usage,
+          cancelled ? null : (refusal ?? { code: providerRefused ? 'experiment_request_refused' : 'pre_dispatch_error', reason: msg }),
+        );
+      }
+      if (experimentBlock) trace.experiment = experimentBlock;
+
+      // The terminal row and the trace commit together. If the transaction
+      // fails, the run stays `running` until the boot reaper marks it.
       await this.repo
-        .completeAgentRun(runId, {
-          status,
-          durationMs: Date.now() - start,
-          ...usage,
-          findingsCount: 0,
-          grounding: '0/0 passed',
-          error: msg,
+        .finalizeRunFailure({
+          runId,
+          completion: { status, durationMs, ...this.usageColumns(usage), findingsCount: 0, grounding: '0/0 passed', error: msg },
+          trace,
         })
-        .catch(() => undefined);
-      await this.repo
-        .saveRunTrace(runId, {
-          ...this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start),
-          ...(experimentBlock ? { experiment: experimentBlock } : {}),
-        })
-        .catch(() => undefined);
+        .catch((persistErr) =>
+          runLog.serverError('terminal write failed; the boot reaper will mark the run', { err: (persistErr as Error).message }),
+        );
       this.container.runBus.complete(runId);
       throw err;
     }
@@ -590,36 +629,47 @@ export class ReviewRunExecutor {
     }
   }
 
+  private traceConfig(pull: PullRow, agent: AgentRow): RunTrace['config'] {
+    return {
+      agent: agent.name,
+      version: String(agent.version),
+      provider: agent.provider,
+      model: agent.model,
+      pr: pull.number,
+      source: 'local',
+    };
+  }
+
+  /** agent_runs usage columns from the run totals (unknown stays null). */
+  private usageColumns(usage: RunUsage) {
+    return { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, costUsd: usage.costUsd };
+  }
+
+  /** Trace stats usage from the SAME run totals the row gets. */
+  private usageStats(usage: RunUsage) {
+    return { tokens_in: usage.tokensIn, tokens_out: usage.tokensOut, cost_usd: usage.costUsd, usage_state: usage.state };
+  }
+
   /**
-   * A minimal RunTrace whose `log` is the run's full SSE buffer — persisted on
-   * failure/cancel (and pre-work failures) so the events (and WHY it failed)
-   * survive a reload, not just the in-memory stream.
+   * The trace of a run that sent nothing: its `log` is the run's full SSE
+   * buffer (so WHY it stopped survives a reload) and its prompt is the agent's
+   * configuration only, labelled as such. No assembly is invented.
    */
-  private traceFromBuffer(
+  private notDispatchedTrace(
     runId: string,
     pull: PullRow,
     agent: AgentRow,
-    grounding: string,
-    durationMs = 0,
+    durationMs: number,
+    usage: RunUsage,
+    refusal: NonNullable<TraceDispatch['refusal']> | null = null,
   ): RunTrace {
     return {
-      config: {
-        agent: agent.name,
-        version: String(agent.version),
-        provider: agent.provider,
-        model: agent.model,
-        pr: pull.number,
-        source: 'local',
-      },
-      stats: {
-        duration_ms: durationMs,
-        tokens_in: 0,
-        tokens_out: 0,
-        cost_usd: null,
-        findings: 0,
-        grounding,
-      },
+      config: this.traceConfig(pull, agent),
+      stats: { duration_ms: durationMs, ...this.usageStats(usage), findings: 0, grounding: '0/0 passed' },
       prompt_assembly: { system: agent.systemPrompt, skills: null, memory: null, specs: null, user: '' },
+      prompt_assembly_source: 'agent_config',
+      dispatch: { state: 'not_dispatched', ...(refusal ? { refusal } : {}) },
+      stages: [],
       tool_calls: [],
       raw_output: '',
       memory_pulled: [],
@@ -627,4 +677,15 @@ export class ReviewRunExecutor {
       log: this.container.runBus.buffer(runId).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg })),
     };
   }
+}
+
+/** Errors that stop a run before any provider request, by their stable code. */
+const PRE_DISPATCH_CODES = new Set(['config_error', 'skill_not_approved', 'experiment_spend_refused']);
+
+/** The refusal an error represents when it stopped the run before dispatch, else null. */
+function preDispatchRefusal(err: unknown): { code: string; reason: string } | null {
+  if (err instanceof ExperimentRefusedError) return { code: 'experiment_refused', reason: err.reason };
+  if (err instanceof ReviewRefusedError) return { code: err.code, reason: err.message };
+  if (err instanceof AppError && PRE_DISPATCH_CODES.has(err.code)) return { code: err.code, reason: err.message };
+  return null;
 }

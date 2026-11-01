@@ -33,6 +33,7 @@ import { Ledger } from './ledger.js';
 import { KeyUsageLog, keyUsageVerdict, readKeyUsage, settleKeyUsage } from './key-usage.js';
 import { EXPERIMENT_FIXTURE, buildManifest, exactlyOne, fixtureDiffSha, frozenSkillProblems, manifestFingerprint, readFrozen, verifyPreregistration, type Manifest, type SkillApprovalState } from './manifest.js';
 import { buildReport, renderReport, type SlotRunData } from './report.js';
+import type { PromptEvidence } from '../../modules/_shared/trace-evidence.js';
 import type { ExpectedRule, FindingLike } from './rules.js';
 import { reconcile, runSchedule, type SlotRun } from './runner.js';
 import { buildSchedule, slotId, type Phase, type Slot } from './schedule.js';
@@ -918,6 +919,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
             experiment: Record<string, unknown> | null;
             config: { agent?: string; pr?: number | null } | null;
             skills_block: string | null;
+            prompt_evidence?: PromptEvidence;
           }>;
         }>(`/experiments/slots/${slot.slot_id}`);
         const found = lookup.runs[0];
@@ -932,6 +934,7 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
           experiment: found.experiment,
           config: found.config,
           skills_block: found.skills_block,
+          ...(found.prompt_evidence ? { prompt_evidence: found.prompt_evidence } : {}),
           findings: reviews.find((r) => r.run_id === found.run_id)?.findings ?? [],
         });
       }

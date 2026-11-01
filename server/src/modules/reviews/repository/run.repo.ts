@@ -2,6 +2,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Db, DbOrTx } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
+import { reapedTrace } from '../reaped-trace.js';
 
 // ---- in-flight / history --------------------------------------------------
 
@@ -132,14 +133,49 @@ export async function cancelRunIfRunning(
 }
 
 /** On boot: any run still 'running' is orphaned (its process died / restarted),
- *  so mark it failed. Prevents permanently stuck "running" runs in the UI. */
-export async function reapStaleRunningRuns(db: Db): Promise<number> {
-  const rows = await db
-    .update(t.agentRuns)
-    .set({ status: 'failed' })
-    .where(eq(t.agentRuns.status, 'running'))
-    .returning({ id: t.agentRuns.id });
-  return rows.length;
+ *  so mark it failed. Prevents permanently stuck "running" runs in the UI.
+ *  Each reaped run's trace is labelled `persistence: reaped` in the same
+ *  transaction (see `reapedTrace`): a partial trace is kept, never replaced,
+ *  and the row's persisted tokens and cost are left as they are. */
+export async function reapStaleRunningRuns(db: Db, now: Date = new Date()): Promise<number> {
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(t.agentRuns)
+      .set({ status: 'failed' })
+      .where(eq(t.agentRuns.status, 'running'))
+      .returning({
+        id: t.agentRuns.id,
+        agentId: t.agentRuns.agentId,
+        provider: t.agentRuns.provider,
+        model: t.agentRuns.model,
+        durationMs: t.agentRuns.durationMs,
+        tokensIn: t.agentRuns.tokensIn,
+        tokensOut: t.agentRuns.tokensOut,
+        costUsd: t.agentRuns.costUsd,
+      });
+    if (rows.length === 0) return 0;
+    const ids = rows.map((r) => r.id);
+    const existing = new Map(
+      (await tx.select({ runId: t.runTraces.runId, trace: t.runTraces.trace }).from(t.runTraces).where(inArray(t.runTraces.runId, ids))).map(
+        (r) => [r.runId, r.trace] as const,
+      ),
+    );
+    const agentIds = rows.map((r) => r.agentId).filter((id): id is string => id !== null);
+    const names = new Map(
+      agentIds.length > 0
+        ? (await tx.select({ id: t.agents.id, name: t.agents.name }).from(t.agents).where(inArray(t.agents.id, agentIds))).map((a) => [a.id, a.name] as const)
+        : [],
+    );
+    for (const row of rows) {
+      const trace = reapedTrace(
+        existing.get(row.id),
+        { ...row, agentName: row.agentId ? (names.get(row.agentId) ?? null) : null },
+        now,
+      );
+      await saveRunTrace(tx, row.id, trace);
+    }
+    return rows.length;
+  });
 }
 
 // ---- observability: agent_runs + run_traces -------------------------------
@@ -227,7 +263,7 @@ export async function isRunCancelled(db: Db, runId: string): Promise<boolean> {
 }
 
 /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */
-export async function saveRunTrace(db: Db, runId: string, trace: RunTrace): Promise<void> {
+export async function saveRunTrace(db: DbOrTx, runId: string, trace: RunTrace): Promise<void> {
   await db
     .insert(t.runTraces)
     .values({ runId, trace })

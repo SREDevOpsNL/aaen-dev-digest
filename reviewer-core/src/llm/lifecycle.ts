@@ -115,11 +115,37 @@ export class AttemptRecorder {
     emit({ phase: 'submitted' });
     return {
       attempt,
-      received: (patch) => emit({ phase: 'response_received', ...patch }),
+      received: (patch) =>
+        emit({
+          phase: 'response_received',
+          ...patch,
+          response_id: safeIdentifier(patch.response_id),
+          ...('finish_reason' in patch ? { finish_reason: safeIdentifier(patch.finish_reason) } : {}),
+        }),
       verified: (usage) => emit({ phase: 'usage_verified', usage }),
-      failed: (outcome, patch = {}) => emit({ phase: 'failed', outcome, ...patch }),
+      failed: (outcome, patch = {}) =>
+        emit({
+          phase: 'failed',
+          outcome,
+          ...patch,
+          ...('response_id' in patch ? { response_id: safeIdentifier(patch.response_id) } : {}),
+          ...('finish_reason' in patch ? { finish_reason: safeIdentifier(patch.finish_reason) } : {}),
+        }),
     };
   }
+}
+
+/**
+ * A response id or finish reason as persisted evidence: kept only when it is
+ * a short, plain token that does not look like a credential; otherwise null.
+ * (An HTTP 200 error body can put arbitrary text, a key included, where an
+ * id belongs.)
+ */
+export function safeIdentifier(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  if (value.length === 0 || value.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(value)) return null;
+  if (/\bsk-[A-Za-z0-9_-]{8,}/i.test(value) || /bearer/i.test(value) || /^sk-/i.test(value)) return null;
+  return value;
 }
 
 /** A finite, non-negative number, else null (a reported usage field that is absent or malformed is unknown). */

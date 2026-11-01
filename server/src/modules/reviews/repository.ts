@@ -1,4 +1,4 @@
-import type { Db } from '../../db/client.js';
+import type { Db, DbOrTx } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { Finding, Intent, RunSummary, RunTrace } from '@devdigest/shared';
 
@@ -182,6 +182,8 @@ export class ReviewRepository {
     findings: Finding[];
     prId: string;
     headSha: string;
+    /** The run's final trace, built from the persisted rows; upserted in the same transaction. */
+    trace: (persisted: { review: ReviewRow; findings: FindingRow[] }) => RunTrace;
   }): Promise<{ applied: false } | { applied: true; review: ReviewRow; findings: FindingRow[] }> {
     return this.db.transaction(async (tx) => {
       const applied = await runRepo.completeAgentRun(tx, input.runId, {
@@ -192,8 +194,30 @@ export class ReviewRepository {
       const review = await reviewRepo.insertReview(tx, input.review);
       const findings = await reviewRepo.insertFindings(tx, review.id, input.findings);
       await pullRepo.markReviewed(tx, input.prId, input.headSha);
+      await this.saveRunTraceIn(tx, input.runId, input.trace({ review, findings }));
       return { applied: true, review, findings } as const;
     });
+  }
+
+  /**
+   * Finish a failed or cancelled run atomically: the guarded terminal
+   * transition and the trace upsert in one transaction, so a crash can never
+   * leave a terminal row without its trace (or a trace claiming a state the
+   * row does not have). The trace is written even when the transition does
+   * not apply (the run was already cancelled): the cancelled status stands,
+   * and the trace records what the run did.
+   */
+  async finalizeRunFailure(input: { runId: string; completion: runRepo.RunCompletion; trace: RunTrace }): Promise<{ applied: boolean }> {
+    return this.db.transaction(async (tx) => {
+      const applied = await runRepo.completeAgentRun(tx, input.runId, input.completion);
+      await this.saveRunTraceIn(tx, input.runId, input.trace);
+      return { applied };
+    });
+  }
+
+  /** The trace upsert used inside the terminal transactions (one seam for tests). */
+  saveRunTraceIn(tx: DbOrTx, runId: string, trace: RunTrace): Promise<void> {
+    return runRepo.saveRunTrace(tx, runId, trace);
   }
 
   /** Record the head SHA a review ran against (PR-list freshness derivation). */

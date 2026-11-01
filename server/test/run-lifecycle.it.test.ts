@@ -201,11 +201,11 @@ d('run lifecycle: cancellation and terminal states (Testcontainers pg)', () => {
     await app.close();
   });
 
-  it('on success, persistence commits before the trace is saved and before the stream completes', async () => {
+  it('on success, the trace is saved inside the persistence transaction, which commits before the stream completes', async () => {
     const { app, llm, pr, agents, service } = await setup();
     const order: string[] = [];
     const finalize = ReviewRepository.prototype.finalizeRunSuccess;
-    const saveTrace = ReviewRepository.prototype.saveRunTrace;
+    const saveTrace = ReviewRepository.prototype.saveRunTraceIn;
     const finalizeSpy = vi
       .spyOn(ReviewRepository.prototype, 'finalizeRunSuccess')
       .mockImplementation(async function (this: ReviewRepository, ...args) {
@@ -214,7 +214,7 @@ d('run lifecycle: cancellation and terminal states (Testcontainers pg)', () => {
         return result;
       });
     const traceSpy = vi
-      .spyOn(ReviewRepository.prototype, 'saveRunTrace')
+      .spyOn(ReviewRepository.prototype, 'saveRunTraceIn')
       .mockImplementation(async function (this: ReviewRepository, ...args) {
         await saveTrace.apply(this, args);
         order.push('trace');
@@ -230,7 +230,8 @@ d('run lifecycle: cancellation and terminal states (Testcontainers pg)', () => {
       llm.gate.resolve();
       await vi.waitFor(() => expect(order).toContain('complete'));
 
-      expect(order).toEqual(['finalize', 'trace', 'complete']);
+      // The trace upsert runs inside finalizeRunSuccess (before it resolves).
+      expect(order).toEqual(['trace', 'finalize', 'complete']);
       const row = await runRow(runs[0]!.run_id);
       expect(row.status).toBe('done');
       expect(await reviewsForRun(runs[0]!.run_id)).toHaveLength(1);

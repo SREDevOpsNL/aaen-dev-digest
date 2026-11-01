@@ -1,6 +1,7 @@
 import { evaluateSlot, fingerprintsAgree, type Eligibility, type FrozenExpectations } from './eligibility.js';
 import type { SlotRecord } from './ledger.js';
 import { detection, type ExpectedRule, type FindingLike } from './rules.js';
+import { promptNotRecordedReason, skillsRecorded, type PromptEvidence } from '../../modules/_shared/trace-evidence.js';
 
 /**
  * The experiment report, built from data only (the CLI fetches it). Every
@@ -24,6 +25,12 @@ export interface SlotRunData {
   config: { agent?: string; pr?: number | null } | null;
   /** The persisted Skills section the model received (null = none). */
   skills_block: string | null;
+  /**
+   * What the trace proves about its prompt (the slot view's read-time
+   * classification). Absent = a server that predates it: the Skills section
+   * is read as recorded, as before.
+   */
+  prompt_evidence?: PromptEvidence;
   findings: FindingLike[];
 }
 
@@ -52,7 +59,13 @@ export function executionIssues(slot: ScheduledSlot, run: SlotRunData, expected:
   check('reviewer', run.config?.agent, fixture.reviewer);
   check('fixture PR', run.config?.pr, fixture.prNumber);
 
-  // The Skills section actually sent, by structure and by fingerprint.
+  // The Skills section actually sent, by structure and by fingerprint. A
+  // trace that did not record the prompt is not evidence of "0 skills": its
+  // Skills checks are skipped, and `promptIssues` keeps the slot uncounted.
+  if (run.prompt_evidence && !skillsRecorded(run.prompt_evidence)) {
+    check('skill_fingerprint', block.skill_fingerprint, expected.skillFingerprint(slot.experiment, slot.condition));
+    return issues;
+  }
   const skillCount = (run.skills_block?.match(/<untrusted source="skill-\d+">/g) ?? []).length;
   if (slot.condition === 'without' && (run.skills_block ?? '') !== '') {
     issues.push(`a "without" slot sent ${skillCount} skill(s) in its Skills section`);
@@ -65,9 +78,21 @@ export function executionIssues(slot: ScheduledSlot, run: SlotRunData, expected:
   return issues;
 }
 
+/**
+ * Missing evidence (not wrong execution): the trace cannot show which prompt
+ * was sent. The slot is not counted, and the experiment is not marked invalid
+ * for it.
+ */
+export function promptIssues(run: SlotRunData): string[] {
+  const reason = run.prompt_evidence ? promptNotRecordedReason(run.prompt_evidence) : null;
+  return reason ? [reason] : [];
+}
+
 export interface SlotRow {
   /** Disagreements between the persisted trace and this slot's preregistered execution. */
   execution_issues: string[];
+  /** Evidence the trace lacks about the prompt it sent (see `promptIssues`). */
+  prompt_issues: string[];
   slot_id: string;
   experiment: string;
   condition: 'with' | 'without';
@@ -116,9 +141,11 @@ export function buildReport(input: {
         finding_titles: [],
         matched: [],
         execution_issues: [],
+        prompt_issues: [],
       };
     }
     const issues = executionIssues(slot, run, input.execution);
+    const missing = promptIssues(run);
     const eligibility = evaluateSlot(run, input.expectations(slot.experiment));
     const fingerprintOk = run.experiment.non_skill_fingerprint === input.frozenNonSkill[slot.experiment];
     const rule = input.rules[slot.experiment];
@@ -133,8 +160,9 @@ export function buildReport(input: {
       cost_usd: run.cost_usd,
       eligibility,
       fingerprint_ok: fingerprintOk,
-      counted: eligibility.eligible && fingerprintOk && issues.length === 0,
+      counted: eligibility.eligible && fingerprintOk && issues.length === 0 && missing.length === 0,
       execution_issues: issues,
+      prompt_issues: missing,
       detected: found.detected,
       finding_titles: run.findings.map((f) => f.title),
       matched,
@@ -212,7 +240,7 @@ export function renderReport(report: { rows: SlotRow[]; summaries: ExperimentSum
         r.counted
           ? '—'
           : r.eligibility
-            ? [...r.execution_issues, ...r.eligibility.reasons, ...(r.fingerprint_ok ? [] : ['non-Skill fingerprint differs from the frozen one'])].join('; ') || '—'
+            ? [...r.prompt_issues, ...r.execution_issues, ...r.eligibility.reasons, ...(r.fingerprint_ok ? [] : ['non-Skill fingerprint differs from the frozen one'])].join('; ') || '—'
             : r.state,
       ]
         .map((v) => cell(String(v)))

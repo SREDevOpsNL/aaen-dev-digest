@@ -19,6 +19,7 @@ import {
   type ExperimentRunRequest,
 } from '../_shared/experiment.js';
 import { ExperimentsRepository } from './repository.js';
+import { promptEvidence } from '../_shared/trace-evidence.js';
 
 /** The demo repository the HW2 fixtures live in. */
 const FIXTURE_REPO = { owner: 'acme', name: 'payments-api', fullName: 'acme/payments-api' };
@@ -376,6 +377,8 @@ export class ExperimentsService {
         // What actually ran: the reviewer and PR, and the Skills section the model received.
         config: (run.trace as { config?: { agent?: string; pr?: number | null } }).config ?? null,
         skills_block: (run.trace as { prompt_assembly?: { skills?: string | null } }).prompt_assembly?.skills ?? null,
+        // What the trace proves about that prompt, derived now (the stored trace is never rewritten).
+        prompt_evidence: promptEvidence(run.trace),
       })),
     };
   }
