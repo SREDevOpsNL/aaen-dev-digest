@@ -126,3 +126,23 @@ export function fingerprintsAgree(blocks: Array<{ non_skill_fingerprint?: string
   const values = new Set(blocks.map((b) => b.non_skill_fingerprint ?? null));
   return values.size === 1 && !values.has(null);
 }
+
+/** The two reasons a truncated slot is ineligible by construction; any other reason is a real gap. */
+const TRUNCATION_REASONS = new Set(['dispatch_state failed', 'attempt outcome truncated']);
+
+/**
+ * Whether a settled slot is a provenance-checked truncation (one dispatched
+ * attempt whose outcome is `truncated`, `finish_reason=length`), and what
+ * else is wrong with it. `problems` is empty only when everything the strict
+ * eligibility check asks for holds, apart from the truncation itself: the
+ * frozen diff, one attempt, the frozen provider and served model, a proven
+ * single upstream attempt.
+ */
+export function truncationCheck(trace: { experiment?: unknown } | null, frozen: FrozenExpectations): { truncated: boolean; problems: string[] } {
+  const experiment = (trace?.experiment ?? null) as null | { dispatch_state?: string; attempts?: Attempt[] };
+  const attempts = experiment?.attempts ?? [];
+  const truncated = experiment?.dispatch_state === 'failed' && attempts.length === 1 &&
+    attempts[0]!.dispatch === 'dispatched' && attempts[0]!.outcome === 'truncated';
+  if (!truncated) return { truncated: false, problems: [] };
+  return { truncated: true, problems: evaluateSlot(trace, frozen).reasons.filter((reason) => !TRUNCATION_REASONS.has(reason)) };
+}

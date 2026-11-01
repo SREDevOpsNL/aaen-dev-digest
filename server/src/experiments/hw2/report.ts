@@ -1,6 +1,7 @@
-import { evaluateSlot, fingerprintsAgree, type Eligibility, type FrozenExpectations } from './eligibility.js';
+import { evaluateSlot, fingerprintsAgree, truncationCheck, type Eligibility, type FrozenExpectations } from './eligibility.js';
 import type { SlotRecord } from './ledger.js';
 import { detection, type ExpectedRule, type FindingLike } from './rules.js';
+import type { StudySemantics } from './manifest.js';
 import { promptNotRecordedReason, skillsRecorded, type PromptEvidence } from '../../modules/_shared/trace-evidence.js';
 
 /**
@@ -105,7 +106,20 @@ export interface SlotRow {
   detected: boolean | null;
   finding_titles: string[];
   matched: Array<{ title: string; file: string; lines: string }>;
+  /**
+   * Version 4 rows only: a truncated slot imputed against the hypothesis
+   * (with → no, without → yes). It is never counted and never adjudicated.
+   */
+  imputed?: Imputation | null;
 }
+
+export interface Imputation {
+  verdict: 'yes' | 'no';
+  label: 'imputed (truncated)';
+}
+
+/** The conservative imputation: a truncation can never help a pass. */
+export const imputedVerdict = (condition: 'with' | 'without'): Imputation => ({ verdict: condition === 'with' ? 'no' : 'yes', label: 'imputed (truncated)' });
 
 export interface ExperimentSummary {
   experiment: string;
@@ -114,6 +128,22 @@ export interface ExperimentSummary {
   fingerprints_agree: boolean;
   outcome: 'success' | 'negative' | 'inconclusive' | 'incomplete' | 'invalid';
   note: string | null;
+  /** Version 4 only: truncated slots imputed per condition. */
+  imputed?: { with: number; without: number };
+}
+
+/**
+ * Under a frozen `continue-impute` rule: whether a slot is a truncation the
+ * runner accepted (its terminal ledger event says `continue`, with a known
+ * cost) and whose trace still shows a sound truncation (frozen fingerprint,
+ * the slot it was scheduled as, its prompt recorded, full provenance).
+ */
+function imputable(record: SlotRecord | null, run: SlotRunData, issues: string[], missing: string[], fingerprintOk: boolean, expectations: FrozenExpectations): boolean {
+  if (!record || record.state !== 'failed' || record.cost_usd === null) return false;
+  const terminal = record.events.find((event) => event.state === record.state);
+  if (terminal?.detail?.truncation !== 'continue' || terminal.detail.fingerprint_mismatch !== false) return false;
+  const check = truncationCheck(run, expectations);
+  return check.truncated && check.problems.length === 0 && fingerprintOk && issues.length === 0 && missing.length === 0;
 }
 
 export function buildReport(input: {
@@ -124,7 +154,10 @@ export function buildReport(input: {
   frozenNonSkill: Record<string, string>;
   expectations: (experiment: string) => FrozenExpectations;
   execution: ExpectedExecution;
+  /** The frozen manifest's semantics; absent = version 3, unchanged. */
+  semantics?: StudySemantics;
 }): { rows: SlotRow[]; summaries: ExperimentSummary[] } {
+  const imputes = input.semantics?.version === 4 && input.semantics.truncation === 'continue-impute';
   const rows: SlotRow[] = input.schedule.map((slot) => {
     const record = input.ledger.get(slot.slot_id) ?? null;
     const run = input.runs.get(slot.slot_id) ?? null;
@@ -142,6 +175,7 @@ export function buildReport(input: {
         matched: [],
         execution_issues: [],
         prompt_issues: [],
+        ...(imputes ? { imputed: null } : {}),
       };
     }
     const issues = executionIssues(slot, run, input.execution);
@@ -153,7 +187,9 @@ export function buildReport(input: {
     const matched = run.findings
       .filter((f) => found.matched.includes(f.title))
       .map((f) => ({ title: f.title, file: f.file, lines: `${f.start_line}-${f.end_line}` }));
+    const imputation = imputes && imputable(record, run, issues, missing, fingerprintOk, input.expectations(slot.experiment)) ? imputedVerdict(slot.condition) : null;
     return {
+      ...(imputes ? { imputed: imputation } : {}),
       ...slot,
       state: record?.state ?? 'unknown',
       run_id: run.run_id,
@@ -178,12 +214,14 @@ export function buildReport(input: {
     };
     const withT = tally('with');
     const withoutT = tally('without');
+    const imputedOf = (condition: 'with' | 'without') => rows.filter((r) => r.experiment === experiment && r.condition === condition && r.imputed).length;
+    const extra = imputes ? { imputed: { with: imputedOf('with'), without: imputedOf('without') } } : {};
     // Operational check: every counted trial reproduces one non-Skill fingerprint, the frozen one.
     const blocks = counted.map((r) => ({ non_skill_fingerprint: input.runs.get(r.slot_id)?.experiment.non_skill_fingerprint ?? null }));
     const agree = counted.length === 0 || (fingerprintsAgree(blocks) && blocks[0]!.non_skill_fingerprint === input.frozenNonSkill[experiment]);
     const mismatched = rows.filter((r) => r.experiment === experiment && r.eligibility?.eligible && !r.fingerprint_ok).length;
     if (!agree || mismatched > 0) {
-      return { experiment, with: withT, without: withoutT, fingerprints_agree: false, outcome: 'invalid', note: `${mismatched} otherwise eligible slot(s) did not reproduce the frozen non-Skill fingerprint` };
+      return { experiment, with: withT, without: withoutT, fingerprints_agree: false, outcome: 'invalid', note: `${mismatched} otherwise eligible slot(s) did not reproduce the frozen non-Skill fingerprint`, ...extra };
     }
     // A slot that did not execute what was scheduled breaks the comparison itself.
     const wrong = rows.filter((r) => r.experiment === experiment && r.execution_issues.length > 0);
@@ -195,6 +233,7 @@ export function buildReport(input: {
         fingerprints_agree: true,
         outcome: 'invalid',
         note: `${wrong.length} slot(s) did not execute their preregistered slot, condition or Skills: ${wrong.map((r) => `${r.slot_id} (${r.execution_issues[0]})`).join('; ')}`,
+        ...extra,
       };
     }
     // Anchored regexes are a provisional screen, not technical adjudication.
@@ -205,7 +244,10 @@ export function buildReport(input: {
       without: withoutT,
       fingerprints_agree: true,
       outcome: 'incomplete',
-      note: 'Anchored regex screening is non-authoritative; sealed condition-blinded technical adjudication is required',
+      note: imputes && (extra.imputed!.with + extra.imputed!.without) > 0
+        ? `Anchored regex screening is non-authoritative; sealed condition-blinded technical adjudication is required; imputed (truncated): ${extra.imputed!.with} with as no, ${extra.imputed!.without} without as yes`
+        : 'Anchored regex screening is non-authoritative; sealed condition-blinded technical adjudication is required',
+      ...extra,
     };
   });
   return { rows, summaries };
@@ -230,7 +272,7 @@ export function renderReport(report: { rows: SlotRow[]; summaries: ExperimentSum
         r.experiment,
         r.condition,
         r.state,
-        r.counted ? 'yes' : 'no',
+        r.imputed ? `no; ${r.imputed.label}: ${r.imputed.verdict}` : r.counted ? 'yes' : 'no',
         r.eligibility ? `${r.eligibility.provenance} (${r.eligibility.sources.join(', ') || '—'})` : '—',
         r.run_id ? (r.fingerprint_ok ? 'frozen' : 'MISMATCH') : '—',
         r.detected === null ? '—' : r.detected ? 'yes' : 'no',

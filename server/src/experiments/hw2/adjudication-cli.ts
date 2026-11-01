@@ -13,6 +13,8 @@
  * The directory layout is the audit record:
  *   packet.json          shareable with adjudicators (no condition, slot, run, Skill or cost)
  *   private/mapping.json case → slot/condition; never given to adjudicators
+ *   private/originals.json  packet version 2 only: the unredacted finding text
+ *                        (mode 0600, digest in the mapping); never published
  *   digests.json         packet and mapping SHA-256, published before judging
  *   private/judgments/<name>.json, private/reconciliation.json
  *                        sealed judgments stay private until the reveal, so the
@@ -32,15 +34,19 @@ import {
   digest,
   judgmentErrors,
   preparePacket,
+  preparePacketV2,
   reveal,
   sealJudgment,
   type AdjudicationDesign,
   type BlindPacket,
   type CaseMapping,
   type Judgment,
+  type Originals,
   type RevealResult,
 } from './adjudication.js';
+import { studySemantics } from './manifest.js';
 import type { SlotRow, SlotRunData } from './report.js';
+import type { ExpectedRule } from './rules.js';
 
 export interface AdjudicationInput {
   /** The frozen pre-registration's schedule and manifest fingerprint. */
@@ -48,6 +54,14 @@ export interface AdjudicationInput {
   rows: SlotRow[];
   runs: Record<string, SlotRunData | null>;
   skill_names: string[];
+  /**
+   * Written by `cli.ts report` for a version 4 manifest only: its version and
+   * study block select packet version 2 and redaction r1, and its anchored
+   * rules feed the evidence-changed check. Absent: version 3, packet v1.
+   */
+  manifest_version?: number;
+  study?: unknown;
+  screen_rules?: Record<string, ExpectedRule>;
 }
 
 interface Digests {
@@ -99,6 +113,7 @@ class Record_ {
   path = (...parts: string[]) => join(this.dir, ...parts);
   packet = () => readJson<BlindPacket>(this.path('packet.json'));
   mapping = () => readJson<CaseMapping>(this.path('private', 'mapping.json'));
+  originals = () => readJson<Originals>(this.path('private', 'originals.json'));
   digests = () => readJson<Digests>(this.path('digests.json'));
   seals = (): SealEvent[] =>
     existsSync(this.path('seals.jsonl'))
@@ -122,7 +137,12 @@ export function verifyRecord(dir: string): string[] {
   const problems: string[] = [];
   const digests = rec.digests();
   if (digest(rec.packet()) !== digests.packet_sha256) problems.push('packet.json does not match its published digest');
-  if (digest(rec.mapping()) !== digests.mapping_sha256) problems.push('private/mapping.json does not match its published digest');
+  const mapping = rec.mapping();
+  if (digest(mapping) !== digests.mapping_sha256) problems.push('private/mapping.json does not match its published digest');
+  if (mapping.version === 2) {
+    if (!existsSync(rec.path('private', 'originals.json'))) problems.push('private/originals.json is missing');
+    else if (digest(rec.originals()) !== mapping.originals_sha256) problems.push('private/originals.json does not match the digest in the mapping');
+  }
   const published = rec.seals().find((e) => e.event === 'digests');
   if (!published || published.packet_sha256 !== digests.packet_sha256 || published.mapping_sha256 !== digests.mapping_sha256) {
     problems.push('digests.json differs from the digests first recorded in seals.jsonl');
@@ -166,7 +186,18 @@ export function renderAdjudicationReport(rec: { digests: Digests; seals: SealEve
   }
   lines.push('', '| Case | Slot | Condition | Final | Per adjudicator |', '| --- | --- | --- | --- | --- |');
   for (const c of rec.result.cases) lines.push(`| ${c.case_id} | ${c.slot_id} | ${c.condition} | ${c.final} | ${Object.entries(c.verdicts).map(([k, v]) => `${k}: ${v}`).join(', ')} |`);
+  if (rec.result.imputed) {
+    lines.push('', '| Slot | Condition | Final |', '| --- | --- | --- |');
+    for (const x of rec.result.imputed) lines.push(`| ${x.slot_id} | ${x.condition} | ${x.final}, ${x.label} |`);
+    if (rec.result.imputed.length === 0) lines.push('| — | — | no imputed slot |');
+  }
   lines.push('', `Blinding compromised: ${rec.result.blinding_compromised ? 'yes' : 'no'}`);
+  if (rec.result.blinding) {
+    const b = rec.result.blinding;
+    lines.push(`Redaction ${b.method}: ${b.redactions} replacement(s) in ${b.redacted_cases} case(s); ${b.warnings_original} warning(s) in the original text; ${b.residual.length} residual compromise(s)`);
+    for (const r of b.residual) lines.push(`- ${r.case_id}: ${r.reason}${r.ref ? ` ${r.ref}` : ''}${r.term ? ` "${r.term}"` : ''}`);
+    return `${lines.join('\n')}\n`;
+  }
   for (const w of rec.warnings) lines.push(`- ${w.case_id} ${w.ref}: "${w.term}"`);
   return `${lines.join('\n')}\n`;
 }
@@ -184,17 +215,29 @@ export async function main(argv: string[], now: () => Date = () => new Date(), l
     case 'prepare': {
       if (existsSync(dir) && readdirSync(dir).length > 0) throw new Error(`${dir} is not empty; a record is never prepared twice`);
       const input = readJson<AdjudicationInput>(need(flags, 'input'));
-      const prepared = preparePacket({
+      // The input's manifest version decides the packet; absent means version 3.
+      const semantics = studySemantics({ version: input.manifest_version ?? 3, study: input.study });
+      const args = {
         design: input.design,
         rows: input.rows,
         runs: new Map(Object.entries(input.runs)),
         rules: TECHNICAL_RULES,
         groundTruth: FIXTURE_GROUND_TRUTH,
         skillNames: input.skill_names,
-      });
+      };
+      let prepared: ReturnType<typeof preparePacket> & { originals?: Originals };
+      if (semantics.adjudicationPacket === 2) {
+        if (!input.screen_rules) throw new Error('a version 4 adjudication input needs the frozen screen_rules');
+        // Only the design's experiments, so a version 4 packet carries no #18 text.
+        const only = (texts: Record<string, string>) => Object.fromEntries(input.design.experiments.map((e) => [e, texts[e]!]));
+        prepared = preparePacketV2({ ...args, rules: only(TECHNICAL_RULES), groundTruth: only(FIXTURE_GROUND_TRUTH), screenRules: input.screen_rules });
+      } else {
+        prepared = preparePacket(args);
+      }
       mkdirSync(rec.path('private', 'judgments'), { recursive: true, mode: 0o700 });
       writeJson(rec.path('packet.json'), prepared.packet);
       writeJson(rec.path('private', 'mapping.json'), prepared.mapping, 0o600);
+      if (prepared.originals) writeJson(rec.path('private', 'originals.json'), prepared.originals, 0o600);
       const digests: Digests = { packet_sha256: prepared.packet_sha256, mapping_sha256: prepared.mapping_sha256 };
       writeJson(rec.path('digests.json'), digests);
       rec.append({ at: at(), event: 'digests', ...digests });

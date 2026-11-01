@@ -31,7 +31,10 @@ import { CAPS, scheduleFits, spent } from './budget.js';
 import { containerLabels, identityProblems, type StackIdentity } from './identity.js';
 import { Ledger } from './ledger.js';
 import { KeyUsageLog, keyUsageVerdict, readKeyUsage, settleKeyUsage } from './key-usage.js';
-import { EXPERIMENT_FIXTURE, buildManifest, exactlyOne, fixtureDiffSha, frozenSkillProblems, manifestFingerprint, readFrozen, verifyPreregistration, type Manifest, type SkillApprovalState } from './manifest.js';
+import {
+  EXPERIMENT_FIXTURE, STUDY_V4, buildManifest, buildManifestV4, exactlyOne, fixtureDiffSha, frozenSkillProblems, manifestFingerprint, readFrozen,
+  scheduleFor, studySemantics, verifyPreregistration, type Manifest, type SkillApprovalState, type StudyBlock,
+} from './manifest.js';
 import { buildReport, renderReport, type SlotRunData } from './report.js';
 import type { PromptEvidence } from '../../modules/_shared/trace-evidence.js';
 import type { ExpectedRule, FindingLike } from './rules.js';
@@ -271,10 +274,10 @@ async function lookupIds(api: ExperimentApi) {
 const fixtureFor = (experiment: string) => EXPERIMENT_FIXTURES.find((f) => f.number === EXPERIMENT_FIXTURE[experiment])!;
 
 /** Free preview per experiment: the non-Skill fingerprint the manifest freezes. */
-async function previewFingerprints(stack: Stack, reservationUsd: number): Promise<Record<string, string>> {
+async function previewFingerprints(stack: Stack, reservationUsd: number, experiments: string[] = Object.keys(EXPERIMENT_FIXTURE)): Promise<Record<string, string>> {
   const { prId, agents } = await lookupIds(stack.api);
   const out: Record<string, string> = {};
-  for (const experiment of Object.keys(EXPERIMENT_FIXTURE)) {
+  for (const experiment of experiments) {
     const fixture = fixtureFor(experiment);
     const preview = await stack.api.post<{ ok: boolean; reason: string | null; block: { non_skill_fingerprint: string | null } }>('/experiments/preview', {
       pr_id: prId(fixture.number),
@@ -461,10 +464,11 @@ const FINGERPRINT = /^[0-9a-f]{64}$/;
 export function phase0Problems(
   previews: Partial<Record<string, ConditionPreview>>,
   expected: { reservationUsd: number; outputCap: number; targets: Partial<Record<string, { name: string; body: string }>> },
+  pairs: readonly string[] = PHASE0_PAIRS,
 ): string[] {
   const problems: string[] = [];
   const worst: number[] = [];
-  for (const pair of PHASE0_PAIRS) {
+  for (const pair of pairs) {
     const [experiment, condition] = pair.split('-') as [string, 'with' | 'without'];
     const fixture = fixtureFor(experiment);
     const p = previews[pair];
@@ -490,7 +494,7 @@ export function phase0Problems(
     if (typeof p.worst_case_usd === 'number' && p.worst_case_usd > 0) worst.push(p.worst_case_usd);
     else problems.push(`${pair}: no worst case`);
   }
-  for (const experiment of new Set(PHASE0_PAIRS.map((pair) => pair.split('-')[0]!))) {
+  for (const experiment of new Set(pairs.map((pair) => pair.split('-')[0]!))) {
     const withP = previews[`${experiment}-with`];
     const withoutP = previews[`${experiment}-without`];
     if (withP && withoutP && withP.non_skill_fingerprint !== withoutP.non_skill_fingerprint) {
@@ -511,7 +515,23 @@ function readPreview(file: string): ConditionPreview | undefined {
   }
 }
 
-async function currentManifest(flags: Flags, stack: Stack, root: string): Promise<Manifest> {
+/**
+ * `--study v4 --experiments 17`: the successor study the flags name, or null
+ * for the v3 form. Only the frozen study block is accepted, exactly.
+ */
+export function studyFromFlags(flags: Flags): StudyBlock | null {
+  if (flags.study === undefined) {
+    if (flags.experiments !== undefined) throw new Error('--experiments needs --study');
+    return null;
+  }
+  if (flags.study !== STUDY_V4.slot_tag) throw new Error(`--study must be ${STUDY_V4.slot_tag}`);
+  if (flags.experiments !== STUDY_V4.experiments.join(',')) throw new Error(`--study ${STUDY_V4.slot_tag} needs --experiments ${STUDY_V4.experiments.join(',')}`);
+  if (flags.seed !== undefined) throw new Error(`--study ${STUDY_V4.slot_tag} derives its seed from the manifest; drop --seed`);
+  return STUDY_V4;
+}
+
+async function currentManifest(flags: Flags, stack: Stack, root: string, study: StudyBlock | null = null): Promise<Manifest> {
+  if (study) return currentManifestV4(flags, stack, root, study);
   const { agents, skills } = await lookupIds(stack.api);
   const seed = Number(need(flags, 'seed'));
   const reservation = Number(need(flags, 'reservation'));
@@ -539,6 +559,41 @@ async function currentManifest(flags: Flags, stack: Stack, root: string): Promis
     rules,
     perSlotReservationUsd: reservation,
   });
+}
+
+/** The version 4 manifest the stack builds now: only the study's experiments, with the seed derived from the content. */
+async function currentManifestV4(flags: Flags, stack: Stack, root: string, study: StudyBlock): Promise<Manifest> {
+  const { agents, skills } = await lookupIds(stack.api);
+  const reservation = Number(need(flags, 'reservation'));
+  const rules = JSON.parse(readFileSync(need(flags, 'rules'), 'utf8')) as Record<string, ExpectedRule>;
+  const fixtures = study.experiments.map(fixtureFor);
+  const identity = stack.identity as StackIdentity & { prices: unknown; generation_lookup: unknown };
+  return buildManifestV4({
+    study,
+    implementationFingerprint: implementationFingerprint(root).sha256,
+    nonSkillFingerprints: await previewFingerprints(stack, reservation, study.experiments),
+    stack: {
+      database: identity.database,
+      provider: identity.provider,
+      providerName: identity.provider_name,
+      model: identity.model,
+      servedModel: identity.served_model ?? null,
+      maxOutputTokens: identity.max_output_tokens,
+      prices: identity.prices,
+      generationLookup: identity.generation_lookup,
+    },
+    skills: fixtures.map((f) => exactlyOne(skills, f.targetSkill, 'Skill')).map((s) => ({ id: s.id, name: s.name, body: s.body, enabled: s.enabled, approval: s.approval ?? null })),
+    agents: fixtures.map((f) => exactlyOne(agents, f.reviewer, 'agent')),
+    rules,
+    perSlotReservationUsd: reservation,
+  });
+}
+
+/** The frozen provenance a slot of `experiment` must show (null when the manifest lacks it: then nothing continues on a truncation). */
+function frozenExpectations(frozen: Manifest, experiment: string) {
+  const diff = frozen.fixtures.find((f) => f.number === EXPERIMENT_FIXTURE[experiment])?.diff_sha256;
+  if (!frozen.stack.providerName || !frozen.stack.servedModel || !diff) return null;
+  return { providerName: frozen.stack.providerName, model: frozen.stack.model, servedModel: frozen.stack.servedModel, expectedDiffSha256: diff };
 }
 
 /**
@@ -574,7 +629,10 @@ export async function authorize(
 /** The committed pre-registration (`--prereg`), verified against the manifest this stack builds now. */
 function verifiedPreregistration(flags: Flags, stack: Stack, root: string) {
   return verifyPreregistration(need(flags, 'prereg'), root, (frozen) =>
-    currentManifest({ ...flags, seed: String(frozen.schedule.seed), reservation: String(frozen.per_slot_reservation_usd) }, stack, root),
+    frozen.version === 4
+      // Version 4: rebuilt from the content, its seed derived again, never copied from the file.
+      ? currentManifest({ ...flags, reservation: String(frozen.per_slot_reservation_usd) }, stack, root, frozen.study)
+      : currentManifest({ ...flags, seed: String(frozen.schedule.seed), reservation: String(frozen.per_slot_reservation_usd) }, stack, root),
   );
 }
 
@@ -590,7 +648,10 @@ async function slotRuns(stack: Stack, slots: Slot[], frozen: Manifest | null, re
       // The slots are built from a second read: the target must still be the frozen one.
       const changed = frozen ? frozenSkillProblems(frozen, { ...target, approval: target.approval ?? null }) : [];
       if (changed.length > 0) throw new Error(changed.join('; '));
+      // Version 4: the runner takes the truncation rule from the frozen manifest.
+      const expectations = frozen?.version === 4 ? frozenExpectations(frozen, slot.experiment) : null;
       return {
+        ...(frozen?.version === 4 ? { semantics: studySemantics(frozen), ...(expectations ? { expectations } : {}) } : {}),
         slot,
         prId: pr,
         agentId: agent.id,
@@ -627,6 +688,13 @@ async function conventionsPreview(stack: ExtractionStack, flags: Flags): Promise
     slot_id: need(flags, 'slot'),
     reservation_usd: Number(need(flags, 'reservation')),
   });
+}
+
+/** `plan --study v4 --prereg <file>`: the committed v4 pre-registration of exactly that study. */
+function readFrozenStudy(flags: Flags, study: StudyBlock): Manifest & { version: 4 } {
+  const frozen = readFrozen(need(flags, 'prereg'), repoRoot());
+  if (frozen.version !== 4 || frozen.study.id !== study.id) throw new Error(`${need(flags, 'prereg')} is not the ${study.id} pre-registration`);
+  return frozen;
 }
 
 export async function main(argv: string[], log: (m: string) => void = console.log): Promise<void> {
@@ -728,10 +796,14 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       const targets = Object.fromEntries(
         Object.keys(EXPERIMENT_FIXTURE).map((experiment) => [experiment, skills.find((s) => s.name === fixtureFor(experiment).targetSkill)]),
       );
-      const previews = Object.fromEntries(PHASE0_PAIRS.map((pair) => [pair, readPreview(join(dir, `${pair}.json`))]));
+      // --experiments 17: only that experiment's two previews (the v4 study).
+      const only = typeof flags.experiments === 'string' ? flags.experiments.split(',') : null;
+      if (only && only.some((e) => !(e in EXPERIMENT_FIXTURE))) throw new Error(`--experiments must name ${Object.keys(EXPERIMENT_FIXTURE).join(', ')}`);
+      const pairs = only ? PHASE0_PAIRS.filter((pair) => only.includes(pair.split('-')[0]!)) : PHASE0_PAIRS;
+      const previews = Object.fromEntries(pairs.map((pair) => [pair, readPreview(join(dir, `${pair}.json`))]));
       const reservationUsd = Number(need(flags, 'reservation'));
-      const problems = phase0Problems(previews, { reservationUsd, outputCap: Number(need(flags, 'cap')), targets });
-      for (const pair of PHASE0_PAIRS) {
+      const problems = phase0Problems(previews, { reservationUsd, outputCap: Number(need(flags, 'cap')), targets }, pairs);
+      for (const pair of pairs) {
         const p = previews[pair];
         log(`${pair}: skills [${p?.linked_skills?.join(', ') ?? '?'}], input bound ${p?.input_upper_bound ?? '?'}, worst case $${p?.worst_case_usd ?? '?'}, non-Skill ${p?.non_skill_fingerprint?.slice(0, 12) ?? '?'}…`);
       }
@@ -761,15 +833,20 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       return;
     }
     case 'plan': {
-      const slots = buildSchedule({ seed: Number(need(flags, 'seed')), phase: 'confirmatory', experiments: ['17', '18'], trials: Number(flags.trials ?? 5) });
+      // --study v4 --experiments 17 --prereg <file>: the frozen v4 schedule, rebuilt from its derived seed.
+      const study = studyFromFlags(flags);
+      const slots = study
+        ? scheduleFor(studySemantics({ version: 4, study }), readFrozenStudy(flags, study).schedule.seed)
+        : buildSchedule({ seed: Number(need(flags, 'seed')), phase: 'confirmatory', experiments: ['17', '18'], trials: Number(flags.trials ?? 5) });
       const json = JSON.stringify(slots, null, 2);
       if (typeof flags.out === 'string') writeFileSync(flags.out, `${json}\n`);
       log(json);
       return;
     }
     case 'manifest': {
+      const study = studyFromFlags(flags);
       const stack = await verifiedStack(flags);
-      const manifest = await currentManifest(flags, stack, repoRoot());
+      const manifest = await currentManifest(flags, stack, repoRoot(), study);
       if (!scheduleFits(manifest.schedule.slots.length, manifest.per_slot_reservation_usd)) {
         throw new Error(`${manifest.schedule.slots.length} slots × $${manifest.per_slot_reservation_usd} exceed the $${CAPS.confirmatory} confirmatory cap`);
       }
@@ -866,7 +943,9 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
         let runs: SlotRun[];
         if (phase === 'confirmatory') {
           const { frozen } = await verifiedPreregistration(flags, stack, repoRoot());
-          const slots = buildSchedule({ seed: frozen.schedule.seed, phase, experiments: ['17', '18'], trials: 5 });
+          const slots = frozen.version === 4
+            ? scheduleFor(studySemantics(frozen), frozen.schedule.seed)
+            : buildSchedule({ seed: frozen.schedule.seed, phase, experiments: ['17', '18'], trials: 5 });
           runs = await slotRuns(stack, slots, frozen, frozen.per_slot_reservation_usd, manifestFingerprint(frozen));
         } else {
           const experiment = need(flags, 'experiment');
@@ -947,7 +1026,9 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
         if (!skill || !frozenSha || sha256(skill.body) !== frozenSha) throw new Error(`Target skill ${name} is missing or differs from the manifest`);
         return toSkillPromptBlock(skill);
       };
+      const semantics = studySemantics(frozen);
       const report = buildReport({
+        ...(frozen.version === 4 ? { semantics } : {}),
         execution: {
           manifestFingerprint: manifestFingerprint(frozen),
           phase: 'confirmatory',
@@ -976,8 +1057,14 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       if (typeof flags.out === 'string') writeFileSync(flags.out, `${markdown}\n`);
       // Input for adjudication-cli.ts prepare: private (it carries condition and slot identity).
       if (typeof flags['adjudication-input'] === 'string') {
-        const design = { manifest_fingerprint: manifestFingerprint(frozen), experiments: Object.keys(EXPERIMENT_FIXTURE), per_condition: 5, slots: frozen.schedule.slots };
-        const input = { design, rows: report.rows, runs: Object.fromEntries(runs), skill_names: frozen.skills.map((s) => s.name) };
+        const design = frozen.version === 4
+          ? { manifest_fingerprint: manifestFingerprint(frozen), experiments: semantics.experiments, per_condition: semantics.perCondition, slots: frozen.schedule.slots }
+          : { manifest_fingerprint: manifestFingerprint(frozen), experiments: Object.keys(EXPERIMENT_FIXTURE), per_condition: 5, slots: frozen.schedule.slots };
+        const input = {
+          design, rows: report.rows, runs: Object.fromEntries(runs), skill_names: frozen.skills.map((s) => s.name),
+          // Version 4: the adjudication takes packet v2 and redaction r1 from these.
+          ...(frozen.version === 4 ? { manifest_version: 4, study: frozen.study, screen_rules: frozen.rules } : {}),
+        };
         writeFileSync(flags['adjudication-input'], `${JSON.stringify(input, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
       }
       log(markdown);

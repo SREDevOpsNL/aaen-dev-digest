@@ -4,6 +4,8 @@ import { fits } from './budget.js';
 import { isTerminal, type Ledger, type SlotRecord, type SlotState } from './ledger.js';
 import type { Slot } from './schedule.js';
 import { reconcileExtraction } from './conventions-runner.js';
+import { truncationCheck, type FrozenExpectations } from './eligibility.js';
+import type { StudySemantics } from './manifest.js';
 
 /**
  * Orchestration of paid experiment slots against the disposable API. It is
@@ -30,6 +32,13 @@ export interface SlotRun {
   /** For the operator's prompt in Run Review mode. */
   agentName?: string;
   prNumber?: number;
+  /**
+   * The frozen manifest's semantics (`studySemantics`). Absent, or a version 3
+   * manifest: a truncated confirmatory slot stops the schedule, as in v3.
+   */
+  semantics?: StudySemantics;
+  /** The frozen provenance a truncated slot must still show to continue (v4 only). */
+  expectations?: FrozenExpectations;
 }
 
 interface SlotLookup {
@@ -145,6 +154,12 @@ export type SlotResult = {
   fingerprintMismatch?: boolean;
   /** What a failed request said about itself (`describeErrorDetail`), for the operator. */
   diagnosis?: string | null;
+  /**
+   * Set only under a frozen `continue-impute` truncation rule, for a slot
+   * whose one attempt was truncated: `continue` when it is otherwise sound
+   * (known cost, frozen fingerprint, full provenance), else the problems.
+   */
+  truncation?: { continue: boolean; problems: string[] };
 };
 
 /**
@@ -256,11 +271,16 @@ async function dispatchAndFollow(deps: RunnerDeps, run: SlotRun, base: LedgerBas
       const fingerprint = current?.experiment?.non_skill_fingerprint ?? null;
       const fingerprintMismatch = settled.state !== 'refused' &&
         run.expectedNonSkillFingerprint !== null && fingerprint !== run.expectedNonSkillFingerprint;
+      const truncation = truncationOutcome(run, settled, current!, fingerprintMismatch);
       deps.ledger.append({
         ...base, state: settled.state, run_id: runId, cost_usd: settled.cost,
-        detail: { fingerprint_mismatch: fingerprintMismatch },
+        detail: {
+          fingerprint_mismatch: fingerprintMismatch,
+          ...(truncation ? { attempt_outcome: 'truncated', truncation: truncation.continue ? 'continue' : 'stop', truncation_problems: truncation.problems } : {}),
+        },
       });
       return {
+        ...(truncation ? { truncation } : {}),
         fingerprintMismatch,
         state: settled.state,
         runId,
@@ -276,6 +296,43 @@ async function dispatchAndFollow(deps: RunnerDeps, run: SlotRun, base: LedgerBas
 }
 
 type LedgerBase = { slot_id: string; phase: SlotRecord['phase']; reservation_usd: number; stack_id?: string };
+
+/** Whether the frozen manifest lets a truncated confirmatory slot continue the schedule (version 4 only). */
+const continuesOnTruncation = (run: SlotRun) =>
+  run.slot.phase === 'confirmatory' && run.semantics?.version === 4 && run.semantics.truncation === 'continue-impute';
+
+/**
+ * A settled confirmatory slot whose single attempt was truncated, under a
+ * frozen `continue-impute` rule: it continues only with a known cost, the
+ * frozen non-Skill fingerprint and full provenance. Null when the rule does
+ * not apply (v3, exploration, or not a truncation): the slot is handled as before.
+ */
+function truncationOutcome(
+  run: SlotRun,
+  settled: { state: SlotState; cost: number | null },
+  current: SlotLookup['runs'][number],
+  fingerprintMismatch: boolean,
+): { continue: boolean; problems: string[] } | null {
+  if (!continuesOnTruncation(run) || settled.state !== 'failed') return null;
+  if (current.experiment?.attempts?.length !== 1 || current.experiment.attempts[0]?.outcome !== 'truncated') return null;
+  const problems: string[] = [];
+  if (settled.cost === null) problems.push('unknown cost');
+  if (fingerprintMismatch) problems.push('non-Skill fingerprint differs from the frozen one');
+  if (!run.expectations) problems.push('no frozen provenance expectations');
+  else {
+    const check = truncationCheck(current, run.expectations);
+    if (!check.truncated) problems.push('the attempt is not a dispatched, truncated generation');
+    problems.push(...check.problems);
+  }
+  return { continue: problems.length === 0, problems };
+}
+
+/** A recorded confirmatory slot the frozen v4 rule let continue: truncated, known cost, frozen fingerprint. */
+function acceptedTruncation(run: SlotRun, recorded: SlotRecord): boolean {
+  if (!continuesOnTruncation(run) || recorded.state !== 'failed' || recorded.cost_usd === null) return false;
+  const terminal = recorded.events.find((event) => event.state === recorded.state);
+  return terminal?.detail?.truncation === 'continue' && terminal.detail.fingerprint_mismatch === false;
+}
 
 /** Dispatch with POST /experiments/runs. A 4xx means nothing was dispatched; anything else is unknown. */
 async function dispatchDirect(deps: RunnerDeps, run: SlotRun, base: LedgerBase): Promise<{ runId: string } | { result: SlotResult }> {
@@ -404,7 +461,7 @@ export async function runSchedule(
     const recorded = deps.ledger.slots().get(run.slot.slot_id);
     if (recorded && isTerminal(recorded.state)) {
       const terminal = recorded.events.find((event) => event.state === recorded.state);
-      if (run.slot.phase === 'confirmatory' &&
+      if (run.slot.phase === 'confirmatory' && !acceptedTruncation(run, recorded) &&
           (recorded.state !== 'completed' || recorded.cost_usd === null ||
            terminal?.detail?.fingerprint_mismatch !== false)) {
         return { results, stopped: 'confirmatory slot ' + run.slot.slot_id +
@@ -415,13 +472,18 @@ export async function runSchedule(
     const result = await runSlot(deps, run);
     results.push({ ...result, slot_id: run.slot.slot_id });
     deps.log(`${run.slot.slot_id}: ${result.state}${result.reason ? ` — ${result.reason}` : ''}${result.diagnosis ? ` (${result.diagnosis})` : ''}`);
+    if (result.truncation) {
+      deps.log(result.truncation.continue
+        ? `${run.slot.slot_id}: truncated; terminal, not retried; the frozen v4 rule continues the schedule and imputes it against the hypothesis`
+        : `${run.slot.slot_id}: truncated, but ${result.truncation.problems.join('; ')}`);
+    }
     if (result.state === 'refused' && result.runId === null && /budget/.test(result.reason ?? '')) return { results, stopped: result.reason };
     if (result.state === 'refused' && rules.stopOnRefusal) return { results, stopped: `guard refusal on ${run.slot.slot_id}: ${result.reason}` };
     if (result.fingerprintMismatch) return { results, stopped: `${run.slot.slot_id} did not reproduce the frozen non-Skill fingerprint` };
     // A confirmatory schedule has fixed slots and no replacement sampling.
     // Stop on the first unsuccessful or potentially billed slot, regardless
     // of the more tolerant exploratory consecutive-failure defaults.
-    if (run.slot.phase === 'confirmatory' &&
+    if (run.slot.phase === 'confirmatory' && result.truncation?.continue !== true &&
         (result.state !== 'completed' || result.costUsd === null || result.infraFailure)) {
       return { results, stopped: 'confirmatory slot ' + run.slot.slot_id + ' is incomplete: ' + (result.reason ?? result.state) };
     }

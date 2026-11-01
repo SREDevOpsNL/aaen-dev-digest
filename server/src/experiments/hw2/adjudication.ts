@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { ScheduledSlot, SlotRow, SlotRunData } from './report.js';
-import { experimentOutcome } from './rules.js';
+import { EXPERIMENT_FIXTURES } from '../../db/seed-fixtures.js';
+import { imputedVerdict, type ScheduledSlot, type SlotRow, type SlotRunData } from './report.js';
+import { detection, experimentOutcome, type ExpectedRule } from './rules.js';
 
 /**
  * Sealed, condition-blinded technical adjudication (PROSPECTIVE-STUDY.md),
@@ -34,7 +35,11 @@ export interface BlindCase {
 }
 
 export interface BlindPacket {
-  version: 1;
+  version: 1 | 2;
+  /** Version 2 only: the predeclared redaction (the term list itself stays out of the packet). */
+  redaction?: { method: 'r1'; token: string; terms_sha256: string };
+  /** Version 2 only: the frozen instruction to adjudicators about the redaction token. */
+  instructions?: string;
   /** The frozen technical rule per experiment, as the adjudicators apply it. */
   rules: Record<string, string>;
   /** What the fixture's executable ground truth shows, per experiment. */
@@ -50,6 +55,12 @@ export interface MappingEntry {
   /** null when the scheduled slot was not counted; it never enters the packet. */
   case_id: string | null;
   not_counted_reason: string | null;
+  /** Version 2 only: a truncated slot's conservative verdict; it never enters the packet. */
+  imputed?: { verdict: Verdict; label: 'imputed (truncated)' } | null;
+  /** Version 2 only: replacements made in this case's titles and rationales. */
+  redactions?: number;
+  /** Version 2 only: digest of this case's unredacted findings (in private/originals.json). */
+  original_findings_sha256?: string | null;
 }
 
 export interface BlindingWarning {
@@ -66,15 +77,33 @@ export interface AdjudicationDesign {
   slots: ScheduledSlot[];
 }
 
+/** Why redaction did not fully blind a case (recorded, never hidden). */
+export interface ResidualCompromise {
+  case_id: string;
+  reason: 'marker-present' | 'term-survived' | 'evidence-changed';
+  ref?: string;
+  term?: string;
+}
+
 export interface CaseMapping {
-  version: 1;
+  version: 1 | 2;
   /** Secret: keeps the published mapping digest from being brute-forced over case-to-slot assignments. */
   nonce: string;
   packet_sha256: string;
   design: AdjudicationDesign;
   entries: MappingEntry[];
-  /** Finding wording that may reveal the condition: recorded, never hidden. */
+  /** Finding wording that may reveal the condition: recorded, never hidden (version 2: in the original text). */
   blinding_warnings: BlindingWarning[];
+  /** Version 2 only. */
+  redaction?: { method: 'r1'; terms_sha256: string };
+  originals_sha256?: string;
+  residual?: ResidualCompromise[];
+}
+
+/** Version 2: the unredacted finding text, kept in private/originals.json (mode 0600). */
+export interface Originals {
+  version: 1;
+  cases: Array<{ case_id: string; findings: Array<{ ref: string; title: string; rationale: string }> }>;
 }
 
 export interface CaseVerdict {
@@ -133,6 +162,54 @@ export const digest = (value: unknown) => createHash('sha256').update(canonicalJ
 /** Wording that names the Skill mechanism or a target Skill would reveal the condition. */
 const LEAK_TERMS = ['skill', 'untrusted source', 'with-skill', 'without-skill'];
 
+/** The neutral token redaction r1 puts in place of every term. */
+export const REDACTION_TOKEN = '[review-guidance]';
+
+/**
+ * Redaction r1's terms: the leak terms plus every target Skill name, longest
+ * first, so a Skill name is replaced whole before any shorter term inside it.
+ * Generic words ("error path", "boundary", "breaking change" without the
+ * hyphen) are not terms.
+ */
+export const REDACTION_TERMS_R1: readonly string[] = [...new Set([...LEAK_TERMS, ...EXPERIMENT_FIXTURES.map((f) => f.targetSkill.toLowerCase())])]
+  .sort((a, b) => b.length - a.length || (a < b ? -1 : 1));
+
+export const REDACTION_TERMS_R1_SHA256 = createHash('sha256').update(JSON.stringify(REDACTION_TERMS_R1)).digest('hex');
+
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Case-insensitive, whole words, with the plural and possessive inflections (`skills`, `skill's`, `skills'`). */
+const R1_PATTERN = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${REDACTION_TERMS_R1.map((t) => escapeRegex(t).replace(/\s+/g, '\\s+')).join('|')})(?:['’]s|s['’]|es|s)?(?![\\p{L}\\p{N}])`,
+  'giu',
+);
+
+/** `text` with every r1 term replaced by the token, and how many were replaced. */
+export function redactText(text: string): { text: string; redactions: number } {
+  let redactions = 0;
+  const out = text.replace(R1_PATTERN, () => {
+    redactions++;
+    return REDACTION_TOKEN;
+  });
+  return { text: out, redactions };
+}
+
+/** One finding's title and rationale under redaction r1. */
+export function redactFinding<F extends { title: string; rationale: string }>(finding: F): F & { redactions: number } {
+  const title = redactText(finding.title);
+  const rationale = redactText(finding.rationale);
+  return { ...finding, title: title.text, rationale: rationale.text, redactions: title.redactions + rationale.redactions };
+}
+
+/**
+ * The frozen instruction a version 2 packet gives adjudicators
+ * (docs/homework/L02/prereg/study-v4-frozen-text.md; a test ties the two).
+ */
+export const REDACTION_INSTRUCTION_R1 =
+  'Wording that names review guidance supplied to the reviewer has been replaced by the neutral token [review-guidance], ' +
+  'in the same way in every case. The token is not evidence of a condition and must not be used to infer one. ' +
+  'Judge each case only on its finding text and anchors against the frozen rule and ground truth.';
+
 function blindingWarnings(cases: BlindCase[], extraTerms: string[]): BlindingWarning[] {
   const terms = [...LEAK_TERMS, ...extraTerms.map((t) => t.toLowerCase())];
   const warnings: BlindingWarning[] = [];
@@ -180,6 +257,7 @@ export function preparePacket(input: {
 }): { packet: BlindPacket; packet_sha256: string; mapping: CaseMapping; mapping_sha256: string } {
   const problems = designProblems(input.design, input.rows);
   if (problems.length > 0) throw new Error(`input does not match the pre-registered schedule: ${problems.join('; ')}`);
+  if (input.rows.some((row) => row.imputed)) throw new Error('an imputed slot needs packet version 2 (a version 4 manifest)');
   const newCaseId = input.newCaseId ?? (() => `case-${randomBytes(6).toString('hex')}`);
   const used = new Set<string>();
   const cases: BlindCase[] = [];
@@ -213,6 +291,101 @@ export function preparePacket(input: {
   return { packet, packet_sha256, mapping, mapping_sha256: digest(mapping) };
 }
 
+/**
+ * Packet and mapping version 2 with redaction r1 (a version 4 manifest):
+ * every counted case, in both arms alike, has the r1 terms in its titles and
+ * rationales replaced by the neutral token; the originals go to a private
+ * record whose digest the mapping holds. A truncated slot imputed by the
+ * report never enters the packet: the mapping carries its conservative
+ * verdict. Residual compromise is recorded per case: the token present, a
+ * condition-revealing term surviving, or the anchored-regex screen giving a
+ * different result on the original and the redacted text.
+ */
+export function preparePacketV2(input: {
+  design: AdjudicationDesign;
+  rows: SlotRow[];
+  runs: Map<string, SlotRunData | null>;
+  rules: Record<string, string>;
+  groundTruth?: Record<string, string>;
+  /** The frozen anchored-regex rules, for the evidence-changed check. */
+  screenRules: Record<string, ExpectedRule>;
+  /** Target Skill names; each must be an r1 term. */
+  skillNames: string[];
+  newCaseId?: () => string;
+}): { packet: BlindPacket; packet_sha256: string; mapping: CaseMapping; mapping_sha256: string; originals: Originals; originals_sha256: string } {
+  const problems = designProblems(input.design, input.rows);
+  if (problems.length > 0) throw new Error(`input does not match the pre-registered schedule: ${problems.join('; ')}`);
+  const unknown = input.skillNames.filter((name) => !REDACTION_TERMS_R1.includes(name.toLowerCase()));
+  if (unknown.length > 0) throw new Error(`Skill name(s) not covered by redaction r1: ${unknown.join(', ')}`);
+  for (const experiment of input.design.experiments) if (!input.screenRules[experiment]) throw new Error(`no frozen screening rule for experiment ${experiment}`);
+  const newCaseId = input.newCaseId ?? (() => `case-${randomBytes(6).toString('hex')}`);
+  const used = new Set<string>();
+  const cases: BlindCase[] = [];
+  const originals: Originals['cases'] = [];
+  const originalCases: BlindCase[] = [];
+  const residual: ResidualCompromise[] = [];
+  const entries: MappingEntry[] = input.rows.map((row) => {
+    const run = input.runs.get(row.slot_id) ?? null;
+    const empty = { redactions: 0, original_findings_sha256: null };
+    if (row.imputed) {
+      // The report's imputation is re-derived here, never trusted as given.
+      const expected = imputedVerdict(row.condition);
+      if (row.imputed.verdict !== expected.verdict) throw new Error(`slot ${row.slot_id}: an imputed ${row.condition} slot is "${expected.verdict}", not "${row.imputed.verdict}"`);
+      if (row.counted) throw new Error(`slot ${row.slot_id} is both counted and imputed`);
+      return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: null, not_counted_reason: expected.label, imputed: expected, ...empty };
+    }
+    if (!row.counted || !run) {
+      const reason = !run ? `no run (${row.state})` : row.execution_issues[0] ?? row.eligibility?.reasons?.[0] ?? 'not counted';
+      return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: null, not_counted_reason: reason, imputed: null, ...empty };
+    }
+    let caseId = newCaseId();
+    while (used.has(caseId)) caseId = newCaseId();
+    used.add(caseId);
+    const original = run.findings.map((f, i) => ({ ref: `f${i + 1}`, file: f.file, start_line: f.start_line, end_line: f.end_line, title: f.title, rationale: f.rationale }));
+    const redacted = original.map((f) => redactFinding(f));
+    const redactions = redacted.reduce((sum, f) => sum + f.redactions, 0);
+    const findings = redacted.map(({ redactions: _count, ...f }) => f);
+    cases.push({ case_id: caseId, experiment: row.experiment, findings });
+    originalCases.push({ case_id: caseId, experiment: row.experiment, findings: original });
+    const originalText = original.map(({ ref, title, rationale }) => ({ ref, title, rationale }));
+    originals.push({ case_id: caseId, findings: originalText });
+    // Residual compromise, in a fixed order per case.
+    if (findings.some((f) => `${f.title}\n${f.rationale}`.includes(REDACTION_TOKEN))) residual.push({ case_id: caseId, reason: 'marker-present' });
+    for (const w of blindingWarnings([{ case_id: caseId, experiment: row.experiment, findings }], input.skillNames)) residual.push({ case_id: caseId, reason: 'term-survived', ref: w.ref, term: w.term });
+    const rule = input.screenRules[row.experiment]!;
+    if (detection(original, rule).detected !== detection(findings, rule).detected) residual.push({ case_id: caseId, reason: 'evidence-changed' });
+    return {
+      slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: caseId, not_counted_reason: null, imputed: null,
+      redactions, original_findings_sha256: digest(originalText),
+    };
+  });
+  cases.sort((a, b) => (a.case_id < b.case_id ? -1 : 1));
+  originals.sort((a, b) => (a.case_id < b.case_id ? -1 : 1));
+  const packet: BlindPacket = {
+    version: 2,
+    redaction: { method: 'r1', token: REDACTION_TOKEN, terms_sha256: REDACTION_TERMS_R1_SHA256 },
+    instructions: REDACTION_INSTRUCTION_R1,
+    rules: input.rules,
+    ground_truth: input.groundTruth ?? {},
+    cases,
+  };
+  const packet_sha256 = digest(packet);
+  const record: Originals = { version: 1, cases: originals };
+  const originals_sha256 = digest(record);
+  const mapping: CaseMapping = {
+    version: 2,
+    nonce: randomBytes(32).toString('hex'),
+    packet_sha256,
+    design: input.design,
+    entries,
+    blinding_warnings: blindingWarnings(originalCases, input.skillNames),
+    redaction: { method: 'r1', terms_sha256: REDACTION_TERMS_R1_SHA256 },
+    originals_sha256,
+    residual,
+  };
+  return { packet, packet_sha256, mapping, mapping_sha256: digest(mapping), originals: record, originals_sha256 };
+}
+
 export const sealJudgment = (judgment: Judgment) => digest(judgment);
 
 export interface ConditionTally {
@@ -220,6 +393,8 @@ export interface ConditionTally {
   adjudicated: number;
   detected: number;
   ambiguous: number;
+  /** Version 2 only: truncated slots counted at their conservative imputed verdict (included in adjudicated and detected). */
+  imputed?: number;
 }
 
 export interface AdjudicatedExperiment {
@@ -237,6 +412,10 @@ export type RevealResult =
       cases: Array<{ case_id: string; slot_id: string; condition: 'with' | 'without'; experiment: string; final: Verdict; verdicts: Record<string, Verdict> }>;
       experiments: AdjudicatedExperiment[];
       blinding_compromised: boolean;
+      /** Version 2 only: truncated slots, never adjudicated, at their conservative verdict. */
+      imputed?: Array<{ slot_id: string; condition: 'with' | 'without'; experiment: string; final: Verdict; label: 'imputed (truncated)' }>;
+      /** Version 2 only. */
+      blinding?: { method: 'r1'; warnings_original: number; redacted_cases: number; redactions: number; residual: ResidualCompromise[] };
     };
 
 /** Problems with one judgment; `cases` = the case IDs it must cover (null = every case). */
@@ -279,6 +458,14 @@ export function reveal(input: {
   const mapped = input.mapping.entries.filter((e) => e.case_id !== null).map((e) => e.case_id!);
   if (mapped.length !== caseIds.length || caseIds.some((id) => !mapped.includes(id))) errors.push('the mapping and packet do not cover the same cases');
   errors.push(...designProblems(input.mapping.design, input.mapping.entries));
+  const v2 = input.mapping.version === 2;
+  if (v2 !== (input.packet.version === 2)) errors.push('the packet and mapping versions differ');
+  for (const e of input.mapping.entries) {
+    if (!e.imputed) continue;
+    if (!v2) errors.push(`slot ${e.slot_id} is imputed in a version 1 mapping`);
+    if (e.case_id !== null) errors.push(`imputed slot ${e.slot_id} was given a case`);
+    if (e.imputed.verdict !== imputedVerdict(e.condition).verdict) errors.push(`imputed slot ${e.slot_id} does not carry the conservative verdict`);
+  }
 
   const names = input.judgments.map((j) => j.judgment.adjudicator);
   if (new Set(names).size !== 2 || names.length !== 2) errors.push('exactly two distinct adjudicators are required');
@@ -313,12 +500,15 @@ export function reveal(input: {
     const tally = (condition: 'with' | 'without'): ConditionTally => {
       const scheduled = input.mapping.entries.filter((e) => e.experiment === experiment && e.condition === condition).length;
       const judged = cases.filter((c) => c.experiment === experiment && c.condition === condition);
-      return {
+      const tally: ConditionTally = {
         scheduled,
         adjudicated: judged.filter((c) => c.final !== 'ambiguous').length,
         detected: judged.filter((c) => c.final === 'yes').length,
         ambiguous: judged.filter((c) => c.final === 'ambiguous').length,
       };
+      if (!v2) return tally;
+      const imputed = input.mapping.entries.filter((e) => e.experiment === experiment && e.condition === condition && e.imputed);
+      return { ...tally, adjudicated: tally.adjudicated + imputed.length, detected: tally.detected + imputed.filter((e) => e.imputed!.verdict === 'yes').length, imputed: imputed.length };
     };
     const w = tally('with');
     const wo = tally('without');
@@ -331,5 +521,17 @@ export function reveal(input: {
     return { experiment, with: w, without: wo, outcome: experimentOutcome(w.detected, w.adjudicated, wo.detected, wo.adjudicated) as AdjudicatedExperiment['outcome'], note: null };
   });
 
-  return { status: 'revealed', cases, experiments, blinding_compromised: input.mapping.blinding_warnings.length > 0 };
+  if (!v2) return { status: 'revealed', cases, experiments, blinding_compromised: input.mapping.blinding_warnings.length > 0 };
+  const residual = input.mapping.residual ?? [];
+  const imputed = input.mapping.entries
+    .filter((e) => e.imputed)
+    .map((e) => ({ slot_id: e.slot_id, condition: e.condition, experiment: e.experiment, final: e.imputed!.verdict, label: e.imputed!.label }));
+  const blinding = {
+    method: 'r1' as const,
+    warnings_original: input.mapping.blinding_warnings.length,
+    redacted_cases: input.mapping.entries.filter((e) => (e.redactions ?? 0) > 0).length,
+    redactions: input.mapping.entries.reduce((sum, e) => sum + (e.redactions ?? 0), 0),
+    residual,
+  };
+  return { status: 'revealed', cases, experiments, blinding_compromised: residual.length > 0, imputed, blinding };
 }
