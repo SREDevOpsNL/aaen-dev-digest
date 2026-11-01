@@ -1,0 +1,5 @@
+2026-11-01T20:02:43Z c-v4-17-without-2: clicked "Test Quality Reviewer" on PR #501 (ref e25)
+2026-11-01T20:03:31Z c-v4-17-without-2: completed
+2026-11-01T20:03:34Z c-v4-17-with-2: clicked "Test Quality Reviewer" on PR #501 (ref e25)
+2026-11-01T20:03:37Z c-v4-17-with-2: failed — 429 Provider returned error (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+runner finished/stopped before slot 3

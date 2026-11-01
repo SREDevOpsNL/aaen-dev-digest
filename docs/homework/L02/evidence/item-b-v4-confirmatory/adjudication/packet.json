@@ -1,0 +1,63 @@
+{
+  "version": 2,
+  "redaction": {
+    "method": "r1",
+    "token": "[review-guidance]",
+    "terms_sha256": "4e07a112cf6092631d32fa12519720c62987df9a12a7e46998ce6edd162297bc"
+  },
+  "instructions": "Wording that names review guidance supplied to the reviewer has been replaced by the neutral token [review-guidance], in the same way in every case. The token is not evidence of a condition and must not be used to infer one. Judge each case only on its finding text and anchors against the frozen rule and ground truth.",
+  "rules": {
+    "17": "Detected only if one grounded finding (or findings together) explicitly identifies BOTH (a) a missing test for an error branch of applyDiscount (an expired coupon or an unknown code throwing) AND (b) a missing test at the exact expiry-equality boundary, now == expiresAt. Generic \"edge case\" or \"more tests\" wording does not count. Otherwise: no; if the text cannot be decided: ambiguous."
+  },
+  "ground_truth": {
+    "17": "Fixture PR #501 (src/billing/discount.ts): applyDiscount succeeds before expiry; throws \"Coupon expired\" at exactly now == expiresAt and after it; throws \"Unknown coupon\" for an unknown code. The added tests exercise only the success path: no error branch and no expiry-boundary case is tested."
+  },
+  "cases": [
+    {
+      "case_id": "case-9acd58625433",
+      "experiment": "17",
+      "findings": [
+        {
+          "ref": "f1",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for expired coupon",
+          "rationale": "The production code throws for expired coupons (line 12 of discount.ts), but the test never exercises that path. A regression that removes or changes the expiration check would not be caught."
+        },
+        {
+          "ref": "f2",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for unknown coupon code",
+          "rationale": "The production code throws for unknown codes (line 11 of discount.ts), but the test never exercises that path. A regression that silently ignores unknown codes would not be caught."
+        },
+        {
+          "ref": "f3",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for rounding edge case",
+          "rationale": "The production code uses Math.round (line 14 of discount.ts), which can produce off-by-one errors for fractional cents. The test only uses a clean 10% discount on 10,000 cents, which yields an integer result. A regression that changes rounding behavior (e.g., to Math.floor) would not be caught."
+        },
+        {
+          "ref": "f4",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for zero total edge case",
+          "rationale": "The production code uses Math.max(..., 0) (line 14 of discount.ts) to prevent negative totals. The test never exercises a scenario where the discount would produce a negative result (e.g., totalCents=0, percentOff=50). A regression that removes the Math.max guard would not be caught."
+        },
+        {
+          "ref": "f5",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for case-insensitive code lookup",
+          "rationale": "The production code uses code.toUpperCase() (line 10 of discount.ts) to allow case-insensitive matching. The test only uses an uppercase code ('SAVE10'). A regression that removes the toUpperCase call would not be caught."
+        }
+      ]
+    }
+  ]
+}

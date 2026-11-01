@@ -522,3 +522,27 @@ design follows the independent analysis in
 The 20-slot shape from the planning envelope would need #18. That waits on
 the Skill v2 decision above, and would be a separate free freeze. Expected
 actual spend for v4 is about $0.003–0.005.
+
+### v4 outcome (2026-11-01)
+
+The owner authorized the v4 packet above, unchanged. Every free binding was
+checked again before the capability was issued, and all of them matched. The
+schedule then stopped at slot 2 of 10. Its second slot, `c-v4-17-with-2`,
+received an HTTP 429 from DeepInfra's shared upstream pool. The 429 is a
+preregistered stop rule; it is not a truncation, so it was not imputed.
+
+| | |
+| --- | --- |
+| Completed | `c-v4-17-without-2` (provenance verified, $0.00035478) |
+| Failed | `c-v4-17-with-2`: 429, no response ID, usage unknown, not billed |
+| Not dispatched | 8 slots |
+| Adjudication | 1 case, two sealed blinded adjudicators: **no** / **no** (part (a) met, part (b) expiry boundary missing) |
+| Imputed truncations | none |
+| Outcome | **`incomplete`**: 0/5 *with* (no verdict) vs 0/5 *without* (1 verdict) |
+| Spend | $0.00035478 actual. The ledger holds the $0.005 reservation for the 429 slot, so it shows $0.02174118 conservative. The key settlement passes. |
+
+Nothing was retried or replaced. The full record is in
+[evidence/item-b-v4-confirmatory/README.md](evidence/item-b-v4-confirmatory/README.md). #17 stays Implemented. A further attempt
+would need a new owner decision. That decision includes whether a 429 from a
+shared upstream pool should stay a stop rule or become a terminal,
+non-retried exclusion. Changing it would be a new pre-registration.

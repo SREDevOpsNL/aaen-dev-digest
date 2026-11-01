@@ -63,8 +63,10 @@ See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md): 50 Verified,
 - criteria 17 and 18 are **Implemented, not passed**.
   - The exploratory pilot and the confirmatory Item B v3 run were both
     incomplete ([record](evidence/item-b-confirmatory/README.md)).
-  - A successor study v4 for #17 is frozen and needs a spending decision
-    ([v4](PROSPECTIVE-STUDY.md#successor-study-v4-for-17-2026-11-01)).
+  - The authorized successor study v4 for #17 (2026-11-01) stopped at
+    slot 2 of 10 on an upstream HTTP 429, so it is also `incomplete`: the
+    one adjudicated *without* slot is "no", and no *with* slot completed
+    ([record](evidence/item-b-v4-confirmatory/README.md)).
   - Under Skill v1, #18 is unresolved/unsupported. A disclosed Skill v2 needs
     the owner's review ([proposal](prereg/proposal-breaking-change-skill-v2.md)).
 - criterion 21 is **Blocked**. It needs a real *interactive* Claude Code

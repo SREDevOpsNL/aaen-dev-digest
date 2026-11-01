@@ -1,0 +1,49 @@
+{
+  "generated_at": "2026-11-01T20:08:11.521Z",
+  "result": {
+    "status": "revealed",
+    "cases": [
+      {
+        "case_id": "case-9acd58625433",
+        "slot_id": "c-v4-17-without-2",
+        "condition": "without",
+        "experiment": "17",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-A": "no",
+          "Technical-Reviewer-B": "no"
+        }
+      }
+    ],
+    "experiments": [
+      {
+        "experiment": "17",
+        "with": {
+          "scheduled": 5,
+          "adjudicated": 0,
+          "detected": 0,
+          "ambiguous": 0,
+          "imputed": 0
+        },
+        "without": {
+          "scheduled": 5,
+          "adjudicated": 1,
+          "detected": 0,
+          "ambiguous": 0,
+          "imputed": 0
+        },
+        "outcome": "incomplete",
+        "note": "5 with and 4 without scheduled slot(s) lack an unambiguous adjudicated verdict"
+      }
+    ],
+    "blinding_compromised": false,
+    "imputed": [],
+    "blinding": {
+      "method": "r1",
+      "warnings_original": 0,
+      "redacted_cases": 0,
+      "redactions": 0,
+      "residual": []
+    }
+  }
+}

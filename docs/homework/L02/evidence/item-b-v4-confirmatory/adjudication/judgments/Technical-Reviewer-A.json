@@ -1,0 +1,15 @@
+{
+  "adjudicator": "Technical-Reviewer-A",
+  "packet_sha256": "c72cb047c07efee230c7278924ef9fea5fd322b18648e27ffec788e5d2a73400",
+  "verdicts": [
+    {
+      "case_id": "case-9acd58625433",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "Element (a) is met: f1 (expired coupon throws, untested) and f2 (unknown code throws, untested) identify missing error-branch tests. Element (b) is missing: no finding mentions the exact expiry-equality boundary (now == expiresAt); f1 speaks only of expired coupons generally, and f3-f5 cover rounding, zero total and case-insensitivity, not the expiry boundary."
+    }
+  ]
+}

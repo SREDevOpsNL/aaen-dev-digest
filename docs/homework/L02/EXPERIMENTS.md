@@ -403,3 +403,16 @@ It is frozen as `prereg/manifest-20261101-v4.json` on stack
 [PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#successor-study-v4-for-17-2026-11-01).
 #18 under Skill v1 is unresolved/unsupported; a Skill v2 is proposed but not
 approved. Phase 1 and v3 stay separate.
+
+### v4 outcome (authorized and run 2026-11-01)
+
+| Slot | Result | Adjudicated |
+| --- | --- | --- |
+| `c-v4-17-without-2` | completed, $0.00035478, provenance verified | no (both adjudicators) |
+| `c-v4-17-with-2` | HTTP 429 from DeepInfra (shared upstream pool); stop rule; not billed | no verdict (no response) |
+| 8 others | not dispatched | — |
+
+**Outcome: `incomplete`** (0/5 *with*, 0/5 *without* with one verdict). No
+truncation occurred, so nothing was imputed. Spend: $0.00035478 actual, with
+$0.005 held conservatively for the 429 slot in the ledger. See
+[the v4 record](evidence/item-b-v4-confirmatory/README.md).

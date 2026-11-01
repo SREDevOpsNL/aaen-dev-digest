@@ -142,8 +142,12 @@ breaking-change, and no response-schema (34;
   [evidence/item-b-confirmatory/](evidence/item-b-confirmatory/README.md).
 - **Failed-run traces** now keep the request that was actually sent; see
   [ARCHITECTURE.md](ARCHITECTURE.md#run-lifecycle-evidence-and-failure-traces-2026-11-01).
-- **The successor study v4** for #17 is frozen and waits for a spending
-  decision; see [PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md).
+- **The successor study v4** for #17 was authorized and run on 2026-11-01.
+  It stopped at slot 2 of 10 on an upstream HTTP 429 (a preregistered stop
+  rule), so it is `incomplete`. Only one *without* slot completed, and it was
+  adjudicated "no". The failed slot's trace records the Skill-bearing request
+  that was sent, with unknown usage, and the 429 was not billed. See
+  [the v4 record](evidence/item-b-v4-confirmatory/README.md).
 
 ## Tests
 

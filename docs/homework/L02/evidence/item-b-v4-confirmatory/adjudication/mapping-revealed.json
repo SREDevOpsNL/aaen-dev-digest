@@ -1,0 +1,173 @@
+{
+  "version": 2,
+  "nonce": "1707c30dd0158715a00ae62ba35c4b511f169fb4329344c25301f827cb28daf1",
+  "packet_sha256": "c72cb047c07efee230c7278924ef9fea5fd322b18648e27ffec788e5d2a73400",
+  "design": {
+    "manifest_fingerprint": "3ab26d81c66e0776620a1f7bef1263ae843c12d45d7fb89d7e5a26ade363a60a",
+    "experiments": [
+      "17"
+    ],
+    "per_condition": 5,
+    "slots": [
+      {
+        "slot_id": "c-v4-17-without-2",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v4-17-with-2",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-with-1",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-without-1",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v4-17-without-5",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v4-17-with-5",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-with-3",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-without-3",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v4-17-with-4",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-without-4",
+        "experiment": "17",
+        "condition": "without"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "slot_id": "c-v4-17-without-2",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": "case-9acd58625433",
+      "not_counted_reason": null,
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": "2c177fabc690761d85405bbac0f4183ae8bea056a60722c8dc7eccea5778fb07"
+    },
+    {
+      "slot_id": "c-v4-17-with-2",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "dispatch_state failed",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    },
+    {
+      "slot_id": "c-v4-17-with-1",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    },
+    {
+      "slot_id": "c-v4-17-without-1",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    },
+    {
+      "slot_id": "c-v4-17-without-5",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    },
+    {
+      "slot_id": "c-v4-17-with-5",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    },
+    {
+      "slot_id": "c-v4-17-with-3",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    },
+    {
+      "slot_id": "c-v4-17-without-3",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    },
+    {
+      "slot_id": "c-v4-17-with-4",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    },
+    {
+      "slot_id": "c-v4-17-without-4",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (not dispatched)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null
+    }
+  ],
+  "blinding_warnings": [],
+  "redaction": {
+    "method": "r1",
+    "terms_sha256": "4e07a112cf6092631d32fa12519720c62987df9a12a7e46998ce6edd162297bc"
+  },
+  "originals_sha256": "082a965bc4b4355d06077d520d171c6eff160a5ec0d1377ac97fd154e0e86f85",
+  "residual": []
+}

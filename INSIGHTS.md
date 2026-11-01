@@ -193,3 +193,24 @@ says which file a finding goes in.
   Records: `docs/homework/L02/evidence/item-b-confirmatory/`,
   `docs/homework/L02/PROSPECTIVE-STUDY.md` (v4),
   [`server/LEARNINGS.md`](server/LEARNINGS.md#recurring-errors--fixes).
+- **2026-11-01 — Upstream rate limits, not model behaviour, now end the
+  confirmatory runs.**
+  - **What happened.** The authorized v4 study for #17 stopped at slot 2.
+    DeepInfra's shared pool returned 429 (`limit_source
+    upstream_provider_shared_pool`) about 300 ms after submission, a few
+    seconds after slot 1 completed.
+  - **The pattern.** The Phase 1 pilot's *without* slot hit the same 429. v3
+    stopped on a truncation, which v4 had designed out. So two of the three
+    paid #17 attempts ended on a provider-side 429 that a stop-on-429 rule
+    turns into `incomplete`.
+  - **Implication.** With a single pinned endpoint, no retries and
+    stop-on-429, a 10-slot schedule completes only if the shared pool admits
+    every request. Any successor design has to decide the 429 policy
+    explicitly before the freeze, for example as a terminal, unbilled,
+    non-retried exclusion with pacing between slots.
+  - **The trace repair held on its first live failure.** The trace recorded
+    the Skill-bearing request that was submitted, the attempt as `submitted`
+    with no response ID, and usage `unknown`/`null` rather than 0. The key
+    settlement confirmed the 429 was not billed.
+
+  Record: `docs/homework/L02/evidence/item-b-v4-confirmatory/README.md`.

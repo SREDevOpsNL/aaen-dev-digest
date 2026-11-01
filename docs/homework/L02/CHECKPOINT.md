@@ -225,3 +225,31 @@ needs a corrected freeze and a fresh approval.
   - `aaen-dev-digest-l02-proc-leak` (`fix/hw2-crash-test-leaks`);
   - `aaen-dev-digest-l02-study-v4` (`feat/hw2-study-v4-harness`);
   - `aaen-dev-digest-l02-verify-final` (detached, runs the v4 stack).
+
+## 2026-11-01: v4 study for #17 executed (owner-authorized)
+
+- **Bindings.** All free binding checks matched before `authorize`: manifest
+  sha256 and read-back, the plan and implementation fingerprints, both
+  request fingerprints (the previews were byte-identical to the freeze),
+  stack and database isolation, `deepinfra/fp8` live prices, the ledger (42
+  records, no `c-v4` slot), the key ($0.00679428), and CI 7/7 at `788a606`.
+- **Run.**
+  - Capability: 20:02:25Z.
+  - Slot 1 `c-v4-17-without-2` completed ($0.00035478).
+  - Slot 2 `c-v4-17-with-2` got an upstream 429, which stopped the schedule.
+  - Revoked 20:03:48Z. Settlement PASS: the 429 was not billed.
+- **Adjudication.** Sealed and blinded, 1 case: no / no.
+- **Outcome:** `incomplete`. #17 stays Implemented. Acceptance stays
+  50/2/1.
+- **Ledger** $0.02174118 conservative (48 records). **Key** $0.00714906.
+- **Evidence:**
+  - private: `itemb-v4-20261101/` (45 files, `SHA256SUMS` sha256
+    `6f05ef01…`);
+  - public: `evidence/item-b-v4-confirmatory/`.
+- **Stack** `hw2f-5b00487b` is still up for read-only forensics. Tearing it
+  down is the owner's decision.
+- **Next owner decisions:**
+  - whether to attempt #17 again (a new decision, and possibly a new
+    pre-registration that treats an upstream-pool 429 differently);
+  - the #18 Skill v2 review;
+  - #21.
