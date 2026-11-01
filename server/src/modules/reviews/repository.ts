@@ -1,6 +1,7 @@
 import type { Db, DbOrTx } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { Finding, Intent, RunSummary, RunTrace } from '@devdigest/shared';
+import { pgSafeDeep } from '../../db/pg-text.js';
 
 /**
  * A2 — review data-access. The ONLY layer touching the DB for the review
@@ -191,8 +192,9 @@ export class ReviewRepository {
         status: 'done',
       });
       if (!applied) return { applied: false } as const;
-      const review = await reviewRepo.insertReview(tx, input.review);
-      const findings = await reviewRepo.insertFindings(tx, review.id, input.findings);
+      // Model text may hold characters Postgres text rejects (see pg-text.ts).
+      const review = await reviewRepo.insertReview(tx, pgSafeDeep(input.review));
+      const findings = await reviewRepo.insertFindings(tx, review.id, pgSafeDeep(input.findings));
       await pullRepo.markReviewed(tx, input.prId, input.headSha);
       await this.saveRunTraceIn(tx, input.runId, input.trace({ review, findings }));
       return { applied: true, review, findings } as const;
@@ -203,15 +205,28 @@ export class ReviewRepository {
    * Finish a failed or cancelled run atomically: the guarded terminal
    * transition and the trace upsert in one transaction, so a crash can never
    * leave a terminal row without its trace (or a trace claiming a state the
-   * row does not have). The trace is written even when the transition does
-   * not apply (the run was already cancelled): the cancelled status stands,
-   * and the trace records what the run did.
+   * row does not have).
+   *
+   * When the transition does not apply, the trace is written only if the run
+   * was cancelled (through the API, which writes the status alone): the
+   * cancelled status stands, the trace records what the run did, and the
+   * row's empty usage is filled from the same totals (never over a known
+   * value). Any other terminal row (e.g. one the reaper already labelled) is
+   * left with its own trace.
    */
-  async finalizeRunFailure(input: { runId: string; completion: runRepo.RunCompletion; trace: RunTrace }): Promise<{ applied: boolean }> {
+  async finalizeRunFailure(input: {
+    runId: string;
+    completion: runRepo.RunCompletion;
+    trace: RunTrace;
+  }): Promise<{ applied: boolean; traceWritten: boolean }> {
     return this.db.transaction(async (tx) => {
       const applied = await runRepo.completeAgentRun(tx, input.runId, input.completion);
+      if (!applied) {
+        if ((await runRepo.runStatus(tx, input.runId)) !== 'cancelled') return { applied, traceWritten: false };
+        await runRepo.recordCancelledRunUsage(tx, input.runId, input.completion);
+      }
       await this.saveRunTraceIn(tx, input.runId, input.trace);
-      return { applied };
+      return { applied, traceWritten: true };
     });
   }
 

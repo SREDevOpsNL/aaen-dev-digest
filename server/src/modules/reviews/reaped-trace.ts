@@ -3,6 +3,9 @@ import type { RunTrace } from '@devdigest/shared';
 /** The note the boot reaper records on a run whose process died mid-flight. */
 export const REAPED_NOTE =
   'The server process stopped before this run wrote its terminal record; only what was persisted before then is kept.';
+/** The note on a cancelled run that never got a trace (its process died after the cancel). */
+export const REAPED_CANCELLED_NOTE =
+  'The run was cancelled and its process stopped before it wrote a trace; nothing about its request was recorded.';
 
 /** What the reaper knows from the agent_runs row (never more). */
 export interface ReapedRunRow {
@@ -28,8 +31,8 @@ export interface ReapedRunRow {
  *   usage is unknown (null).
  * - Without a trace, a minimal one is written with no prompt at all.
  */
-export function reapedTrace(existing: unknown, row: ReapedRunRow, at: Date): RunTrace {
-  const persistence = { state: 'reaped' as const, at: at.toISOString(), note: REAPED_NOTE };
+export function reapedTrace(existing: unknown, row: ReapedRunRow, at: Date, note: string = REAPED_NOTE): RunTrace {
+  const persistence = { state: 'reaped' as const, at: at.toISOString(), note };
   const measured = row.tokensIn !== null && row.tokensOut !== null;
   const stats = {
     duration_ms: row.durationMs ?? 0,

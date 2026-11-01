@@ -1,8 +1,9 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db, DbOrTx } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
-import { reapedTrace } from '../reaped-trace.js';
+import { REAPED_CANCELLED_NOTE, reapedTrace } from '../reaped-trace.js';
+import { pgSafeDeep, pgSafeText } from '../../../db/pg-text.js';
 
 // ---- in-flight / history --------------------------------------------------
 
@@ -153,6 +154,35 @@ export async function reapStaleRunningRuns(db: Db, now: Date = new Date()): Prom
         tokensOut: t.agentRuns.tokensOut,
         costUsd: t.agentRuns.costUsd,
       });
+    // A cancelled run with no trace at all (the cancel wrote the status, then
+    // the process died before the executor's trace): give it a minimal,
+    // labelled one. Nothing about its request is invented.
+    const orphanCancelled = await tx
+      .select({
+        id: t.agentRuns.id,
+        agentId: t.agentRuns.agentId,
+        provider: t.agentRuns.provider,
+        model: t.agentRuns.model,
+        durationMs: t.agentRuns.durationMs,
+        tokensIn: t.agentRuns.tokensIn,
+        tokensOut: t.agentRuns.tokensOut,
+        costUsd: t.agentRuns.costUsd,
+      })
+      .from(t.agentRuns)
+      .leftJoin(t.runTraces, eq(t.runTraces.runId, t.agentRuns.id))
+      .where(and(eq(t.agentRuns.status, 'cancelled'), isNull(t.runTraces.runId)));
+    if (orphanCancelled.length > 0) {
+      const agentIds = orphanCancelled.map((r) => r.agentId).filter((id): id is string => id !== null);
+      const names = new Map(
+        agentIds.length > 0
+          ? (await tx.select({ id: t.agents.id, name: t.agents.name }).from(t.agents).where(inArray(t.agents.id, agentIds))).map((a) => [a.id, a.name] as const)
+          : [],
+      );
+      for (const row of orphanCancelled) {
+        const agentName = row.agentId ? (names.get(row.agentId) ?? null) : null;
+        await saveRunTrace(tx, row.id, reapedTrace(undefined, { ...row, agentName }, now, REAPED_CANCELLED_NOTE));
+      }
+    }
     if (rows.length === 0) return 0;
     const ids = rows.map((r) => r.id);
     const existing = new Map(
@@ -246,7 +276,7 @@ export async function completeAgentRun(
       grounding: values.grounding,
       score: values.score ?? null,
       blockers: values.blockers ?? null,
-      error: values.error ?? null,
+      error: values.error == null ? null : pgSafeText(values.error),
     })
     .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.status, 'running')))
     .returning({ id: t.agentRuns.id });
@@ -264,10 +294,36 @@ export async function isRunCancelled(db: Db, runId: string): Promise<boolean> {
 
 /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */
 export async function saveRunTrace(db: DbOrTx, runId: string, trace: RunTrace): Promise<void> {
+  // Provider and prompt text may hold characters jsonb rejects (see pg-text.ts).
+  const safe = pgSafeDeep(trace);
   await db
     .insert(t.runTraces)
-    .values({ runId, trace })
-    .onConflictDoUpdate({ target: t.runTraces.runId, set: { trace } });
+    .values({ runId, trace: safe })
+    .onConflictDoUpdate({ target: t.runTraces.runId, set: { trace: safe } });
+}
+
+/**
+ * An API-cancelled run's row keeps only the status the cancel wrote. Fill in
+ * the usage the executor measured, ONLY while the row is cancelled and has no
+ * usage yet; the status is never touched. Returns whether it applied.
+ */
+export async function recordCancelledRunUsage(
+  db: DbOrTx,
+  runId: string,
+  values: Pick<RunCompletion, 'durationMs' | 'tokensIn' | 'tokensOut' | 'costUsd'>,
+): Promise<boolean> {
+  const rows = await db
+    .update(t.agentRuns)
+    .set({ durationMs: values.durationMs, tokensIn: values.tokensIn, tokensOut: values.tokensOut, costUsd: values.costUsd })
+    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.status, 'cancelled'), isNull(t.agentRuns.tokensIn), isNull(t.agentRuns.costUsd)))
+    .returning({ id: t.agentRuns.id });
+  return rows.length > 0;
+}
+
+/** The run's current status (inside a transaction: as that transaction sees it). */
+export async function runStatus(db: DbOrTx, runId: string): Promise<string | null> {
+  const [row] = await db.select({ status: t.agentRuns.status }).from(t.agentRuns).where(eq(t.agentRuns.id, runId));
+  return row?.status ?? null;
 }
 
 export async function getRunTrace(

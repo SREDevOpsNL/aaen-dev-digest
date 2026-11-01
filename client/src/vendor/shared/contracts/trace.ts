@@ -196,9 +196,15 @@ export const PartialOutput = z.object({
 });
 export type PartialOutput = z.infer<typeof PartialOutput>;
 
-/** Written by the boot reaper for a run whose process died before its terminal write. */
+/**
+ * How the terminal trace was written when the normal write could not be.
+ * `reaped`: by the boot reaper, for a run whose process died before its
+ * terminal write (or a cancelled run that never got a trace). `fallback`: by
+ * the executor, after the full trace failed to persist; a minimal trace with
+ * no prompt, stages or partial output.
+ */
 export const TracePersistence = z.object({
-  state: z.literal('reaped'),
+  state: z.enum(['reaped', 'fallback']),
   at: z.string(),
   note: z.string(),
 });
@@ -274,8 +280,18 @@ export const RunTrace = z.object({
   // they existed and is classified at read time, never rewritten.
   dispatch: TraceDispatch.optional(),
   prompt_assembly_source: PromptAssemblySource.optional(),
-  /** sha256 of the top-level `prompt_assembly` (see `TraceStage`). */
+  /** sha256 of the FULL top-level `prompt_assembly` (see `TraceStage`). */
   prompt_assembly_sha256: z.string().optional(),
+  /** UTF-8 bytes of the full top-level assembly's sections. */
+  prompt_assembly_bytes: z.number().int().nonnegative().optional(),
+  /** False when the stored `prompt_assembly` was cut by the size bound. */
+  prompt_assembly_complete: z.boolean().optional(),
+  /**
+   * What the top-level assembly is: `single_stage` = exactly one request's
+   * assembly; `whole_diff` = a map-reduce run's whole-diff assembly, which no
+   * request sent as such (the per-chunk requests are in `stages[]`).
+   */
+  prompt_assembly_scope: z.enum(['single_stage', 'whole_diff']).optional(),
   stages: z.array(TraceStage).optional(),
   partial_output: PartialOutput.nullish(),
   persistence: TracePersistence.optional(),

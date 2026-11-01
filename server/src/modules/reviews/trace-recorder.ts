@@ -11,6 +11,7 @@ import type {
 } from '@devdigest/shared';
 import {
   ProviderOutputError,
+  safeIdentifier,
   type ReviewStage,
   type ReviewStageAttemptEvent,
   type ReviewStageEvent,
@@ -53,7 +54,7 @@ export function assemblyDigest(assembly: PromptAssembly): { sha256: string; byte
 /** An assembly cut so its sections total at most `max` bytes (sections in prompt order; never inside a character). */
 function boundAssembly(assembly: PromptAssembly, max: number): { assembly: PromptAssembly; bytes: number } {
   let left = max;
-  const out: PromptAssembly = { system: '', user: '' };
+  const out: PromptAssembly = { system: '', user: '', ...(assembly.skills_tokens !== undefined ? { skills_tokens: assembly.skills_tokens } : {}) };
   for (const k of ASSEMBLY_KEYS) {
     const value = assembly[k];
     if (value === undefined) continue;
@@ -68,6 +69,20 @@ function boundAssembly(assembly: PromptAssembly, max: number): { assembly: Promp
     left -= end;
   }
   return { assembly: out, bytes: max - left };
+}
+
+/** Bound on the trace's top-level `prompt_assembly` (UTF-8 bytes of its sections). */
+export const TOP_ASSEMBLY_MAX_BYTES = 256 * 1024;
+
+/**
+ * The top-level `prompt_assembly` as stored: cut to TOP_ASSEMBLY_MAX_BYTES
+ * when larger, with the sha256 and byte count of the FULL assembly and
+ * `complete: false` when it was cut.
+ */
+export function topLevelAssembly(assembly: PromptAssembly): { assembly: PromptAssembly; sha256: string; bytes: number; complete: boolean } {
+  const digest = assemblyDigest(assembly);
+  if (digest.bytes <= TOP_ASSEMBLY_MAX_BYTES) return { assembly, ...digest, complete: true };
+  return { assembly: boundAssembly(assembly, TOP_ASSEMBLY_MAX_BYTES).assembly, ...digest, complete: false };
 }
 
 interface StageRecord {
@@ -159,16 +174,23 @@ export class RunTraceRecorder {
 
   /** A stage's usage: the provider result when it completed; else the typed error's, else its attempts', else unknown. */
   private stageUsage(record: StageRecord): { state: UsageState; usage: TraceUsage } {
-    if (record.completedUsage) return { state: 'measured', usage: record.completedUsage };
+    const attempts = [...record.attempts.values()];
+    // An attempt with no response (429, timeout, transport error) or one whose
+    // response omitted a token count has unknown usage. Unknown is never
+    // turned into a measured number, also when the stage completed.
+    const unknownAttempt = attempts.some((a) => !a.usage || a.usage.tokens_in === null || a.usage.tokens_out === null);
+    if (record.completedUsage) {
+      return unknownAttempt
+        ? { state: 'unknown', usage: { tokens_in: null, tokens_out: null, cost_usd: null } }
+        : { state: 'measured', usage: record.completedUsage };
+    }
     const err = record.error;
     if (err instanceof ProviderOutputError) {
       const usage = { tokens_in: err.usage.tokensIn, tokens_out: err.usage.tokensOut, cost_usd: err.usage.costUsd };
       return { state: usage.tokens_in !== null && usage.tokens_out !== null ? 'measured' : 'unknown', usage };
     }
-    const attempts = [...record.attempts.values()];
-    // Every submitted attempt must have reported a response; an attempt with
-    // no response (429, timeout, transport error) has unknown usage.
-    if (attempts.length > 0 && attempts.every((a) => a.usage && a.usage.tokens_in !== null && a.usage.tokens_out !== null)) {
+    // Every submitted attempt must have reported a response with its tokens.
+    if (attempts.length > 0 && !unknownAttempt) {
       return {
         state: 'measured',
         usage: {
@@ -199,9 +221,13 @@ export class RunTraceRecorder {
     };
   }
 
-  /** `stages[]`, each distinct assembly stored once and under the size bounds. */
-  traceStages(topLevelSha256: string | null): TraceStage[] {
-    const stored = new Set<string>(topLevelSha256 ? [topLevelSha256] : []);
+  /**
+   * `stages[]`, each distinct assembly stored once and under the size bounds.
+   * A stage whose digest equals the top-level assembly's references it; it is
+   * complete only when the top-level copy is.
+   */
+  traceStages(top: { sha256: string; complete: boolean } | null): TraceStage[] {
+    const stored = new Set<string>();
     let budget = STAGE_ASSEMBLIES_TOTAL_MAX_BYTES;
     return this.stages.map((record) => {
       const digest = assemblyDigest(record.assembly);
@@ -216,6 +242,7 @@ export class RunTraceRecorder {
         usage,
         attempts: [...record.attempts.values()].sort((a, b) => a.attempt - b.attempt),
       };
+      if (top && digest.sha256 === top.sha256) return top.complete ? stage : { ...stage, assembly_complete: false };
       if (stored.has(digest.sha256)) return stage;
       const limit = Math.min(STAGE_ASSEMBLY_MAX_BYTES, budget);
       if (limit <= 0) return { ...stage, assembly_complete: false, stored_assembly_bytes: 0 };
@@ -254,8 +281,9 @@ export function partialOutputOf(err: unknown, stageId: string): PartialOutput | 
     stage_id: stageId,
     text: err.partialText,
     provider_incomplete: true,
-    finish_reason: err.finishReason,
-    response_id: err.responseId,
+    // Already plain tokens from the error; checked again here, at the trace boundary.
+    finish_reason: safeIdentifier(err.finishReason),
+    response_id: safeIdentifier(err.responseId),
     total_bytes: err.partialTotalBytes,
     ...(storedBytes < err.partialTotalBytes ? { truncated_at_bytes: storedBytes } : {}),
     sha256: err.partialSha256,

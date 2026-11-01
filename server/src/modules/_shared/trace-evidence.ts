@@ -3,7 +3,10 @@
  * READ time only (a stored trace is never rewritten):
  *
  * - `dispatched_request`: written with lifecycle evidence; the assembly is
- *   what was passed to the provider.
+ *   what one request passed to the provider.
+ * - `dispatched_request_whole_diff`: a map-reduce success with lifecycle
+ *   evidence; the top-level assembly is the whole-diff one, which no request
+ *   sent as such, and the executed requests are in `stages[]`.
  * - `agent_config`: written with lifecycle evidence; nothing was dispatched,
  *   so it holds only the agent's system prompt.
  * - `unrecorded`: no evidence of the request survived (a reaped run).
@@ -17,6 +20,7 @@
  */
 export type PromptEvidence =
   | 'dispatched_request'
+  | 'dispatched_request_whole_diff'
   | 'agent_config'
   | 'unrecorded'
   | 'legacy_single_pass'
@@ -25,13 +29,15 @@ export type PromptEvidence =
 
 interface TraceLike {
   prompt_assembly_source?: unknown;
+  prompt_assembly_scope?: unknown;
   tool_calls?: unknown;
 }
 
 export function promptEvidence(trace: unknown): PromptEvidence {
   const t = (trace ?? {}) as TraceLike;
   const source = t.prompt_assembly_source;
-  if (source === 'dispatched_request' || source === 'agent_config' || source === 'unrecorded') return source;
+  if (source === 'dispatched_request') return t.prompt_assembly_scope === 'whole_diff' ? 'dispatched_request_whole_diff' : 'dispatched_request';
+  if (source === 'agent_config' || source === 'unrecorded') return source;
   // Legacy: only the success path ever wrote tool_calls (one per chunk, meta = mode).
   const calls = Array.isArray(t.tool_calls) ? (t.tool_calls as Array<{ meta?: unknown }>) : [];
   if (calls.length === 0) return 'legacy_failed_fallback';
@@ -42,7 +48,12 @@ export function promptEvidence(trace: unknown): PromptEvidence {
 export function skillsRecorded(evidence: PromptEvidence): boolean {
   // The Skills section is in the system message, identical for every chunk,
   // so a whole-diff legacy assembly still shows the Skills that were sent.
-  return evidence === 'dispatched_request' || evidence === 'legacy_single_pass' || evidence === 'legacy_map_reduce_whole_diff';
+  return (
+    evidence === 'dispatched_request' ||
+    evidence === 'dispatched_request_whole_diff' ||
+    evidence === 'legacy_single_pass' ||
+    evidence === 'legacy_map_reduce_whole_diff'
+  );
 }
 
 /** Why a trace's prompt cannot be read as evidence, or null when it can. */

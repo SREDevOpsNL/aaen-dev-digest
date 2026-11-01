@@ -11,7 +11,7 @@ import { loadDiff } from './diff-loader.js';
 import { sha256, type ExperimentRunContext } from '../_shared/experiment.js';
 import { assertSkillsApproved, SKILL_APPROVAL_UNAVAILABLE } from '../_shared/skill-approval.js';
 import { AppError, SkillNotApprovedError } from '../../platform/errors.js';
-import { RunTraceRecorder, assemblyDigest, experimentTotals, partialOutputOf, type RunUsage } from './trace-recorder.js';
+import { RunTraceRecorder, experimentTotals, partialOutputOf, topLevelAssembly, type RunUsage } from './trace-recorder.js';
 import {
   ExperimentRefusedError,
   attemptTotals,
@@ -261,14 +261,18 @@ export class ReviewRunExecutor {
         // Same renderer as assemblePrompt, so this is the section the model received.
         skills_tokens: skillsSectionTokens(skillBlocks, this.container.tokenizer),
       };
-      const assemblySha256 = assemblyDigest(outcome.assembly).sha256;
+      const top = topLevelAssembly(promptAssembly);
+      // Usage: the provider result's totals, unless an attempt's usage was not
+      // reported (then unknown: null, never a measured 0). One object for the
+      // row and the trace stats.
+      const recorded = recorder.totals();
+      const usage: RunUsage =
+        recorded.state === 'unknown' ? recorded : { tokensIn, tokensOut, costUsd: outcome.providerCostUsd, state: 'measured' };
       const persisted = await this.repo.finalizeRunSuccess({
         runId,
         completion: {
           durationMs,
-          tokensIn,
-          tokensOut,
-          costUsd: outcome.providerCostUsd,
+          ...this.usageColumns(usage),
           findingsCount: keptFindings.length,
           grounding,
           score: outcome.review.score,
@@ -294,16 +298,8 @@ export class ReviewRunExecutor {
           runLog.result(`Persisting review ${review.id} with ${findings.length} finding(s) and the run trace`);
           return {
             config: this.traceConfig(pull, agent),
-            stats: {
-              duration_ms: durationMs,
-              tokens_in: tokensIn,
-              tokens_out: tokensOut,
-              cost_usd: outcome.providerCostUsd,
-              findings: findings.length,
-              grounding,
-              usage_state: 'measured',
-            },
-            prompt_assembly: promptAssembly,
+            stats: { duration_ms: durationMs, ...this.usageStats(usage), findings: findings.length, grounding },
+            prompt_assembly: top.assembly,
             tool_calls: outcome.chunks.map((c) => ({
               tool: 'review_file',
               args: c.label,
@@ -319,8 +315,11 @@ export class ReviewRunExecutor {
             ...(slot ? { experiment: finishBlock(slot, 'completed') } : {}),
             dispatch: { state: 'completed' },
             prompt_assembly_source: 'dispatched_request',
-            prompt_assembly_sha256: assemblySha256,
-            stages: recorder.traceStages(assemblySha256),
+            prompt_assembly_sha256: top.sha256,
+            prompt_assembly_bytes: top.bytes,
+            prompt_assembly_complete: top.complete,
+            prompt_assembly_scope: outcome.mode === 'map-reduce' ? 'whole_diff' : 'single_stage',
+            stages: recorder.traceStages(top),
           };
         },
       });
@@ -363,16 +362,19 @@ export class ReviewRunExecutor {
       let trace: RunTrace;
       const last = dispatched ? recorder.lastStage() : undefined;
       if (last) {
-        const assemblySha256 = assemblyDigest(last.assembly).sha256;
+        // The assembly the failing (last prepared) stage passed to the provider; never recomputed.
+        const top = topLevelAssembly({ ...last.assembly, skills_tokens: skillsSectionTokens(skillBlocks, this.container.tokenizer) });
         trace = {
           config: this.traceConfig(pull, agent),
           stats: { duration_ms: durationMs, ...this.usageStats(usage), findings: 0, grounding: '0/0 passed' },
-          // The assembly the failing (last prepared) stage passed to the provider; never recomputed.
-          prompt_assembly: { ...last.assembly, skills_tokens: skillsSectionTokens(skillBlocks, this.container.tokenizer) },
+          prompt_assembly: top.assembly,
           prompt_assembly_source: 'dispatched_request',
-          prompt_assembly_sha256: assemblySha256,
+          prompt_assembly_sha256: top.sha256,
+          prompt_assembly_bytes: top.bytes,
+          prompt_assembly_complete: top.complete,
+          prompt_assembly_scope: 'single_stage',
           dispatch: { state: 'dispatched' },
-          stages: recorder.traceStages(assemblySha256),
+          stages: recorder.traceStages(top),
           // Truncated or schema-invalid output: kept privately here, never parsed into findings.
           partial_output: partialOutputOf(err, last.stage.stage_id),
           tool_calls: [],
@@ -393,17 +395,21 @@ export class ReviewRunExecutor {
       }
       if (experimentBlock) trace.experiment = experimentBlock;
 
-      // The terminal row and the trace commit together. If the transaction
-      // fails, the run stays `running` until the boot reaper marks it.
-      await this.repo
-        .finalizeRunFailure({
-          runId,
-          completion: { status, durationMs, ...this.usageColumns(usage), findingsCount: 0, grounding: '0/0 passed', error: msg },
-          trace,
-        })
-        .catch((persistErr) =>
-          runLog.serverError('terminal write failed; the boot reaper will mark the run', { err: (persistErr as Error).message }),
-        );
+      // The terminal row and the trace commit together. If that transaction
+      // fails, retry once with a minimal trace so the row still reaches its
+      // terminal state; only if that fails too does the run stay `running`
+      // until the boot reaper marks it.
+      const completion = { status, durationMs, ...this.usageColumns(usage), findingsCount: 0, grounding: '0/0 passed', error: msg } as const;
+      try {
+        await this.repo.finalizeRunFailure({ runId, completion, trace });
+      } catch (persistErr) {
+        runLog.serverError('terminal write failed; retrying with a minimal trace', { err: (persistErr as Error).message });
+        await this.repo
+          .finalizeRunFailure({ runId, completion, trace: this.fallbackTrace(pull, agent, durationMs, usage, dispatched, experimentBlock) })
+          .catch((again) =>
+            runLog.serverError('minimal terminal write failed; the boot reaper will mark the run', { err: (again as Error).message }),
+          );
+      }
       this.container.runBus.complete(runId);
       throw err;
     }
@@ -648,6 +654,41 @@ export class ReviewRunExecutor {
   /** Trace stats usage from the SAME run totals the row gets. */
   private usageStats(usage: RunUsage) {
     return { tokens_in: usage.tokensIn, tokens_out: usage.tokensOut, cost_usd: usage.costUsd, usage_state: usage.state };
+  }
+
+  /**
+   * The minimal trace written when the full failure trace could not be
+   * persisted: no prompt, stages, partial output or log, labelled as such.
+   * It keeps the usage totals and the experiment block (the budget reads it).
+   */
+  private fallbackTrace(
+    pull: PullRow,
+    agent: AgentRow,
+    durationMs: number,
+    usage: RunUsage,
+    dispatched: boolean,
+    experimentBlock: ExperimentRunTrace | undefined,
+  ): RunTrace {
+    return {
+      config: this.traceConfig(pull, agent),
+      stats: { duration_ms: durationMs, ...this.usageStats(usage), findings: 0, grounding: '0/0 passed' },
+      prompt_assembly: { system: '', skills: null, memory: null, specs: null, user: '' },
+      prompt_assembly_source: 'unrecorded',
+      dispatch: { state: dispatched ? 'dispatched' : 'not_dispatched' },
+      stages: [],
+      partial_output: null,
+      tool_calls: [],
+      raw_output: '',
+      memory_pulled: [],
+      specs_read: [],
+      log: [],
+      persistence: {
+        state: 'fallback',
+        at: new Date().toISOString(),
+        note: 'The full trace could not be persisted; this minimal trace keeps the terminal state and usage only.',
+      },
+      ...(experimentBlock ? { experiment: experimentBlock } : {}),
+    };
   }
 
   /**

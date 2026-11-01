@@ -19,7 +19,8 @@ import { ExperimentRefusedError } from '../src/modules/reviews/experiment-run.js
 import { ReviewRepository } from '../src/modules/reviews/repository.js';
 import { preDispatchRefusal } from '../src/modules/reviews/run-executor.js';
 import { ReviewService } from '../src/modules/reviews/service.js';
-import { REAPED_NOTE } from '../src/modules/reviews/reaped-trace.js';
+import { REAPED_CANCELLED_NOTE, REAPED_NOTE } from '../src/modules/reviews/reaped-trace.js';
+import { TOP_ASSEMBLY_MAX_BYTES, assemblyDigest } from '../src/modules/reviews/trace-recorder.js';
 import { promptEvidence } from '../src/modules/_shared/trace-evidence.js';
 import { sha256 } from '../src/modules/_shared/experiment.js';
 import { writeCapability } from '../src/experiments/hw2/cli.js';
@@ -70,7 +71,10 @@ function deferred() {
   return { promise, resolve };
 }
 
-type Step = 'ok' | 'invalid-then-ok' | 'truncate' | 'http-429' | 'hold';
+type Step = 'ok' | 'invalid-then-ok' | 'truncate' | 'truncate-nul' | 'ok-nul' | 'ok-no-usage' | 'http-429' | 'hold';
+
+/** Text with characters Postgres text/jsonb rejects: U+0000 and an unpaired surrogate. */
+const NUL_TEXT = 'before\u0000after \uD800 end';
 
 /**
  * A provider that reports its attempts through the stage lifecycle exactly as
@@ -94,13 +98,23 @@ class ScriptedLLM extends MockLLMProvider {
       recorder.submit('initial').failed('http_error', { http_status: 429 });
       throw Object.assign(new Error('429 Provider returned error'), { status: 429 });
     }
-    if (step === 'truncate') {
+    if (step === 'truncate' || step === 'truncate-nul') {
       const a = recorder.submit('initial');
       a.received({ response_id: 'gen-1793471676-synthetic0002', finish_reason: 'length', http_status: 200, usage: { tokens_in: TRUNCATED_USAGE.tokensIn, tokens_out: TRUNCATED_USAGE.tokensOut, cost_usd: TRUNCATED_USAGE.costUsd } });
       a.failed('truncated', { finish_reason: 'length' });
       throw new ProviderOutputError('OpenRouter structured output failed schema validation for Review', {
-        kind: 'truncated', text: TRUNCATED_OUTPUT, usage: TRUNCATED_USAGE, finishReason: 'length', responseId: 'gen-1793471676-synthetic0002', attempts: 1,
+        kind: 'truncated', text: step === 'truncate' ? TRUNCATED_OUTPUT : `${TRUNCATED_OUTPUT}${NUL_TEXT}`, usage: TRUNCATED_USAGE, finishReason: 'length', responseId: 'gen-1793471676-synthetic0002', attempts: 1,
       });
+    }
+    if (step === 'ok-nul') {
+      recorder.submit('initial').received({ response_id: 'gen-ok-nul', finish_reason: 'stop', http_status: 200, usage });
+      const data = { ...CLEAN, summary: `Synthetic ${NUL_TEXT}` };
+      return { data: data as T, model: req.model, tokensIn: 100, tokensOut: 50, providerCostUsd: 0.0001, costUsd: 0.0001, raw: JSON.stringify(data).replace('\\u0000', '\u0000'), attempts: 1 };
+    }
+    if (step === 'ok-no-usage') {
+      // The response omitted its token counts; the adapter's result still carries numbers (the contract's 0).
+      recorder.submit('initial').received({ response_id: 'gen-ok-nousage', finish_reason: 'stop', http_status: 200, usage: { tokens_in: null, tokens_out: null, cost_usd: null } });
+      return ok(0, 0, 0, 1);
     }
     if (step === 'invalid-then-ok') {
       const first = recorder.submit('initial');
@@ -391,12 +405,18 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
       expect(afterTrace).toMatchObject({ dispatch: { state: 'dispatched' }, prompt_assembly_source: 'dispatched_request' });
       expect(afterTrace.stages![0]!.attempts[0]).toMatchObject({ phase: 'response_received', response_id: 'gen-ok-1' });
       expect(llm.structuredCalls).toBe(1);
+      // The API cancel wrote the status only; the row's usage now equals the trace's (same totals), status untouched.
+      const rows = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, first!));
+      expect(rows[0]).toMatchObject({ status: 'cancelled', tokensIn: afterTrace.stats.tokens_in, tokensOut: afterTrace.stats.tokens_out, costUsd: afterTrace.stats.cost_usd });
+      expect(afterTrace.stats).toMatchObject({ tokens_in: 100, tokens_out: 50, cost_usd: 0.0001, usage_state: 'measured' });
+      const beforeRow = (await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, second!)))[0]!;
+      expect(beforeRow).toMatchObject({ status: 'cancelled', tokensIn: beforeTrace.stats.tokens_in, tokensOut: beforeTrace.stats.tokens_out, costUsd: beforeTrace.stats.cost_usd ?? null });
       await app.close();
     });
   });
 
   describe('crash-consistent persistence and the reaper', () => {
-    it('a trace-save failure inside the transaction rolls back the terminal status; the reaper then reports missing evidence', async () => {
+    it('a trace-save failure inside the transaction rolls back the terminal status (the minimal retry failing too); the reaper then reports missing evidence', async () => {
       const { app, llm, pr, agent, service } = await setup();
       llm.steps = ['http-429'];
       const spy = vi.spyOn(ReviewRepository.prototype, 'saveRunTraceIn').mockRejectedValue(new Error('injected trace write failure'));
@@ -404,7 +424,8 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
       try {
         ({ runs: [{ run_id: runId }] } = (await service.runReview(workspaceId, pr.id, [await agent()])) as { runs: [{ run_id: string }] });
         await vi.waitFor(() => expect(spy).toHaveBeenCalled());
-        // Let the rolled-back transaction and the executor's catch finish.
+        // Let the rolled-back transactions and the executor's catch finish.
+        await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2)); // the full trace, then the minimal retry
         await new Promise((r) => setTimeout(r, 300));
       } finally {
         spy.mockRestore();
@@ -456,6 +477,167 @@ d('run traces across the request lifecycle (Testcontainers pg)', () => {
         persistence: { state: 'reaped' },
         stats: { tokens_in: 1142, tokens_out: 4000, cost_usd: 0.00082278, usage_state: 'measured' },
       });
+      await app.close();
+    });
+  });
+
+  describe('text Postgres rejects, retries and bounds', () => {
+    it('a NUL in the partial output: the run still fails terminally, the text is stored with U+FFFD, the hash is of the original', async () => {
+      const { app, llm, pr, agent, service } = await setup();
+      llm.steps = ['truncate-nul'];
+      const { runs } = await service.runReview(workspaceId, pr.id, [await agent()]);
+      const { run, trace } = await settled(runs[0]!.run_id);
+      expect(run.status).toBe('failed');
+      expect(trace.partial_output!.text).toContain('before\uFFFDafter \uFFFD end');
+      expect(trace.partial_output!.text).not.toContain('\u0000');
+      expect(trace.partial_output!.sha256).toBe(sha(`${TRUNCATED_OUTPUT}${NUL_TEXT}`));
+      await app.close();
+    });
+
+    it('a NUL in the prompt (the diff): the failure trace persists with the prompt made storable', async () => {
+      const { app, llm, pr, agent, service } = await setup({ diff: ONE_FILE.replace('retries: 3,', `retries: 3, // ${NUL_TEXT}`) });
+      llm.steps = ['http-429'];
+      const { runs } = await service.runReview(workspaceId, pr.id, [await agent()]);
+      const { run, trace } = await settled(runs[0]!.run_id);
+      expect(run.status).toBe('failed');
+      expect(trace.prompt_assembly_source).toBe('dispatched_request');
+      expect(trace.prompt_assembly.user).toContain('before\uFFFDafter');
+      await app.close();
+    });
+
+    it('a NUL in raw_output and the review text: a billed success stays a success', async () => {
+      const { app, llm, pr, agent, service } = await setup();
+      llm.steps = ['ok-nul'];
+      const { runs } = await service.runReview(workspaceId, pr.id, [await agent()]);
+      const runId = runs[0]!.run_id;
+      const { run, trace } = await settled(runId);
+      expect(run).toMatchObject({ status: 'done', tokensIn: 100, costUsd: 0.0001 });
+      expect(trace.raw_output).toContain('\uFFFD');
+      expect(trace.raw_output).not.toContain('\u0000');
+      const [review] = await reviewsFor(runId);
+      expect(review!.summary).toContain('before\uFFFDafter');
+      await app.close();
+    });
+
+    it('when the full failure trace cannot be written, one retry writes a minimal labelled trace and the row reaches its terminal state', async () => {
+      const { app, llm, pr, agent, service } = await setup();
+      llm.steps = ['truncate'];
+      const spy = vi.spyOn(ReviewRepository.prototype, 'saveRunTraceIn').mockRejectedValueOnce(new Error('injected trace write failure'));
+      try {
+        const { runs } = await service.runReview(workspaceId, pr.id, [await agent()]);
+        const { run, trace } = await settled(runs[0]!.run_id);
+        expect(spy).toHaveBeenCalledTimes(2);
+        expect(run).toMatchObject({ status: 'failed', tokensIn: 1142, tokensOut: 4000, costUsd: 0.00082278 });
+        expect(trace).toMatchObject({
+          persistence: { state: 'fallback' },
+          prompt_assembly_source: 'unrecorded',
+          dispatch: { state: 'dispatched' },
+          stages: [],
+          partial_output: null,
+          log: [],
+          stats: { tokens_in: 1142, tokens_out: 4000, cost_usd: 0.00082278, usage_state: 'measured' },
+        });
+        expect(trace.prompt_assembly).toMatchObject({ system: '', user: '' });
+      } finally {
+        spy.mockRestore();
+      }
+      await app.close();
+    });
+
+    it('a success whose response omitted its token counts is unknown usage (null), not a measured 0', async () => {
+      const { app, llm, pr, agent, service } = await setup();
+      llm.steps = ['ok-no-usage'];
+      const { runs } = await service.runReview(workspaceId, pr.id, [await agent()]);
+      const { run, trace } = await settled(runs[0]!.run_id);
+      expect(run).toMatchObject({ status: 'done', tokensIn: null, tokensOut: null, costUsd: null });
+      expect(trace.stats).toMatchObject({ tokens_in: null, tokens_out: null, cost_usd: null, usage_state: 'unknown' });
+      expect(trace.stages![0]!.usage_state).toBe('unknown');
+      await app.close();
+    });
+
+    it('a top-level prompt over the bound is cut, keeps the full hash and byte count, and the stage copy is not duplicated', async () => {
+      const big = Array.from({ length: 6000 }, (_, i) => `+  line${i}: '${'x'.repeat(40)}',`).join('\n');
+      const diff = `diff --git a/src/big.ts b/src/big.ts\n--- a/src/big.ts\n+++ b/src/big.ts\n@@ -0,0 +1,6000 @@\n${big}`;
+      const { app, pr, agent, service } = await setup({ diff });
+      const { runs } = await service.runReview(workspaceId, pr.id, [await agent({ strategy: 'single-pass' })]);
+      const { run, trace } = await settled(runs[0]!.run_id);
+      expect(run.status).toBe('done');
+      expect(trace.prompt_assembly_complete).toBe(false);
+      expect(trace.prompt_assembly_bytes!).toBeGreaterThan(TOP_ASSEMBLY_MAX_BYTES);
+      expect(assemblyDigest(trace.prompt_assembly).bytes).toBeLessThanOrEqual(TOP_ASSEMBLY_MAX_BYTES);
+      expect(trace.prompt_assembly_sha256).not.toBe(assemblyDigest(trace.prompt_assembly).sha256); // the hash is of the full text
+      expect(trace.stages![0]).toMatchObject({ assembly_sha256: trace.prompt_assembly_sha256, assembly_bytes: trace.prompt_assembly_bytes, assembly_complete: false });
+      expect(trace.stages![0]!.assembly).toBeUndefined();
+      await app.close();
+    });
+
+    it('map-reduce and single-pass successes are distinguishable: whole_diff versus single_stage', async () => {
+      const { app, pr, agent, service } = await setup({ diff: TWO_FILES });
+      const single = await service.runReview(workspaceId, pr.id, [await agent({ strategy: 'single-pass' })]);
+      const map = await service.runReview(workspaceId, pr.id, [await agent({ strategy: 'map-reduce' })]);
+      const s1 = (await settled(single.runs[0]!.run_id)).trace;
+      const m1 = (await settled(map.runs[0]!.run_id)).trace;
+      expect(s1.prompt_assembly_scope).toBe('single_stage');
+      expect(m1.prompt_assembly_scope).toBe('whole_diff');
+      expect(promptEvidence(s1)).toBe('dispatched_request');
+      expect(promptEvidence(m1)).toBe('dispatched_request_whole_diff');
+      expect(m1.stages!.every((st) => st.assembly && st.assembly_complete)).toBe(true); // each chunk's prompt is stored
+      await app.close();
+    });
+  });
+
+  describe('terminal writes never overwrite another terminal trace; the reaper covers cancelled runs', () => {
+    it('a CAS miss on a non-cancelled terminal row (e.g. reaped) writes no trace', async () => {
+      const { app, pr, agent } = await setup();
+      const a = await agent();
+      const [row] = await pg.handle.db.insert(t.agentRuns).values({ workspaceId, agentId: a.id, prId: pr.id, status: 'failed', source: 'local' }).returning();
+      const reaped = { config: { agent: a.name, model: 'gpt-4.1', source: 'local' }, stats: { duration_ms: 0, tokens_in: null, tokens_out: null, cost_usd: null, findings: 0, grounding: '0/0 passed', usage_state: 'unknown' }, prompt_assembly: { system: '', user: '' }, prompt_assembly_source: 'unrecorded', tool_calls: [], raw_output: '', memory_pulled: [], specs_read: [], log: [], persistence: { state: 'reaped', at: '2026-11-01T00:00:00.000Z', note: REAPED_NOTE } } as RunTrace;
+      await pg.handle.db.insert(t.runTraces).values({ runId: row!.id, trace: reaped });
+      const repo = new ReviewRepository(pg.handle.db);
+      const late = { ...reaped, persistence: undefined, prompt_assembly_source: 'dispatched_request' as const, prompt_assembly: { system: 'late', user: 'late' } };
+      const result = await repo.finalizeRunFailure({ runId: row!.id, completion: { status: 'failed', durationMs: 1, tokensIn: 1, tokensOut: 1, costUsd: 1, findingsCount: 0, grounding: '0/0 passed', error: 'late' }, trace: late });
+      expect(result).toEqual({ applied: false, traceWritten: false });
+      const [stored] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, row!.id));
+      expect(stored!.trace).toEqual(reaped);
+      const [after] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, row!.id));
+      expect(after).toMatchObject({ status: 'failed', tokensIn: null, costUsd: null, error: null });
+      await app.close();
+    });
+
+    it('a cancelled run with known usage keeps it; the guarded fill never overwrites', async () => {
+      const { app, pr, agent } = await setup();
+      const a = await agent();
+      const [row] = await pg.handle.db.insert(t.agentRuns).values({ workspaceId, agentId: a.id, prId: pr.id, status: 'cancelled', source: 'local', tokensIn: 5, tokensOut: 6, costUsd: 0.5 }).returning();
+      const repo = new ReviewRepository(pg.handle.db);
+      const trace = { config: { agent: a.name, model: 'm', source: 'local' }, stats: { duration_ms: 1, tokens_in: 0, tokens_out: 0, cost_usd: null, findings: 0, grounding: '0/0 passed' }, prompt_assembly: { system: 's', user: '' }, tool_calls: [], raw_output: '', memory_pulled: [], specs_read: [], log: [] } as RunTrace;
+      expect(await repo.finalizeRunFailure({ runId: row!.id, completion: { status: 'cancelled', durationMs: 1, tokensIn: 0, tokensOut: 0, costUsd: null, findingsCount: 0, grounding: '0/0 passed' }, trace })).toEqual({ applied: false, traceWritten: true });
+      const [after] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, row!.id));
+      expect(after).toMatchObject({ status: 'cancelled', tokensIn: 5, tokensOut: 6, costUsd: 0.5 });
+      await app.close();
+    });
+
+    it('the reaper gives a cancelled run with no trace a minimal labelled one, and leaves a cancelled run that has a trace alone', async () => {
+      const { app, pr, agent } = await setup();
+      const a = await agent();
+      const [bare] = await pg.handle.db.insert(t.agentRuns).values({ workspaceId, agentId: a.id, prId: pr.id, provider: 'openai', model: 'gpt-4.1', status: 'cancelled', source: 'local' }).returning();
+      const [traced] = await pg.handle.db.insert(t.agentRuns).values({ workspaceId, agentId: a.id, prId: pr.id, status: 'cancelled', source: 'local' }).returning();
+      const own = { config: { agent: a.name, model: 'gpt-4.1', source: 'local' }, stats: { duration_ms: 1, tokens_in: 0, tokens_out: 0, cost_usd: null, findings: 0, grounding: '0/0 passed', usage_state: 'none' }, prompt_assembly: { system: 'Synthetic reviewer.', user: '' }, prompt_assembly_source: 'agent_config', tool_calls: [], raw_output: '', memory_pulled: [], specs_read: [], log: [] } as RunTrace;
+      await pg.handle.db.insert(t.runTraces).values({ runId: traced!.id, trace: own });
+
+      await new ReviewService(app.container).reapStaleRuns();
+      const [bareTrace] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, bare!.id));
+      expect(bareTrace!.trace).toMatchObject({
+        persistence: { state: 'reaped', note: REAPED_CANCELLED_NOTE },
+        prompt_assembly_source: 'unrecorded',
+        prompt_assembly: { system: '', user: '', skills: null },
+        stats: { tokens_in: null, tokens_out: null, cost_usd: null, usage_state: 'unknown' },
+        config: { agent: a.name, model: 'gpt-4.1' },
+      });
+      expect((bareTrace!.trace as RunTrace).dispatch).toBeUndefined();
+      const [bareRow] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, bare!.id));
+      expect(bareRow!.status).toBe('cancelled');
+      const [ownTrace] = await pg.handle.db.select().from(t.runTraces).where(eq(t.runTraces.runId, traced!.id));
+      expect(ownTrace!.trace).toEqual(own);
       await app.close();
     });
   });
