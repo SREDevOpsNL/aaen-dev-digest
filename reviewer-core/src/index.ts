@@ -50,7 +50,32 @@ export {
   type ReviewEvent,
   type ReviewStrategy,
   type ReviewMode,
+  type ReviewStage,
+  type ReviewStageUsage,
+  type ReviewStageEvent,
+  type ReviewStageAttemptEvent,
 } from './review/run.js';
+
+// Request lifecycle evidence (stage attempts) and the typed provider errors.
+export {
+  AttemptRecorder,
+  reportedNumber,
+  type AttemptHandle,
+  type AttemptLifecycle,
+  type AttemptLifecycleEvent,
+  type AttemptOutcome,
+  type AttemptPhase,
+  type AttemptRetryKind,
+  type AttemptUsage,
+  type LifecycleStructuredRequest,
+} from './llm/lifecycle.js';
+export {
+  PARTIAL_OUTPUT_MAX_BYTES,
+  ProviderOutputError,
+  ReviewRefusedError,
+  boundUtf8,
+  type ProviderOutputUsage,
+} from './llm/provider-output-error.js';
 
 // Output: grounded Review → GitHubReviewPayload (body + inline comments + event).
 export {

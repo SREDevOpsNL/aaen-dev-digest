@@ -7,12 +7,15 @@ import type {
   ChatMessage,
   StructuredAttemptTelemetry,
   StructuredExperimentOptions,
+  StructuredResult,
   UnifiedDiff,
 } from '@devdigest/shared';
 import { Review as ReviewSchema } from '@devdigest/shared';
 import { assemblePrompt } from '../prompt.js';
 import { groundFindings, groundingSummary } from '../grounding.js';
 import { reduceReviews, scoreFromFindings, sliceDiff } from './reduce.js';
+import type { AttemptLifecycleEvent, LifecycleStructuredRequest } from '../llm/lifecycle.js';
+import { ReviewRefusedError } from '../llm/provider-output-error.js';
 
 /**
  * reviewPullRequest — the review engine entry point.
@@ -36,6 +39,43 @@ export const DEFAULT_REVIEW_MAX_RETRIES = 2;
 
 export type ReviewStrategy = 'auto' | 'single-pass' | 'map-reduce';
 export type ReviewMode = 'single-pass' | 'map-reduce';
+
+/**
+ * One provider request of a review. Single pass has one stage (`single-0`);
+ * map-reduce has one per chunk (`map-0`, `map-1`, …), and a model-backed
+ * reduce would add `reduce-0` (today's reduce is deterministic, so it has none).
+ */
+export interface ReviewStage {
+  stage_id: string;
+  kind: 'single' | 'map' | 'reduce';
+  index: number;
+  count: number;
+  label: string;
+}
+
+/** Usage a completed stage's provider result reported. */
+export interface ReviewStageUsage {
+  tokens_in: number;
+  tokens_out: number;
+  /** Provider-reported USD cost; null when the provider did not report it. */
+  provider_cost_usd: number | null;
+  cost_usd: number | null;
+}
+
+/**
+ * Stage lifecycle, as the engine sees it:
+ * - `prepared`: the exact assembly about to be passed to the provider (emitted
+ *   immediately before the call, after the cancellation checkpoint);
+ * - `completed`: the provider returned a schema-valid result;
+ * - `failed`: the provider call threw (`error` is what it threw).
+ */
+export type ReviewStageEvent =
+  | { type: 'prepared'; stage: ReviewStage; assembly: PromptAssembly }
+  | { type: 'completed'; stage_id: string; usage: ReviewStageUsage; attempts: number }
+  | { type: 'failed'; stage_id: string; error: unknown };
+
+/** A provider attempt of one stage (see `AttemptLifecycleEvent`). */
+export type ReviewStageAttemptEvent = AttemptLifecycleEvent & { stage_id: string };
 
 /** Progress event emitted during a review (server → SSE bus, runner → log). */
 export interface ReviewEvent {
@@ -95,6 +135,17 @@ export interface ReviewInput {
   /** Progress sink. */
   onEvent?: (e: ReviewEvent) => void;
   /**
+   * Stage lifecycle sink (evidence for the run trace). Called synchronously;
+   * an error it throws is ignored. Unlike `onEvent`, its payload carries the
+   * full prompt: keep it out of logs and live streams.
+   */
+  onStage?: (e: ReviewStageEvent) => void;
+  /**
+   * Per-attempt sink, forwarded to the provider as the stage's lifecycle. A
+   * provider that does not report attempts simply never calls it.
+   */
+  onStageAttempt?: (e: ReviewStageAttemptEvent) => void;
+  /**
    * Cancellation checkpoint, awaited before each (expensive) chunk LLM call.
    * Supply a function that THROWS (or returns a rejecting promise) to abort
    * mid-run; the caller owns the error type (e.g. the server's
@@ -113,7 +164,11 @@ export interface ReviewOutcome {
   dropped: { finding: Finding; reason: string }[];
   /** Which path ran. */
   mode: ReviewMode;
-  /** Prompt assembly (for the run trace). Single-pass: the one call; map-reduce: the whole-diff assembly. */
+  /**
+   * Prompt assembly (for the run trace). Single-pass: the one call; map-reduce:
+   * the whole-diff assembly, which no request sent as such (the per-chunk
+   * assemblies are reported through `onStage`).
+   */
   assembly: PromptAssembly;
   /** Per-chunk labels (for the run trace's tool_calls). */
   chunks: { label: string }[];
@@ -168,7 +223,7 @@ export const REVIEW_SCHEMA_NAME = 'Review';
 
 export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutcome> {
   if (input.experiment && input.strategy !== 'single-pass') {
-    throw new Error("Experiment mode requires strategy 'single-pass' (one request per slot)");
+    throw new ReviewRefusedError('strategy_guard', "Experiment mode requires strategy 'single-pass' (one request per slot)");
   }
   const threshold = input.mapThresholdLines ?? DEFAULT_MAP_THRESHOLD_LINES;
   // Experiment mode never reprompts; the provider enforces it, this keeps the count honest.
@@ -186,6 +241,15 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     mode === 'map-reduce'
       ? input.diff.files.map((f) => ({ label: f.path, diffText: sliceDiff(input.diff, f.path) }))
       : [{ label: 'all files', diffText: input.diff.raw }];
+  const stageKind = mode === 'map-reduce' ? 'map' : 'single';
+  // Evidence sinks never change the review's outcome.
+  const stageEvent = (e: ReviewStageEvent) => {
+    try {
+      input.onStage?.(e);
+    } catch {
+      /* ignored */
+    }
+  };
 
   emit(
     'info',
@@ -201,7 +265,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
   let costUsd: number | null = 0;
   const raws: string[] = [];
 
-  for (const chunk of chunks) {
+  for (const [index, chunk] of chunks.entries()) {
     // Cancellation checkpoint — stop before the next (expensive) LLM call.
     await input.checkCancelled?.();
     // 'map:' prefix only for the map-reduce path (one call per file). In
@@ -213,7 +277,9 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     );
     const a = assemblePrompt({ ...promptParts, diff: chunk.diffText });
     if (mode === 'single-pass') assembly = a.assembly;
-    const res = await input.llm.completeStructured<Review>({
+    const stage: ReviewStage = { stage_id: `${stageKind}-${index}`, kind: stageKind, index, count: chunks.length, label: chunk.label };
+    const onStageAttempt = input.onStageAttempt;
+    const request: LifecycleStructuredRequest<Review> = {
       model: input.model,
       schema: ReviewSchema,
       schemaName: REVIEW_SCHEMA_NAME,
@@ -222,6 +288,24 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       ...(input.experiment ? { experiment: input.experiment } : {}),
       ...(input.onAttempt ? { onAttempt: input.onAttempt } : {}),
+      ...(onStageAttempt
+        ? { lifecycle: { stageId: stage.stage_id, report: (e: AttemptLifecycleEvent) => onStageAttempt({ stage_id: stage.stage_id, ...e }) } }
+        : {}),
+    };
+    // Marked immediately before the call, with the exact assembly it sends.
+    stageEvent({ type: 'prepared', stage, assembly: a.assembly });
+    let res: StructuredResult<Review>;
+    try {
+      res = await input.llm.completeStructured<Review>(request);
+    } catch (error) {
+      stageEvent({ type: 'failed', stage_id: stage.stage_id, error });
+      throw error;
+    }
+    stageEvent({
+      type: 'completed',
+      stage_id: stage.stage_id,
+      usage: { tokens_in: res.tokensIn, tokens_out: res.tokensOut, provider_cost_usd: res.providerCostUsd, cost_usd: res.costUsd },
+      attempts: res.attempts,
     });
     tokensIn += res.tokensIn;
     tokensOut += res.tokensOut;

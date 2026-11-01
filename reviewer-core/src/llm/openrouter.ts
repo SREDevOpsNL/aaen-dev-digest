@@ -16,11 +16,15 @@ import {
   GENERATION_ID,
   emptyGeneration,
   experimentOptionsProblem,
+  generationTokenDetail,
+  responseReasoningTokens,
   parseEndpoints,
   summarizeGeneration,
   summarizeRouterMetadata,
 } from './openrouter-metadata.js';
 import { ExperimentRequestError, attemptErrorDetail, failedResponseTelemetry, sanitizeText } from './error-detail.js';
+import { AttemptRecorder, reportedNumber, type AttemptOutcome, type AttemptTokenDetail, type LifecycleStructuredRequest } from './lifecycle.js';
+import { ProviderOutputError } from './provider-output-error.js';
 
 /** Bound on a persisted failure reason. */
 const FAILURE_REASON_MAX = 500;
@@ -113,6 +117,14 @@ export function experimentRequestBody(
   } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
 }
 
+/** How a request that produced no response ended, from the SDK's error type only (never its message). */
+function transportOutcome(err: unknown): AttemptOutcome {
+  if (err instanceof OpenAI.APIUserAbortError) return 'cancelled';
+  if (err instanceof OpenAI.APIConnectionTimeoutError) return 'timeout';
+  if (err instanceof OpenAI.APIError && typeof err.status === 'number') return 'http_error';
+  return 'network_error';
+}
+
 export class OpenRouterProvider implements LLMProvider {
   readonly id: 'openai' | 'openrouter';
   private client: OpenAI;
@@ -145,8 +157,12 @@ export class OpenRouterProvider implements LLMProvider {
     });
   }
 
-  async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+  async completeStructured<T>(req: LifecycleStructuredRequest<T>): Promise<StructuredResult<T>> {
     if (req.experiment) return this.completeExperiment(req);
+    // Attempts of this stage. The SDK's own transport retries (`maxRetries`)
+    // happen inside one `create()` and are not visible here: one record per
+    // structured attempt, each `submitted` before its `create()`.
+    const recorder = new AttemptRecorder(req.lifecycle);
     const jsonSchema = toJsonSchema(req.schema, req.schemaName);
     const maxRetries = req.maxRetries ?? 2;
     const messages = [...req.messages];
@@ -156,9 +172,14 @@ export class OpenRouterProvider implements LLMProvider {
     let hasAnyProviderCost = false;
     let hasCompleteProviderCost = this.id === 'openrouter';
     let lastRaw = '';
+    let lastFinish: string | null = null;
+    let lastResponseId: string | null = null;
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-      const res = await this.client.chat.completions.create({
+      const tracked = recorder.submit(attempt === 1 ? 'initial' : 'structured_retry');
+      let res: OpenAI.Chat.ChatCompletion;
+      try {
+        res = await this.client.chat.completions.create({
         model: req.model,
         messages,
         temperature: req.temperature ?? 0,
@@ -173,12 +194,31 @@ export class OpenRouterProvider implements LLMProvider {
         // OpenRouter usage accounting — ask it to return the REAL generation
         // cost (USD) in `usage.cost`, instead of estimating from a price book.
         ...(this.id === 'openrouter' ? { usage: { include: true } } : {}),
+        });
+      } catch (err) {
+        tracked.failed(transportOutcome(err), { http_status: err instanceof OpenAI.APIError && typeof err.status === 'number' ? err.status : null });
+        throw err;
+      }
+      const responseUsage = res.usage as (OpenAI.Completions.CompletionUsage & { cost?: number }) | null | undefined;
+      lastResponseId = typeof res.id === 'string' ? res.id : null;
+      lastFinish = res.choices?.[0]?.finish_reason ?? null;
+      tracked.received({
+        response_id: lastResponseId,
+        finish_reason: lastFinish,
+        http_status: 200,
+        usage: {
+          tokens_in: reportedNumber(responseUsage?.prompt_tokens),
+          tokens_out: reportedNumber(responseUsage?.completion_tokens),
+          cost_usd: reportedNumber(responseUsage?.cost),
+          detail: { reasoning_tokens: responseReasoningTokens(responseUsage) },
+        },
       });
 
       // OpenRouter can return HTTP 200 with no `choices` (an upstream provider
       // error / moderation / free-tier limit in the body) — surface it.
       const choice = res.choices?.[0];
       if (!choice) {
+        tracked.failed('http_error', { http_status: 200 });
         const errMsg = (res as unknown as { error?: { message?: string } }).error?.message;
         throw new Error(`OpenRouter returned no choices for ${req.schemaName}${errMsg ? `: ${errMsg}` : ''}`);
       }
@@ -210,10 +250,18 @@ export class OpenRouterProvider implements LLMProvider {
           attempts: attempt,
         };
       }
+      tracked.failed(choice.finish_reason === 'length' ? 'truncated' : 'schema_invalid', { finish_reason: choice.finish_reason ?? null });
       messages.push({ role: 'assistant', content: lastRaw });
       messages.push({ role: 'user', content: parsed.repromptMessage });
     }
-    throw new Error(`OpenRouter structured output failed schema validation for ${req.schemaName}`);
+    throw new ProviderOutputError(`OpenRouter structured output failed schema validation for ${req.schemaName}`, {
+      kind: lastFinish === 'length' ? 'truncated' : 'schema_invalid',
+      text: lastRaw,
+      usage: { tokensIn, tokensOut, costUsd: hasCompleteProviderCost ? providerCostUsd : null },
+      finishReason: lastFinish,
+      responseId: lastResponseId,
+      attempts: maxRetries + 1,
+    });
   }
 
   /**
@@ -223,8 +271,9 @@ export class OpenRouterProvider implements LLMProvider {
    * a thrown error, is reported through `req.onAttempt` before returning or
    * throwing. Provenance comes only from OpenRouter's metadata.
    */
-  private async completeExperiment<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+  private async completeExperiment<T>(req: LifecycleStructuredRequest<T>): Promise<StructuredResult<T>> {
     const options = req.experiment!;
+    const recorder = new AttemptRecorder(req.lifecycle);
     const started = Date.now();
     const base: StructuredAttemptTelemetry = {
       sequence: 1,
@@ -276,6 +325,8 @@ export class OpenRouterProvider implements LLMProvider {
 
     let data: OpenAI.Chat.ChatCompletion & { openrouter_metadata?: unknown };
     let headers: Headers | null = null;
+    // The one HTTP request of this slot (experiment mode never retries).
+    const tracked = recorder.submit('initial');
     try {
       const result = await this.client.chat.completions.create(body, requestOptions).withResponse();
       data = result.data as typeof data;
@@ -314,6 +365,7 @@ export class OpenRouterProvider implements LLMProvider {
         failureReason,
         errorDetail,
       });
+      tracked.failed(cancelled ? 'cancelled' : timedOut ? 'timeout' : status === null ? 'network_error' : 'http_error', { http_status: status });
       if (cancelled) {
         // The SDK's abort error carries no status, body or headers. Any other
         // error that coincides with the caller's abort (an HTTP error answered
@@ -333,6 +385,20 @@ export class OpenRouterProvider implements LLMProvider {
     const responseId = typeof data.id === 'string' ? data.id : null;
     const generationIdHeader = headers?.get('x-generation-id') ?? null;
     const generationId = [responseId, generationIdHeader].find((id): id is string => !!id && GENERATION_ID.test(id)) ?? null;
+    tracked.received({
+      response_id: responseId,
+      finish_reason: choice?.finish_reason ?? null,
+      http_status: 200,
+      usage: {
+        tokens_in: reportedNumber(usage?.prompt_tokens),
+        tokens_out: reportedNumber(usage?.completion_tokens),
+        cost_usd: cost,
+        detail: { reasoning_tokens: responseReasoningTokens(usage) },
+      },
+    });
+    const lookup = options.generationLookup && generationId
+      ? await this.lookupGeneration(generationId, options.generationLookup, req.signal)
+      : null;
     const dispatched: Partial<StructuredAttemptTelemetry> = {
       dispatch: 'dispatched',
       httpStatus: 200,
@@ -345,12 +411,17 @@ export class OpenRouterProvider implements LLMProvider {
       costUsd: cost,
       router: summarizeRouterMetadata(data.openrouter_metadata),
       routerMetadataRaw: data.openrouter_metadata ?? null,
-      generation: options.generationLookup
-        ? generationId
-          ? await this.lookupGeneration(generationId, options.generationLookup, req.signal)
-          : emptyGeneration('unavailable')
-        : null,
+      generation: options.generationLookup ? (lookup?.summary ?? emptyGeneration('unavailable')) : null,
     };
+
+    if (dispatched.generation?.status === 'found') {
+      tracked.verified({
+        tokens_in: dispatched.generation.tokensPrompt,
+        tokens_out: dispatched.generation.tokensCompletion,
+        cost_usd: dispatched.generation.totalCost,
+        ...(lookup?.detail ? { detail: lookup.detail } : {}),
+      });
+    }
 
     if (!choice) {
       // An HTTP 200 whose body holds only an `error` (an upstream failure after OpenRouter committed the status).
@@ -359,21 +430,32 @@ export class OpenRouterProvider implements LLMProvider {
       // A failed generation: no raw `openrouter_metadata`, only bounded identifiers.
       const failed = failedResponseTelemetry(dispatched as StructuredAttemptTelemetry, [this.apiKey]);
       report({ ...dispatched, ...failed, outcome: 'http_error', failureReason: reason, errorDetail });
+      tracked.failed('http_error', { http_status: 200 });
       throw new ExperimentRequestError(reason, null);
     }
     const raw = choice.message?.content ?? '';
     // A length stop is truncation even if what arrived happens to parse: the
     // answer was cut at the output cap, so it is not a complete review.
+    const outputEvidence = (kind: 'truncated' | 'schema_invalid') => ({
+      kind,
+      text: raw,
+      usage: { tokensIn: reportedNumber(usage?.prompt_tokens), tokensOut: reportedNumber(usage?.completion_tokens), costUsd: cost },
+      finishReason: choice.finish_reason ?? null,
+      responseId,
+      attempts: 1,
+    });
     if (choice.finish_reason === 'length') {
       const reason = `output reached the max_tokens cap (finish_reason=length) for ${req.schemaName}; experiment mode does not reprompt`;
       report({ ...dispatched, outcome: 'truncated', failureReason: reason });
-      throw new Error(reason);
+      tracked.failed('truncated', { finish_reason: 'length' });
+      throw new ProviderOutputError(reason, outputEvidence('truncated'));
     }
     const parsed = parseWithRepair(req.schema, raw);
     if (!parsed.ok) {
       const reason = `structured output failed schema validation for ${req.schemaName} (finish_reason=${choice.finish_reason ?? 'unknown'}; experiment mode does not reprompt)`;
       report({ ...dispatched, outcome: 'schema_invalid', failureReason: reason });
-      throw new Error(reason);
+      tracked.failed('schema_invalid', { finish_reason: choice.finish_reason ?? null });
+      throw new ProviderOutputError(reason, outputEvidence('schema_invalid'));
     }
     report({ ...dispatched, outcome: 'valid' });
     const tokensIn = usage?.prompt_tokens ?? 0;
@@ -410,10 +492,11 @@ export class OpenRouterProvider implements LLMProvider {
     id: string,
     policy: { attempts: number; delayMs: number },
     signal?: AbortSignal,
-  ): Promise<GenerationMetadataSummary> {
+  ): Promise<{ summary: GenerationMetadataSummary; detail: AttemptTokenDetail | null }> {
     const deadline = this.now() + generationLookupDeadlineMs(policy, this.lookupReadTimeoutMs);
-    let found: GenerationMetadataSummary | null = null;
+    let found: { summary: GenerationMetadataSummary; detail: AttemptTokenDetail } | null = null;
     let missing: 'not_found' | 'unavailable' = 'not_found';
+    const none = (status: 'not_found' | 'unavailable') => ({ summary: emptyGeneration(status), detail: null });
     for (let attempt = 1; attempt <= Math.max(policy.attempts, 1); attempt++) {
       if (attempt > 1) {
         if (this.now() + policy.delayMs >= deadline) break; // never wait past the deadline
@@ -435,16 +518,17 @@ export class OpenRouterProvider implements LLMProvider {
           missing = 'unavailable';
           continue;
         }
-        if (!res.ok) return found ?? emptyGeneration('unavailable');
-        const summary = summarizeGeneration(await res.json());
-        if (summary.status !== 'found') return found ?? summary;
-        found = summary;
-        if (summary.providerResponses.length > 0) return summary;
+        if (!res.ok) return found ?? none('unavailable');
+        const body: unknown = await res.json();
+        const summary = summarizeGeneration(body);
+        if (summary.status !== 'found') return found ?? { summary, detail: null };
+        found = { summary, detail: generationTokenDetail(body) };
+        if (summary.providerResponses.length > 0) return found;
       } catch {
         missing = 'unavailable';
       }
     }
-    return found ?? emptyGeneration(signal?.aborted ? 'unavailable' : missing);
+    return found ?? none(signal?.aborted ? 'unavailable' : missing);
   }
 
   /** Per-provider endpoints of `model` with prices and limits (free metadata call). */

@@ -13,6 +13,7 @@ import type {
   RouterMetadataSummary,
   StructuredExperimentOptions,
 } from '@devdigest/shared';
+import type { AttemptTokenDetail } from './lifecycle.js';
 
 type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -62,6 +63,27 @@ export function summarizeGeneration(body: unknown): GenerationMetadataSummary {
       status: num(entry.status),
     })),
   };
+}
+
+/**
+ * The token breakdown a `GET /generation` body reports (native, normalized,
+ * reasoning). Fields it does not carry are null; nothing is derived.
+ */
+export function generationTokenDetail(body: unknown): AttemptTokenDetail {
+  const data = isObject(body) && isObject(body.data) ? body.data : null;
+  return {
+    reasoning_tokens: num(data?.native_tokens_reasoning),
+    native_prompt_tokens: num(data?.native_tokens_prompt),
+    native_completion_tokens: num(data?.native_tokens_completion),
+    normalized_prompt_tokens: num(data?.tokens_prompt),
+    normalized_completion_tokens: num(data?.tokens_completion),
+  };
+}
+
+/** The reasoning-token count a chat response's `usage` reports, or null. */
+export function responseReasoningTokens(usage: unknown): number | null {
+  const details = isObject(usage) && isObject(usage.completion_tokens_details) ? usage.completion_tokens_details : null;
+  return num(details?.reasoning_tokens);
 }
 
 export function emptyGeneration(status: 'not_found' | 'unavailable'): GenerationMetadataSummary {

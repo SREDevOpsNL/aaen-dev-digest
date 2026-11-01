@@ -4,7 +4,6 @@ import type {
   ModelInfo,
   CompletionRequest,
   CompletionResult,
-  StructuredRequest,
   StructuredResult,
   ChatMessage,
 } from '@devdigest/shared';
@@ -12,6 +11,8 @@ import { withRetry, withTimeout } from '../../platform/resilience.js';
 import { toJsonSchema, parseWithRepair } from '../../platform/structured.js';
 import { estimateCost } from './pricing.js';
 import { ExternalServiceError } from '../../platform/errors.js';
+import { AttemptRecorder, reportedNumber, type AttemptHandle, type LifecycleStructuredRequest } from '@devdigest/reviewer-core';
+import { httpStatusOf, transportOutcome } from './attempt-outcome.js';
 
 const DEFAULT_TIMEOUT = 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -86,7 +87,7 @@ export class AnthropicProvider implements LLMProvider {
     };
   }
 
-  async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+  async completeStructured<T>(req: LifecycleStructuredRequest<T>): Promise<StructuredResult<T>> {
     const jsonSchema = toJsonSchema(req.schema, req.schemaName);
     const toolName = req.schemaName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const maxRetries = req.maxRetries ?? 2;
@@ -95,10 +96,17 @@ export class AnthropicProvider implements LLMProvider {
     let tokensIn = 0;
     let tokensOut = 0;
     let lastRaw = '';
+    // One attempt record per HTTP call: withRetry's transport retries included.
+    const recorder = new AttemptRecorder(req.lifecycle);
+    let tracked: AttemptHandle | undefined;
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-      const res = await withRetry(() =>
-        withTimeout(
+      let transport = 0;
+      const res = await withRetry(async () => {
+        const handle = recorder.submit(transport++ > 0 ? 'transport_retry' : attempt === 1 ? 'initial' : 'structured_retry');
+        tracked = handle;
+        try {
+          const response = await withTimeout(
           this.client.messages.create({
             model: req.model,
             system: system || undefined,
@@ -115,8 +123,20 @@ export class AnthropicProvider implements LLMProvider {
             tool_choice: { type: 'tool', name: toolName },
           }),
           req.timeoutMs ?? DEFAULT_TIMEOUT,
-        ),
-      );
+          );
+          handle.received({
+            response_id: typeof response.id === 'string' ? response.id : null,
+            finish_reason: response.stop_reason ?? null,
+            http_status: 200,
+            // Anthropic reports no per-request cost: unknown, never 0.
+            usage: { tokens_in: reportedNumber(response.usage?.input_tokens), tokens_out: reportedNumber(response.usage?.output_tokens), cost_usd: null },
+          });
+          return response;
+        } catch (err) {
+          handle.failed(transportOutcome(err), { http_status: httpStatusOf(err) });
+          throw err;
+        }
+      });
       tokensIn += res.usage.input_tokens;
       tokensOut += res.usage.output_tokens;
 
@@ -138,6 +158,7 @@ export class AnthropicProvider implements LLMProvider {
           attempts: attempt,
         };
       }
+      tracked?.failed(res.stop_reason === 'max_tokens' ? 'truncated' : 'schema_invalid', { finish_reason: res.stop_reason ?? null });
       messages.push({ role: 'assistant', content: res.content });
       messages.push({
         role: 'user',
