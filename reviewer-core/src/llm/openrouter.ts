@@ -22,7 +22,7 @@ import {
   summarizeGeneration,
   summarizeRouterMetadata,
 } from './openrouter-metadata.js';
-import { ExperimentRequestError, attemptErrorDetail, failedResponseTelemetry, sanitizeText } from './error-detail.js';
+import { ExperimentRequestError, attemptErrorDetail, failedResponseTelemetry, safeCount, safeToken, sanitizeText } from './error-detail.js';
 import { AttemptRecorder, reportedNumber, safeIdentifier, type AttemptOutcome, type AttemptTokenDetail, type LifecycleStructuredRequest } from './lifecycle.js';
 import { ProviderOutputError } from './provider-output-error.js';
 
@@ -401,7 +401,8 @@ export class OpenRouterProvider implements LLMProvider {
     // Provider-controlled identifiers, kept only as plain tokens (as the failed path's telemetry does).
     const responseId = safeIdentifier(data.id);
     const finishReason = safeIdentifier(choice?.finish_reason);
-    const generationIdHeader = headers?.get('x-generation-id') ?? null;
+    // A raw response header: kept only as a bounded plain token, as the failed path's telemetry does.
+    const generationIdHeader = safeToken(headers?.get('x-generation-id'), 128, [this.apiKey]);
     const generationId = [responseId, generationIdHeader].find((id): id is string => !!id && GENERATION_ID.test(id)) ?? null;
     tracked.received({
       response_id: responseId,
@@ -422,10 +423,10 @@ export class OpenRouterProvider implements LLMProvider {
       httpStatus: 200,
       responseId,
       generationIdHeader,
-      servedModel: typeof data.model === 'string' ? data.model : null,
+      servedModel: safeToken(data.model, 64, [this.apiKey]),
       finishReason,
-      tokensIn: usage?.prompt_tokens ?? null,
-      tokensOut: usage?.completion_tokens ?? null,
+      tokensIn: safeCount(usage?.prompt_tokens),
+      tokensOut: safeCount(usage?.completion_tokens),
       costUsd: cost,
       router: summarizeRouterMetadata(data.openrouter_metadata),
       routerMetadataRaw: data.openrouter_metadata ?? null,

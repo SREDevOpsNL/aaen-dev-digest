@@ -31,13 +31,14 @@ export const RATE_LIMIT_HEADERS = [
 ] as const;
 
 const REDACTED = '[redacted]';
-const SECRET_PATTERNS: Array<[RegExp, string]> = [
+/** Credential shapes: bearer values, `sk-` keys, `key=value` secrets, URL query strings. */
+const KEY_PATTERNS: Array<[RegExp, string]> = [
   [/\bBearer\s+[^\s"',;]+/gi, `Bearer ${REDACTED}`],
   [/\bsk-[A-Za-z0-9_-]{8,}/g, REDACTED],
   [/\b(api[_-]?key|access[_-]?token|token|secret|password|authorization)(["']?\s*[:=]\s*["']?)[^\s"',;&]+/gi, `$1$2${REDACTED}`],
   [/(https?:\/\/[^\s?"'<>]+)\?[^\s"'<>]*/g, `$1?${REDACTED}`],
-  [/[A-Za-z0-9+/_-]{32,}={0,2}/g, REDACTED],
 ];
+const SECRET_PATTERNS: Array<[RegExp, string]> = [...KEY_PATTERNS, [/[A-Za-z0-9+/_-]{32,}={0,2}/g, REDACTED]];
 /** Characters allowed in identifiers, codes, names and header values. */
 const TOKEN = /^[A-Za-z0-9 ._:/()+,-]+$/;
 
@@ -69,6 +70,32 @@ function header(headers: unknown, name: string): unknown {
  * given exact values redacted, whitespace collapsed, at most `max` characters.
  */
 export function sanitizeText(value: unknown, max: number, secrets: readonly string[] = [], bag: Bag = { redacted: false }): string | null {
+  return sanitizeWith(SECRET_PATTERNS, value, max, secrets, bag);
+}
+
+/**
+ * An error message made safe to persist and stream: like `sanitizeText`
+ * (control characters removed, credential shapes and `secrets` redacted,
+ * whitespace collapsed, at most `max` characters), but long opaque tokens
+ * are kept, because the studio's own refusal messages carry sha256
+ * fingerprints and ids that are evidence, not secrets. Non-strings become
+ * null.
+ */
+export function sanitizeErrorText(value: unknown, max: number, secrets: readonly string[] = []): string | null {
+  return sanitizeWith(KEY_PATTERNS, value, max, secrets, { redacted: false });
+}
+
+/** A short plain token (an id, a model name, a header value), or null when unsafe; see `failedResponseTelemetry`. */
+export function safeToken(value: unknown, max: number = TOKEN_MAX, secrets: readonly string[] = []): string | null {
+  return token(value, max, secrets, { redacted: false });
+}
+
+/** A non-negative integer count as reported, else null. */
+export function safeCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function sanitizeWith(patterns: Array<[RegExp, string]>, value: unknown, max: number, secrets: readonly string[], bag: Bag): string | null {
   if (typeof value !== 'string') return null;
   let text = value.length > SCAN_MAX ? value.slice(0, SCAN_MAX) : value;
   if (text.length !== value.length) bag.redacted = true;
@@ -80,7 +107,7 @@ export function sanitizeText(value: unknown, max: number, secrets: readonly stri
   }
   // eslint-disable-next-line no-control-regex
   text = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ');
-  for (const [pattern, replacement] of SECRET_PATTERNS) {
+  for (const [pattern, replacement] of patterns) {
     const next = text.replace(pattern, replacement);
     if (next !== text) bag.redacted = true;
     text = next;

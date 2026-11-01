@@ -361,3 +361,36 @@ describe('review fixes: provider-controlled text never reaches evidence or messa
     expect(okAttempts[0]).toMatchObject({ outcome: 'valid', responseId: null, finishReason: 'stop' });
   });
 });
+
+describe('review follow-ups: success telemetry and error text', () => {
+  it('experiment success telemetry keeps the generation header and served model only as plain tokens, and counts only as integers', async () => {
+    const create = vi.fn(() => ({
+      withResponse: () =>
+        Promise.resolve({
+          data: chat(JSON.stringify({ ok: true }), { model: 'deepseek/deepseek-v4-flash Bearer sk-or-v1-abcdef0123456789', usage: { prompt_tokens: 12.5, completion_tokens: -3, cost: 0.0001 } }),
+          response: { headers: new Headers({ 'x-generation-id': 'gen-x; Bearer sk-or-v1-abcdef0123456789' }) },
+        }),
+    }));
+    const provider = new OpenRouterProvider('sk-or-test-key-000000000000', { fetchImpl: vi.fn() as unknown as typeof fetch, sleep: async () => {} });
+    (provider as unknown as { client: unknown }).client = { chat: { completions: { create } } };
+    const attempts: Array<Record<string, unknown>> = [];
+    await provider.completeStructured({ model: 'deepseek/deepseek-v4-flash', schema: Result, schemaName: 'Review', messages: [{ role: 'user', content: 's' }], experiment: experiment(), onAttempt: (a) => attempts.push(a as unknown as Record<string, unknown>) });
+    expect(attempts[0]).toMatchObject({ outcome: 'valid', generationIdHeader: null, servedModel: null, tokensIn: null, tokensOut: null });
+
+    const plain = experimentProvider(chat(JSON.stringify({ ok: true })));
+    const kept: Array<Record<string, unknown>> = [];
+    await plain.provider.completeStructured({ model: 'deepseek/deepseek-v4-flash', schema: Result, schemaName: 'Review', messages: [{ role: 'user', content: 's' }], experiment: experiment(), onAttempt: (a) => kept.push(a as unknown as Record<string, unknown>) });
+    expect(kept[0]).toMatchObject({ servedModel: 'deepseek/deepseek-v4-flash', tokensIn: 1142, tokensOut: 431 });
+  });
+
+  it('sanitizeErrorText redacts credentials and control characters, bounds the text, and keeps fingerprints', async () => {
+    const { sanitizeErrorText } = await import('../src/llm/error-detail.js');
+    const sha = 'c6010d90c44151bb6cc144d21cdbd9493dab1947cbf40e5791860c9a71d1a860';
+    const text = sanitizeErrorText(`401 upstream said Authorization: Bearer sk-or-v1-abcdef0123456789\u0000 fingerprint ${sha} ${'z'.repeat(900)}`, 500)!;
+    expect(text).not.toContain('sk-or-v1');
+    expect(text).not.toContain('\u0000');
+    expect(text).toContain(sha);
+    expect(text.length).toBeLessThanOrEqual(500);
+    expect(sanitizeErrorText({ not: 'text' }, 500)).toBeNull();
+  });
+});

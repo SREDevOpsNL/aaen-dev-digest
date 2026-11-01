@@ -97,6 +97,8 @@ export {
   generationLookupDeadlineMs,
   type OpenRouterProviderOptions,
 } from './llm/openrouter.js';
+// Sanitizers for provider-controlled text (error messages, tokens, counts).
+export { safeCount, safeToken, sanitizeErrorText, sanitizeText } from './llm/error-detail.js';
 // Pure parsers of OpenRouter's provenance metadata (HW2 experiment mode).
 export {
   GENERATION_ID,
