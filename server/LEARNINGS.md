@@ -470,6 +470,44 @@ correction. Repo-intel remains server-scoped;
   the usage mirroring, the refusal classification or the transaction each
   fails at least one of its tests.
 
+- **2026-11-01** — Extension and correction of the entry above, after the
+  security and architecture review:
+  - **One bad character could roll back the whole terminal write.** Postgres
+    `jsonb` rejects the `\u0000` escape and unpaired UTF-16 surrogates
+    (which `JSON.stringify` emits as `\udXXX`), and `text` rejects U+0000.
+    Model output, a diff or an error message can contain either. Once the
+    row update and the trace upsert shared one transaction, such a character
+    left a failed run `running`, and on the success path turned a billed
+    review into a failure. Every trace, error and review text is now passed
+    through `pgSafeDeep` / `pgSafeText` (U+FFFD) before the write; recorded
+    hashes stay those of the original text.
+  - **`running` until boot only if the retry fails too.** When the failure
+    transaction throws, the executor retries once with a minimal trace
+    (`persistence: 'fallback'`, prompt `unrecorded`). A live process leaves a
+    run `running` for the boot reaper only when that retry also fails.
+  - **Correction to the API-cancelled bullet above:** the row is no longer
+    left with null usage. Inside the same transaction, a second update
+    guarded on `status = 'cancelled' AND tokens_in IS NULL AND cost_usd IS
+    NULL` fills it from the trace's totals and never touches the status. A
+    CAS miss on any other terminal state now writes no trace at all, so a
+    reaped trace is never overwritten. The HW2 budget still charges the
+    reservation for a null cost and the known cost once it is known.
+  - **Attempt records do not see SDK retries.** In OpenRouter's ordinary
+    path the OpenAI SDK retries timeouts, 429 and 5xx inside one
+    `create()`, so one attempt record can stand for several HTTP requests.
+    The adapters' own `withRetry` retries (OpenAI, Anthropic) are recorded,
+    as `transport_retry`. Experiment mode sets SDK retries to 0.
+
+  Evidence: `server/src/db/pg-text.ts`,
+  `server/src/modules/reviews/repository.ts` (`finalizeRunFailure`),
+  `server/src/modules/reviews/repository/run.repo.ts`
+  (`recordCancelledRunUsage`, `reapStaleRunningRuns`),
+  `reviewer-core/src/llm/openrouter.ts` (`completeStructured` comment), and
+  `server/test/run-failure-trace.it.test.ts` ("text Postgres rejects,
+  retries and bounds", "terminal writes never overwrite another terminal
+  trace"). Removing the sanitizer fails 3 of those tests; removing the
+  retry, the cancelled-usage fill or the status guard fails 1 each.
+
 ## Session Notes
 
 ## Open Questions

@@ -179,6 +179,17 @@ correction. Genuinely cross-package findings belong in
   (`safeIdentifier`), `server/test/experiments.it.test.ts` ("an HTTP 200
   error body persists no openrouter_metadata and no unsafe identifier").
 
+- **2026-11-01** — The per-stage attempt records do not see the OpenAI
+  SDK's own retries. On OpenRouter's ordinary path the client is built with
+  `maxRetries: 2`, so a timeout, 429 or 5xx is retried inside one
+  `chat.completions.create()`: one `submitted` record can stand for several
+  HTTP requests, and only the last response's usage is reported. Treat an
+  ordinary-path attempt count as a lower bound on HTTP requests. Experiment
+  mode passes `maxRetries: 0`, where one record is one request. Details in
+  [`../server/LEARNINGS.md`](../server/LEARNINGS.md#recurring-errors--fixes)
+  (2026-11-01). Evidence: `reviewer-core/src/llm/openrouter.ts`
+  (`OpenRouterProvider` constructor and `completeStructured`).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
