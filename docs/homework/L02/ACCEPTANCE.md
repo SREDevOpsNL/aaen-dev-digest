@@ -20,7 +20,7 @@ Status values:
 - **Verified**: shown at runtime, with evidence linked.
 - **Blocked**: cannot be verified; the reason is given.
 
-**Current count (2026-10-31):** **50 Verified** · 2 Implemented (17, 18: paid exploratory pilot and the 2026-10-31 confirmatory run both incomplete, not a pass) · 1 Blocked (21: needs a real interactive Claude Code `/pr-self-review` session).
+**Current count (2026-11-01):** **50 Verified** · 2 Implemented (17, 18: the paid exploratory pilot and the 2026-10-31 confirmatory run were both incomplete, not a pass; the v4 study for #17 awaits a spending decision) · 1 Blocked (21: needs a real interactive Claude Code `/pr-self-review` session).
 
 Most runtime evidence comes from an unpaid walkthrough on a disposable stack (`scripts/e2e.sh --serve`, no spending capability, so no generation). Rows 38 and 40 have separate [authorized live extraction evidence](evidence/conventions-live-extraction.md). Conventions rows 41–50 use seeded candidates labelled "Synthetic fixture — not a model extraction".
 

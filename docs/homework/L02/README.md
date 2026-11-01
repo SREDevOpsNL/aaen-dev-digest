@@ -55,12 +55,23 @@ Also on the branch, as prerequisites:
 
 ## Status
 
-See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md). Still open:
-- criterion 14: drag order and trace are verified, but the recovered rubric
-  literally requires the system-message role; mentor clarification is pending.
-- criteria 17 and 18: the exploratory pilot ran, but neither result is a pass (17 incomplete, 18 no detection difference). Confirmatory runs need a separate authorization;
-- the headless `pr-self-review` session (row 21);
-- original-source verification of the rubric, which was a recovered English translation.
+See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md): 50 Verified,
+2 Implemented, 1 Blocked. Still open:
+- criterion 14 is **Verified**. The mentor ruled on 2026-10-30 that Skills
+  belong in the system-role message, and a live run trace confirmed it on
+  2026-10-31 ([evidence](evidence/criterion-14-system-role.md)).
+- criteria 17 and 18 are **Implemented, not passed**.
+  - The exploratory pilot and the confirmatory Item B v3 run were both
+    incomplete ([record](evidence/item-b-confirmatory/README.md)).
+  - A successor study v4 for #17 is frozen and needs a spending decision
+    ([v4](PROSPECTIVE-STUDY.md#successor-study-v4-for-17-2026-11-01)).
+  - Under Skill v1, #18 is unresolved/unsupported. A disclosed Skill v2 needs
+    the owner's review ([proposal](prereg/proposal-breaking-change-skill-v2.md)).
+- criterion 21 is **Blocked**. It needs a real *interactive* Claude Code
+  session in which the owner types `/pr-self-review --base HEAD`
+  ([preparation](evidence/criterion-21-preparation.md)).
+- original-source verification of the rubric, which was a recovered English
+  translation.
 
 Rows 38 and 40 are verified by the [single authorized live extraction](evidence/conventions-live-extraction.md), including model output, grounded persistence, API/SQL read-back and an API-only restart.
 
