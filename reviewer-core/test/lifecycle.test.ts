@@ -311,3 +311,53 @@ describe('safeIdentifier', () => {
     expect(safeIdentifier(42)).toBeNull();
   });
 });
+
+describe('review fixes: provider-controlled text never reaches evidence or messages raw', () => {
+  it('ProviderOutputError keeps only plain-token response ids and finish reasons (non-strings become null)', () => {
+    const err = new ProviderOutputError('cut', {
+      kind: 'truncated', text: 'x', usage: { tokensIn: 1, tokensOut: 1, costUsd: null },
+      finishReason: 'length; Bearer sk-or-v1-abcdef0123456789', responseId: 'gen-err Bearer sk-or-v1-abcdef0123456789', attempts: 1,
+    });
+    expect(err.finishReason).toBeNull();
+    expect(err.responseId).toBeNull();
+    const typed = new ProviderOutputError('cut', { kind: 'truncated', text: 'x', usage: { tokensIn: 1, tokensOut: 1, costUsd: null }, finishReason: { evil: true }, responseId: 42, attempts: 1 });
+    expect(typed.finishReason).toBeNull();
+    expect(typed.responseId).toBeNull();
+  });
+
+  it('ordinary mode: an unsafe id or finish reason is dropped from the typed error, and a missing token count is unknown, not 0', async () => {
+    const bad = 'gen-err Bearer sk-or-v1-abcdef0123456789';
+    const { provider } = normalProvider([
+      { id: bad, model: 'm', choices: [{ message: { content: 'nope' }, finish_reason: 'stop\u0000weird text' }], usage: { completion_tokens: 7 } },
+    ]);
+    const error = await provider.completeStructured({ model: 'm', schema: Result, schemaName: 'Result', messages: [{ role: 'user', content: 'x' }], maxRetries: 0 }).catch((e) => e);
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect(error).toMatchObject({ responseId: null, finishReason: null, usage: { tokensIn: null, tokensOut: 7, costUsd: null } });
+  });
+
+  it('a no-choices body: its error message is sanitized and bounded before it becomes the error text', async () => {
+    const { provider } = normalProvider([{ id: 'gen-x', choices: [], error: { message: `upstream said Bearer sk-or-v1-abcdef0123456789\u0000${'y'.repeat(1000)}` } }]);
+    const error = await provider.completeStructured({ model: 'm', schema: Result, schemaName: 'Result', messages: [{ role: 'user', content: 'x' }] }).catch((e) => e);
+    expect(error.message).toMatch(/^OpenRouter returned no choices for Result: upstream said/);
+    expect(error.message).not.toContain('sk-or-v1');
+    expect(error.message).not.toContain('\u0000');
+    expect(error.message.length).toBeLessThan(400);
+  });
+
+  it('experiment mode: an unsafe finish reason never enters the error message or the telemetry; the success telemetry ids are sanitized too', async () => {
+    const weird = 'stop Bearer sk-or-v1-abcdef0123456789';
+    const { provider } = experimentProvider(chat('not json', { choices: [{ message: { content: 'not json' }, finish_reason: weird }] }));
+    const attempts: Array<Record<string, unknown>> = [];
+    const error = await provider
+      .completeStructured({ model: 'deepseek/deepseek-v4-flash', schema: Result, schemaName: 'Review', messages: [{ role: 'user', content: 's' }], experiment: experiment(), onAttempt: (a) => attempts.push(a as unknown as Record<string, unknown>) })
+      .catch((e) => e);
+    expect(error.message).toContain('(finish_reason=unknown;');
+    expect(error.message).not.toContain('sk-or-v1');
+    expect(attempts[0]).toMatchObject({ finishReason: null });
+
+    const ok = experimentProvider(chat(JSON.stringify({ ok: true }), { id: `gen-ok ${weird}` }));
+    const okAttempts: Array<Record<string, unknown>> = [];
+    await ok.provider.completeStructured({ model: 'deepseek/deepseek-v4-flash', schema: Result, schemaName: 'Review', messages: [{ role: 'user', content: 's' }], experiment: experiment(), onAttempt: (a) => okAttempts.push(a as unknown as Record<string, unknown>) });
+    expect(okAttempts[0]).toMatchObject({ outcome: 'valid', responseId: null, finishReason: 'stop' });
+  });
+});

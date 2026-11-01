@@ -136,10 +136,11 @@ export class AttemptRecorder {
 }
 
 /**
- * A response id or finish reason as persisted evidence: kept only when it is
- * a short, plain token that does not look like a credential; otherwise null.
- * (An HTTP 200 error body can put arbitrary text, a key included, where an
- * id belongs.)
+ * A response id or finish reason to persist as evidence: kept only when it is
+ * a short plain token (at most 128 characters of `[A-Za-z0-9._:-]`) that does
+ * not match the common key shapes (`sk-…`, "bearer"); otherwise null. This
+ * is a conservative filter for one field, not a general secret scanner: an
+ * HTTP 200 error body can put arbitrary text where an id belongs.
  */
 export function safeIdentifier(value: unknown): string | null {
   if (typeof value !== 'string') return null;

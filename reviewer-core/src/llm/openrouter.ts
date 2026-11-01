@@ -23,7 +23,7 @@ import {
   summarizeRouterMetadata,
 } from './openrouter-metadata.js';
 import { ExperimentRequestError, attemptErrorDetail, failedResponseTelemetry, sanitizeText } from './error-detail.js';
-import { AttemptRecorder, reportedNumber, type AttemptOutcome, type AttemptTokenDetail, type LifecycleStructuredRequest } from './lifecycle.js';
+import { AttemptRecorder, reportedNumber, safeIdentifier, type AttemptOutcome, type AttemptTokenDetail, type LifecycleStructuredRequest } from './lifecycle.js';
 import { ProviderOutputError } from './provider-output-error.js';
 
 /** Bound on a persisted failure reason. */
@@ -159,15 +159,22 @@ export class OpenRouterProvider implements LLMProvider {
 
   async completeStructured<T>(req: LifecycleStructuredRequest<T>): Promise<StructuredResult<T>> {
     if (req.experiment) return this.completeExperiment(req);
-    // Attempts of this stage. The SDK's own transport retries (`maxRetries`)
-    // happen inside one `create()` and are not visible here: one record per
-    // structured attempt, each `submitted` before its `create()`.
+    // Attempts of this stage: one record per structured attempt, each
+    // `submitted` before its `create()`. The SDK's own transport retries
+    // (`maxRetries`, on timeouts, 429 and 5xx) happen INSIDE one `create()`
+    // and are invisible here, so one record can stand for several HTTP
+    // requests. Retry behaviour is deliberately unchanged; experiment mode
+    // sets SDK retries to 0, where one record is exactly one request.
     const recorder = new AttemptRecorder(req.lifecycle);
     const jsonSchema = toJsonSchema(req.schema, req.schemaName);
     const maxRetries = req.maxRetries ?? 2;
     const messages = [...req.messages];
     let tokensIn = 0;
     let tokensOut = 0;
+    // A response that omits a token count makes the total unknown (for the
+    // typed error); the success result keeps the contract's numbers.
+    let tokensInKnown = true;
+    let tokensOutKnown = true;
     let providerCostUsd = 0;
     let hasAnyProviderCost = false;
     let hasCompleteProviderCost = this.id === 'openrouter';
@@ -200,8 +207,8 @@ export class OpenRouterProvider implements LLMProvider {
         throw err;
       }
       const responseUsage = res.usage as (OpenAI.Completions.CompletionUsage & { cost?: number }) | null | undefined;
-      lastResponseId = typeof res.id === 'string' ? res.id : null;
-      lastFinish = res.choices?.[0]?.finish_reason ?? null;
+      lastResponseId = safeIdentifier(res.id);
+      lastFinish = safeIdentifier(res.choices?.[0]?.finish_reason);
       tracked.received({
         response_id: lastResponseId,
         finish_reason: lastFinish,
@@ -219,12 +226,17 @@ export class OpenRouterProvider implements LLMProvider {
       const choice = res.choices?.[0];
       if (!choice) {
         tracked.failed('http_error', { http_status: 200 });
-        const errMsg = (res as unknown as { error?: { message?: string } }).error?.message;
+        // Provider-controlled text: sanitized and bounded before it reaches the run record, bus or logs.
+        const errMsg = sanitizeText((res as unknown as { error?: { message?: unknown } }).error?.message, 300, [this.apiKey]);
         throw new Error(`OpenRouter returned no choices for ${req.schemaName}${errMsg ? `: ${errMsg}` : ''}`);
       }
       lastRaw = choice.message?.content ?? '';
-      tokensIn += res.usage?.prompt_tokens ?? 0;
-      tokensOut += res.usage?.completion_tokens ?? 0;
+      const promptTokens = reportedNumber(res.usage?.prompt_tokens);
+      const completionTokens = reportedNumber(res.usage?.completion_tokens);
+      if (promptTokens === null) tokensInKnown = false;
+      if (completionTokens === null) tokensOutKnown = false;
+      tokensIn += promptTokens ?? 0;
+      tokensOut += completionTokens ?? 0;
       // `usage.cost` is an OpenRouter extension (USD), absent from the OpenAI SDK type.
       const apiCost = (res.usage as { cost?: number } | null | undefined)?.cost;
       if (typeof apiCost === 'number' && Number.isFinite(apiCost) && apiCost >= 0) {
@@ -250,14 +262,18 @@ export class OpenRouterProvider implements LLMProvider {
           attempts: attempt,
         };
       }
-      tracked.failed(choice.finish_reason === 'length' ? 'truncated' : 'schema_invalid', { finish_reason: choice.finish_reason ?? null });
+      tracked.failed(choice.finish_reason === 'length' ? 'truncated' : 'schema_invalid', { finish_reason: lastFinish });
       messages.push({ role: 'assistant', content: lastRaw });
       messages.push({ role: 'user', content: parsed.repromptMessage });
     }
     throw new ProviderOutputError(`OpenRouter structured output failed schema validation for ${req.schemaName}`, {
       kind: lastFinish === 'length' ? 'truncated' : 'schema_invalid',
       text: lastRaw,
-      usage: { tokensIn, tokensOut, costUsd: hasCompleteProviderCost ? providerCostUsd : null },
+      usage: {
+        tokensIn: tokensInKnown ? tokensIn : null,
+        tokensOut: tokensOutKnown ? tokensOut : null,
+        costUsd: hasCompleteProviderCost ? providerCostUsd : null,
+      },
       finishReason: lastFinish,
       responseId: lastResponseId,
       attempts: maxRetries + 1,
@@ -382,12 +398,14 @@ export class OpenRouterProvider implements LLMProvider {
     const apiCost = usage?.cost;
     const cost = typeof apiCost === 'number' && Number.isFinite(apiCost) && apiCost >= 0 ? apiCost : null;
     const choice = data.choices?.[0];
-    const responseId = typeof data.id === 'string' ? data.id : null;
+    // Provider-controlled identifiers, kept only as plain tokens (as the failed path's telemetry does).
+    const responseId = safeIdentifier(data.id);
+    const finishReason = safeIdentifier(choice?.finish_reason);
     const generationIdHeader = headers?.get('x-generation-id') ?? null;
     const generationId = [responseId, generationIdHeader].find((id): id is string => !!id && GENERATION_ID.test(id)) ?? null;
     tracked.received({
       response_id: responseId,
-      finish_reason: choice?.finish_reason ?? null,
+      finish_reason: finishReason,
       http_status: 200,
       usage: {
         tokens_in: reportedNumber(usage?.prompt_tokens),
@@ -405,7 +423,7 @@ export class OpenRouterProvider implements LLMProvider {
       responseId,
       generationIdHeader,
       servedModel: typeof data.model === 'string' ? data.model : null,
-      finishReason: choice?.finish_reason ?? null,
+      finishReason,
       tokensIn: usage?.prompt_tokens ?? null,
       tokensOut: usage?.completion_tokens ?? null,
       costUsd: cost,
@@ -440,7 +458,7 @@ export class OpenRouterProvider implements LLMProvider {
       kind,
       text: raw,
       usage: { tokensIn: reportedNumber(usage?.prompt_tokens), tokensOut: reportedNumber(usage?.completion_tokens), costUsd: cost },
-      finishReason: choice.finish_reason ?? null,
+      finishReason,
       responseId,
       attempts: 1,
     });
@@ -452,9 +470,9 @@ export class OpenRouterProvider implements LLMProvider {
     }
     const parsed = parseWithRepair(req.schema, raw);
     if (!parsed.ok) {
-      const reason = `structured output failed schema validation for ${req.schemaName} (finish_reason=${choice.finish_reason ?? 'unknown'}; experiment mode does not reprompt)`;
+      const reason = `structured output failed schema validation for ${req.schemaName} (finish_reason=${finishReason ?? 'unknown'}; experiment mode does not reprompt)`;
       report({ ...dispatched, outcome: 'schema_invalid', failureReason: reason });
-      tracked.failed('schema_invalid', { finish_reason: choice.finish_reason ?? null });
+      tracked.failed('schema_invalid', { finish_reason: finishReason });
       throw new ProviderOutputError(reason, outputEvidence('schema_invalid'));
     }
     report({ ...dispatched, outcome: 'valid' });

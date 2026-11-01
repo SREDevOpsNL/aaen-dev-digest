@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { safeIdentifier } from './lifecycle.js';
 
 /** Bound on the partial text a ProviderOutputError carries (UTF-8 bytes). */
 export const PARTIAL_OUTPUT_MAX_BYTES = 16 * 1024;
@@ -51,8 +52,9 @@ export class ProviderOutputError extends Error {
       kind: 'truncated' | 'schema_invalid';
       text: string;
       usage: ProviderOutputUsage;
-      finishReason: string | null;
-      responseId: string | null;
+      /** Provider-controlled: kept only when it is a plain token (`safeIdentifier`). */
+      finishReason: unknown;
+      responseId: unknown;
       attempts: number;
     },
   ) {
@@ -66,8 +68,8 @@ export class ProviderOutputError extends Error {
       partialTotalBytes: hidden(bounded.totalBytes),
       partialSha256: hidden(createHash('sha256').update(evidence.text, 'utf8').digest('hex')),
       usage: hidden({ ...evidence.usage }),
-      finishReason: hidden(evidence.finishReason),
-      responseId: hidden(evidence.responseId),
+      finishReason: hidden(safeIdentifier(evidence.finishReason)),
+      responseId: hidden(safeIdentifier(evidence.responseId)),
       attempts: hidden(evidence.attempts),
     });
   }
