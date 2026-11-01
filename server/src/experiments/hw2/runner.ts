@@ -4,7 +4,7 @@ import { fits } from './budget.js';
 import { isTerminal, type Ledger, type SlotRecord, type SlotState } from './ledger.js';
 import type { Slot } from './schedule.js';
 import { reconcileExtraction } from './conventions-runner.js';
-import { truncationCheck, type FrozenExpectations } from './eligibility.js';
+import { truncationCheck, type FrozenExpectations, type TruncationProvenance } from './eligibility.js';
 import type { StudySemantics } from './manifest.js';
 
 /**
@@ -159,7 +159,7 @@ export type SlotResult = {
    * whose one attempt was truncated: `continue` when it is otherwise sound
    * (known cost, frozen fingerprint, full provenance), else the problems.
    */
-  truncation?: { continue: boolean; problems: string[] };
+  truncation?: { continue: boolean; problems: string[]; provenance: TruncationProvenance | null };
 };
 
 /**
@@ -276,7 +276,12 @@ async function dispatchAndFollow(deps: RunnerDeps, run: SlotRun, base: LedgerBas
         ...base, state: settled.state, run_id: runId, cost_usd: settled.cost,
         detail: {
           fingerprint_mismatch: fingerprintMismatch,
-          ...(truncation ? { attempt_outcome: 'truncated', truncation: truncation.continue ? 'continue' : 'stop', truncation_problems: truncation.problems } : {}),
+          ...(truncation ? {
+            attempt_outcome: 'truncated',
+            truncation: truncation.continue ? 'continue' : 'stop',
+            truncation_provenance: truncation.provenance,
+            truncation_problems: truncation.problems,
+          } : {}),
         },
       });
       return {
@@ -312,19 +317,22 @@ function truncationOutcome(
   settled: { state: SlotState; cost: number | null },
   current: SlotLookup['runs'][number],
   fingerprintMismatch: boolean,
-): { continue: boolean; problems: string[] } | null {
+): { continue: boolean; problems: string[]; provenance: TruncationProvenance | null } | null {
   if (!continuesOnTruncation(run) || settled.state !== 'failed') return null;
   if (current.experiment?.attempts?.length !== 1 || current.experiment.attempts[0]?.outcome !== 'truncated') return null;
   const problems: string[] = [];
+  let provenance: TruncationProvenance | null = null;
   if (settled.cost === null) problems.push('unknown cost');
   if (fingerprintMismatch) problems.push('non-Skill fingerprint differs from the frozen one');
   if (!run.expectations) problems.push('no frozen provenance expectations');
   else {
-    const check = truncationCheck(current, run.expectations);
+    // The provenance level the frozen v4 semantics accept (`truncationCheck`).
+    const check = truncationCheck(current, run.expectations, run.semantics!.truncationProvenance);
     if (!check.truncated) problems.push('the attempt is not a dispatched, truncated generation');
     problems.push(...check.problems);
+    provenance = check.provenance;
   }
-  return { continue: problems.length === 0, problems };
+  return problems.length === 0 ? { continue: true, problems, provenance } : { continue: false, problems, provenance: null };
 }
 
 /** A recorded confirmatory slot the frozen v4 rule let continue: truncated, known cost, frozen fingerprint. */
@@ -474,7 +482,7 @@ export async function runSchedule(
     deps.log(`${run.slot.slot_id}: ${result.state}${result.reason ? ` — ${result.reason}` : ''}${result.diagnosis ? ` (${result.diagnosis})` : ''}`);
     if (result.truncation) {
       deps.log(result.truncation.continue
-        ? `${run.slot.slot_id}: truncated; terminal, not retried; the frozen v4 rule continues the schedule and imputes it against the hypothesis`
+        ? `${run.slot.slot_id}: truncated; terminal, not retried; provenance ${result.truncation.provenance}; the frozen v4 rule continues the schedule and imputes it against the hypothesis`
         : `${run.slot.slot_id}: truncated, but ${result.truncation.problems.join('; ')}`);
     }
     if (result.state === 'refused' && result.runId === null && /budget/.test(result.reason ?? '')) return { results, stopped: result.reason };

@@ -2,6 +2,7 @@ import { EXPERIMENT_FIXTURES, patchStats, type ExperimentFixture } from '../../d
 import { diffFromPrFiles } from '../../modules/reviews/diff-loader.js';
 import type { ReviewRepository } from '../../modules/reviews/repository.js';
 import { canonicalJson, sha256 } from '../../modules/_shared/experiment.js';
+import type { TruncationProvenancePolicy } from './eligibility.js';
 import type { ExpectedRule } from './rules.js';
 import { buildSchedule, type Slot } from './schedule.js';
 import { preregisteredManifest } from './source.js';
@@ -127,6 +128,12 @@ export interface StudyBlock {
   per_condition: number;
   /** `continue-impute`: a truncated slot is terminal, not retried, does not stop the schedule, and is imputed against the hypothesis. */
   truncation: 'continue-impute';
+  /**
+   * `single-router-attempt`: a truncation also continues on router metadata
+   * alone (attempt 1 on the frozen endpoint, generation `not_found` or one
+   * matching response); see `truncationCheck`.
+   */
+  truncation_provenance: 'single-router-attempt';
   /** Blind packet and mapping version 2 (redacted, with private originals). */
   adjudication_packet: 2;
   redaction: 'r1';
@@ -139,6 +146,7 @@ export const STUDY_V4: StudyBlock = {
   experiments: ['17'],
   per_condition: 5,
   truncation: 'continue-impute',
+  truncation_provenance: 'single-router-attempt',
   adjudication_packet: 2,
   redaction: 'r1',
 };
@@ -168,6 +176,8 @@ export interface StudySemantics {
   experiments: string[];
   perCondition: number;
   truncation: 'stop' | 'continue-impute';
+  /** The provenance a truncation needs to continue (v3: never continues). */
+  truncationProvenance: TruncationProvenancePolicy;
   adjudicationPacket: 1 | 2;
   redaction: 'none' | 'r1';
 }
@@ -179,6 +189,7 @@ export const V3_SEMANTICS: StudySemantics = Object.freeze({
   experiments: ['17', '18'],
   perCondition: 5,
   truncation: 'stop',
+  truncationProvenance: 'strict',
   adjudicationPacket: 1,
   redaction: 'none',
 }) as StudySemantics;
@@ -194,6 +205,7 @@ export function studySemantics(manifest: { version: unknown; study?: unknown }):
       experiments: [...study.experiments],
       perCondition: study.per_condition,
       truncation: study.truncation,
+      truncationProvenance: study.truncation_provenance,
       adjudicationPacket: study.adjudication_packet,
       redaction: study.redaction,
     };

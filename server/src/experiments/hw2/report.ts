@@ -1,4 +1,4 @@
-import { evaluateSlot, fingerprintsAgree, truncationCheck, type Eligibility, type FrozenExpectations } from './eligibility.js';
+import { evaluateSlot, fingerprintsAgree, truncationCheck, type Eligibility, type FrozenExpectations, type TruncationProvenance, type TruncationProvenancePolicy } from './eligibility.js';
 import type { SlotRecord } from './ledger.js';
 import { detection, type ExpectedRule, type FindingLike } from './rules.js';
 import type { StudySemantics } from './manifest.js';
@@ -116,6 +116,8 @@ export interface SlotRow {
 export interface Imputation {
   verdict: 'yes' | 'no';
   label: 'imputed (truncated)';
+  /** The provenance level the continued truncation rested on (report rows only). */
+  provenance?: TruncationProvenance;
 }
 
 /** The conservative imputation: a truncation can never help a pass. */
@@ -138,12 +140,17 @@ export interface ExperimentSummary {
  * cost) and whose trace still shows a sound truncation (frozen fingerprint,
  * the slot it was scheduled as, its prompt recorded, full provenance).
  */
-function imputable(record: SlotRecord | null, run: SlotRunData, issues: string[], missing: string[], fingerprintOk: boolean, expectations: FrozenExpectations): boolean {
-  if (!record || record.state !== 'failed' || record.cost_usd === null) return false;
+function imputable(
+  record: SlotRecord | null, run: SlotRunData, issues: string[], missing: string[], fingerprintOk: boolean,
+  expectations: FrozenExpectations, policy: TruncationProvenancePolicy,
+): TruncationProvenance | null {
+  if (!record || record.state !== 'failed' || record.cost_usd === null) return null;
   const terminal = record.events.find((event) => event.state === record.state);
-  if (terminal?.detail?.truncation !== 'continue' || terminal.detail.fingerprint_mismatch !== false) return false;
-  const check = truncationCheck(run, expectations);
-  return check.truncated && check.problems.length === 0 && fingerprintOk && issues.length === 0 && missing.length === 0;
+  if (terminal?.detail?.truncation !== 'continue' || terminal.detail.fingerprint_mismatch !== false) return null;
+  const check = truncationCheck(run, expectations, policy);
+  if (!check.truncated || check.problems.length > 0 || !fingerprintOk || issues.length > 0 || missing.length > 0) return null;
+  // The trace must still support the level the runner recorded.
+  return terminal.detail.truncation_provenance === check.provenance ? check.provenance : null;
 }
 
 export function buildReport(input: {
@@ -187,7 +194,8 @@ export function buildReport(input: {
     const matched = run.findings
       .filter((f) => found.matched.includes(f.title))
       .map((f) => ({ title: f.title, file: f.file, lines: `${f.start_line}-${f.end_line}` }));
-    const imputation = imputes && imputable(record, run, issues, missing, fingerprintOk, input.expectations(slot.experiment)) ? imputedVerdict(slot.condition) : null;
+    const provenance = imputes ? imputable(record, run, issues, missing, fingerprintOk, input.expectations(slot.experiment), input.semantics!.truncationProvenance) : null;
+    const imputation = provenance ? { ...imputedVerdict(slot.condition), provenance } : null;
     return {
       ...(imputes ? { imputed: imputation } : {}),
       ...slot,
@@ -272,7 +280,7 @@ export function renderReport(report: { rows: SlotRow[]; summaries: ExperimentSum
         r.experiment,
         r.condition,
         r.state,
-        r.imputed ? `no; ${r.imputed.label}: ${r.imputed.verdict}` : r.counted ? 'yes' : 'no',
+        r.imputed ? `no; ${r.imputed.label}: ${r.imputed.verdict} [${r.imputed.provenance}]` : r.counted ? 'yes' : 'no',
         r.eligibility ? `${r.eligibility.provenance} (${r.eligibility.sources.join(', ') || '—'})` : '—',
         r.run_id ? (r.fingerprint_ok ? 'frozen' : 'MISMATCH') : '—',
         r.detected === null ? '—' : r.detected ? 'yes' : 'no',

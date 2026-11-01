@@ -56,7 +56,7 @@ export interface MappingEntry {
   case_id: string | null;
   not_counted_reason: string | null;
   /** Version 2 only: a truncated slot's conservative verdict; it never enters the packet. */
-  imputed?: { verdict: Verdict; label: 'imputed (truncated)' } | null;
+  imputed?: { verdict: Verdict; label: 'imputed (truncated)'; provenance?: string } | null;
   /** Version 2 only: replacements made in this case's titles and rationales. */
   redactions?: number;
   /** Version 2 only: digest of this case's unredacted findings (in private/originals.json). */
@@ -332,7 +332,8 @@ export function preparePacketV2(input: {
       const expected = imputedVerdict(row.condition);
       if (row.imputed.verdict !== expected.verdict) throw new Error(`slot ${row.slot_id}: an imputed ${row.condition} slot is "${expected.verdict}", not "${row.imputed.verdict}"`);
       if (row.counted) throw new Error(`slot ${row.slot_id} is both counted and imputed`);
-      return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: null, not_counted_reason: expected.label, imputed: expected, ...empty };
+      const imputed = { ...expected, ...(row.imputed.provenance ? { provenance: row.imputed.provenance } : {}) };
+      return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: null, not_counted_reason: expected.label, imputed, ...empty };
     }
     if (!row.counted || !run) {
       const reason = !run ? `no run (${row.state})` : row.execution_issues[0] ?? row.eligibility?.reasons?.[0] ?? 'not counted';
@@ -413,7 +414,7 @@ export type RevealResult =
       experiments: AdjudicatedExperiment[];
       blinding_compromised: boolean;
       /** Version 2 only: truncated slots, never adjudicated, at their conservative verdict. */
-      imputed?: Array<{ slot_id: string; condition: 'with' | 'without'; experiment: string; final: Verdict; label: 'imputed (truncated)' }>;
+      imputed?: Array<{ slot_id: string; condition: 'with' | 'without'; experiment: string; final: Verdict; label: 'imputed (truncated)'; provenance?: string }>;
       /** Version 2 only. */
       blinding?: { method: 'r1'; warnings_original: number; redacted_cases: number; redactions: number; residual: ResidualCompromise[] };
     };
@@ -525,7 +526,7 @@ export function reveal(input: {
   const residual = input.mapping.residual ?? [];
   const imputed = input.mapping.entries
     .filter((e) => e.imputed)
-    .map((e) => ({ slot_id: e.slot_id, condition: e.condition, experiment: e.experiment, final: e.imputed!.verdict, label: e.imputed!.label }));
+    .map((e) => ({ slot_id: e.slot_id, condition: e.condition, experiment: e.experiment, final: e.imputed!.verdict, label: e.imputed!.label, ...(e.imputed!.provenance ? { provenance: e.imputed!.provenance } : {}) }));
   const blinding = {
     method: 'r1' as const,
     warnings_original: input.mapping.blinding_warnings.length,

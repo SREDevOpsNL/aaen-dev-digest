@@ -525,6 +525,21 @@ correction. Repo-intel remains server-scoped;
   `c-17-with-2`), `server/test/hw2-study-v4.test.ts` ("a truncation with a
   provenance gap … still stops the schedule").
 
+- **2026-11-01** — Correction to the entry above about the v4 truncation
+  rule: v4 now also accepts a truncation at provenance level
+  `router_metadata_only`. The study block's `truncation_provenance:
+  single-router-attempt` sets this, and `truncationCheck` implements it. The
+  conditions are: router `attempt` 1, `attempts` 1 or absent, one selected
+  endpoint equal to the frozen provider and served model, and a generation
+  that is `not_found` or found with exactly one matching response. Cost and
+  fingerprints must be known and frozen. The private forensic slot view of
+  `c-17-with-2` has exactly that shape (`attempt: 1`, `attemptsCount: null`,
+  DeepInfra selected, generation `not_found`), so the same slot would now
+  continue and be imputed. The level used is recorded on the ledger and in
+  the report row. Evidence: `server/test/hw2-study-v4.test.ts` ("a
+  truncation shaped like v3 c-17-with-2 … continues at
+  router_metadata_only"), `docs/homework/L02/prereg/study-v4-frozen-text.md`.
+
 ## Session Notes
 
 ## Open Questions

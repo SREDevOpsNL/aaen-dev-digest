@@ -188,7 +188,7 @@ export function renderAdjudicationReport(rec: { digests: Digests; seals: SealEve
   for (const c of rec.result.cases) lines.push(`| ${c.case_id} | ${c.slot_id} | ${c.condition} | ${c.final} | ${Object.entries(c.verdicts).map(([k, v]) => `${k}: ${v}`).join(', ')} |`);
   if (rec.result.imputed) {
     lines.push('', '| Slot | Condition | Final |', '| --- | --- | --- |');
-    for (const x of rec.result.imputed) lines.push(`| ${x.slot_id} | ${x.condition} | ${x.final}, ${x.label} |`);
+    for (const x of rec.result.imputed) lines.push(`| ${x.slot_id} | ${x.condition} | ${x.final}, ${x.label}${x.provenance ? ` [${x.provenance}]` : ''} |`);
     if (rec.result.imputed.length === 0) lines.push('| — | — | no imputed slot |');
   }
   lines.push('', `Blinding compromised: ${rec.result.blinding_compromised ? 'yes' : 'no'}`);

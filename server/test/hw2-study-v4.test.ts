@@ -156,7 +156,7 @@ describe('the closed v3 pre-registration (regression)', () => {
     expect(frozen.schedule.slots.slice(0, 3).map((s) => s.slot_id)).toEqual(['c-18-with-5', 'c-18-without-5', 'c-17-with-1']);
     // The fingerprint published in PROSPECTIVE-STUDY.md, "Approval packet v3".
     expect(manifestFingerprint(frozen)).toBe('2f13ad1ce7f5ad5bfcf3b90d2ecd4cb0ba78cd3ad61eb4499da43627684d79d5');
-    expect(studySemantics(frozen)).toEqual({ version: 3, slotTag: null, experiments: ['17', '18'], perCondition: 5, truncation: 'stop', adjudicationPacket: 1, redaction: 'none' });
+    expect(studySemantics(frozen)).toEqual({ version: 3, slotTag: null, experiments: ['17', '18'], perCondition: 5, truncation: 'stop', truncationProvenance: 'strict', adjudicationPacket: 1, redaction: 'none' });
     expect('study' in frozen).toBe(false);
   });
 });
@@ -187,7 +187,7 @@ describe('readFrozen and verifyPreregistration across versions (real git)', () =
     const v3 = await buildManifest({ ...v4Input(), schedule: { seed: 20261030, slots: buildSchedule({ seed: 20261030, phase: 'confirmatory', experiments: ['17', '18'], trials: 5 }) } });
     expect(studySemantics(readFrozen(commitFile('v3.json', v3), root))).toBe(V3_SEMANTICS);
     const read = readFrozen(commitFile('v4.json', v4), root);
-    expect(studySemantics(read)).toEqual({ version: 4, slotTag: 'v4', experiments: ['17'], perCondition: 5, truncation: 'continue-impute', adjudicationPacket: 2, redaction: 'r1' });
+    expect(studySemantics(read)).toEqual({ version: 4, slotTag: 'v4', experiments: ['17'], perCondition: 5, truncation: 'continue-impute', truncationProvenance: 'single-router-attempt', adjudicationPacket: 2, redaction: 'r1' });
     expect(rest.version).toBe(4);
   });
 
@@ -281,6 +281,12 @@ const settled = (o: Outcome) => (slotId: string, runId: string) => ({
   }],
 });
 const TRUNCATED: Outcome = { dispatch_state: 'failed', usage_known: true, cost: 0.0015, attempts: [attempt('truncated')], refusal_reason: 'output reached the max_tokens cap (finish_reason=length)' };
+/** Shaped like v3 `c-17-with-2` (forensic slot view): router attempt 1, attempts absent, DeepInfra selected, generation not_found, cost known. */
+const V3_SHAPED_ATTEMPT = attempt('truncated', {
+  router: { selected: [{ provider: 'DeepInfra', model: SERVED }], attempt: 1, attemptsCount: null },
+  generation: { status: 'not_found', providerName: null, model: null, providerResponses: [] },
+});
+const TRUNCATED_ROUTER_ONLY: Outcome = { ...TRUNCATED, cost: 0.00082278, attempts: [V3_SHAPED_ATTEMPT] };
 const COMPLETED: Outcome = { dispatch_state: 'completed', usage_known: true, cost: 0.0004, attempts: [attempt('valid')] };
 
 /** In-memory stand-in for the disposable API; `outcomes` settles each slot in turn. */
@@ -342,12 +348,54 @@ describe('runner: the frozen v4 truncation rule (fake API, no network)', () => {
     expect(api.posts).toEqual(ids);
     expect(results[0]).toMatchObject({ state: 'failed', costUsd: 0.0015, truncation: { continue: true, problems: [] } });
     const terminal = ledger.slots().get(ids[0]!)!.events.at(-1)!;
-    expect(terminal).toMatchObject({ state: 'failed', cost_usd: 0.0015, detail: { fingerprint_mismatch: false, attempt_outcome: 'truncated', truncation: 'continue' } });
+    expect(terminal).toMatchObject({ state: 'failed', cost_usd: 0.0015, detail: { fingerprint_mismatch: false, attempt_outcome: 'truncated', truncation: 'continue', truncation_provenance: 'verified' } });
     expect(logs.join('\n')).toMatch(/c-v4-17-with-1: truncated; terminal, not retried/);
     // Resume: the accepted truncation is skipped, never replayed, and nothing else is sent.
     const resumed = await runSchedule(deps, runs());
     expect(resumed.stopped).toBeNull();
     expect(api.posts).toEqual(ids);
+  });
+
+  it('a truncation shaped like v3 c-17-with-2 (router attempt 1, generation not_found) continues at router_metadata_only', async () => {
+    api.outcomes.set(ids[0]!, TRUNCATED_ROUTER_ONLY);
+    const { results, stopped } = await runSchedule(deps, runs());
+    expect(stopped).toBeNull();
+    expect(api.posts).toEqual(ids);
+    expect(results[0]).toMatchObject({ state: 'failed', costUsd: 0.00082278, truncation: { continue: true, problems: [], provenance: 'router_metadata_only' } });
+    expect(ledger.slots().get(ids[0]!)!.events.at(-1)!.detail).toMatchObject({ truncation: 'continue', truncation_provenance: 'router_metadata_only' });
+    expect(logs.join('\n')).toMatch(/provenance router_metadata_only/);
+    expect((await runSchedule(deps, runs())).stopped).toBeNull();
+    expect(api.posts).toEqual(ids);
+  });
+
+  it('the same v3-shaped truncation still stops under version 3 semantics', async () => {
+    api.outcomes.set(ids[0]!, TRUNCATED_ROUTER_ONLY);
+    expect((await runSchedule(deps, runs(null))).stopped).toMatch(/is incomplete/);
+    expect(api.posts).toEqual([ids[0]]);
+  });
+
+  it.each([
+    ['a router record of 2 attempts (attempt 2)', { router: { selected: [{ provider: 'DeepInfra', model: SERVED }], attempt: 2, attemptsCount: null } }, /router attempt is 2, not 1/],
+    ['a router record of 2 attempts (attempts 2)', { router: { selected: [{ provider: 'DeepInfra', model: SERVED }], attempt: 1, attemptsCount: 2 } }, /router metadata shows 2 upstream attempts/],
+    ['a different provider', { router: { selected: [{ provider: 'Novita', model: SERVED }], attempt: 1, attemptsCount: null } }, /router selected Novita/],
+    ['a different served model', { router: { selected: [{ provider: 'DeepInfra', model: 'deepseek/other' }], attempt: 1, attemptsCount: null } }, /not DeepInfra \/ deepseek\/deepseek-v4-flash-20260423/],
+    ['two selected endpoints', { router: { selected: [{ provider: 'DeepInfra', model: SERVED }, { provider: 'Novita', model: SERVED }], attempt: 1, attemptsCount: null } }, /selected 2 endpoints/],
+    ['a found generation with two responses', { generation: { status: 'found', providerName: 'DeepInfra', model: SERVED, providerResponses: [{ providerName: 'DeepInfra', modelPermaslug: SERVED, status: 500 }, { providerName: 'DeepInfra', modelPermaslug: SERVED, status: 200 }] } }, /does not show exactly one response/],
+    ['an unavailable generation lookup', { generation: { status: 'unavailable', providerResponses: [] } }, /generation lookup unavailable/],
+  ])('a router-only truncation with %s stops the schedule', async (_label, patch, problem) => {
+    api.outcomes.set(ids[0]!, { ...TRUNCATED_ROUTER_ONLY, attempts: [{ ...V3_SHAPED_ATTEMPT, ...patch }] });
+    const { results, stopped } = await runSchedule(deps, runs());
+    expect(stopped).toMatch(/is incomplete/);
+    expect(api.posts).toEqual([ids[0]]);
+    expect(results[0]!.truncation).toMatchObject({ continue: false, provenance: null });
+    expect(results[0]!.truncation!.problems.join('; ')).toMatch(problem);
+  });
+
+  it('a router-only truncation with unknown cost stops the schedule', async () => {
+    api.outcomes.set(ids[0]!, { ...TRUNCATED_ROUTER_ONLY, usage_known: false, cost: null });
+    const { results, stopped } = await runSchedule(deps, runs());
+    expect(stopped).toMatch(/is incomplete/);
+    expect(results[0]!.truncation!.problems).toEqual(['unknown cost']);
   });
 
   it('a version 3 manifest (no v4 semantics) still stops on the truncation, also on resume', async () => {
@@ -383,7 +431,7 @@ describe('runner: the frozen v4 truncation rule (fake API, no network)', () => {
     api.outcomes.set(ids[0]!, TRUNCATED);
     const { results, stopped } = await runSchedule(deps, runs(V4, false));
     expect(stopped).toMatch(/is incomplete/);
-    expect(results[0]!.truncation).toEqual({ continue: false, problems: ['no frozen provenance expectations'] });
+    expect(results[0]!.truncation).toEqual({ continue: false, problems: ['no frozen provenance expectations'], provenance: null });
   });
 
   it('a truncation that does not reproduce the frozen fingerprint stops', async () => {
@@ -434,11 +482,11 @@ describe('report: v4 imputation of truncated slots', () => {
     fixture: () => ({ reviewer: 'Test Quality Reviewer', prNumber: 501, targetSkill: 'Edge Cases and Error Paths' }),
     skillFingerprint: (_e: string, condition: 'with' | 'without') => sha256(canonicalJson(condition === 'with' ? [block] : [])),
   };
-  const runFor = (slot: (typeof schedule)[number], truncated: boolean): SlotRunData => ({
+  const runFor = (slot: (typeof schedule)[number], truncated: boolean, truncatedAttempt = attempt('truncated')): SlotRunData => ({
     run_id: `run-${slot.slot_id}`,
     cost_usd: truncated ? 0.0015 : 0.0004,
     experiment: {
-      dispatch_state: truncated ? 'failed' : 'completed', diff_sha256: 'd'.repeat(64), attempts: [attempt(truncated ? 'truncated' : 'valid')],
+      dispatch_state: truncated ? 'failed' : 'completed', diff_sha256: 'd'.repeat(64), attempts: [truncated ? truncatedAttempt : attempt('valid')],
       slot_id: slot.slot_id, experiment: '17', condition: slot.condition, phase: 'confirmatory', manifest_fingerprint: MANIFEST,
       non_skill_fingerprint: NON_SKILL, skill_fingerprint: execution.skillFingerprint('17', slot.condition),
     },
@@ -447,14 +495,15 @@ describe('report: v4 imputation of truncated slots', () => {
     prompt_evidence: 'dispatched_request',
     findings: truncated ? [] : [{ file: 'src/billing/discount.test.ts', start_line: 5, end_line: 6, title: 'Expired coupon untested', rationale: 'expired' }],
   });
-  const record = (slot_id: string, truncated: boolean, detail: Record<string, unknown> = truncated ? { fingerprint_mismatch: false, attempt_outcome: 'truncated', truncation: 'continue', truncation_problems: [] } : { fingerprint_mismatch: false }): SlotRecord => {
+  const accepted = (provenance: string) => ({ fingerprint_mismatch: false, attempt_outcome: 'truncated', truncation: 'continue', truncation_provenance: provenance, truncation_problems: [] });
+  const record = (slot_id: string, truncated: boolean, detail: Record<string, unknown> = truncated ? accepted('verified') : { fingerprint_mismatch: false }): SlotRecord => {
     const state = truncated ? 'failed' : 'completed';
     const cost = truncated ? 0.0015 : 0.0004;
     return { slot_id, state, phase: 'confirmatory', reservation_usd: 0.005, run_id: `run-${slot_id}`, cost_usd: cost, events: [{ at: 'now', slot_id, state, phase: 'confirmatory', reservation_usd: 0.005, cost_usd: cost, detail }] };
   };
   const truncatedIds = [schedule.find((s) => s.condition === 'with')!.slot_id, schedule.find((s) => s.condition === 'without')!.slot_id];
-  const build = (semantics: typeof V4 | undefined, ledgerDetail?: Record<string, unknown>) => {
-    const runs = new Map(schedule.map((s) => [s.slot_id, runFor(s, truncatedIds.includes(s.slot_id))]));
+  const build = (semantics: typeof V4 | undefined, ledgerDetail?: Record<string, unknown>, truncatedAttempt?: ReturnType<typeof attempt>) => {
+    const runs = new Map(schedule.map((s) => [s.slot_id, runFor(s, truncatedIds.includes(s.slot_id), truncatedAttempt)]));
     const ledger = new Map(schedule.map((s) => [s.slot_id, truncatedIds.includes(s.slot_id) && ledgerDetail ? record(s.slot_id, true, ledgerDetail) : record(s.slot_id, truncatedIds.includes(s.slot_id))]));
     return buildReport({ schedule, ledger, runs, rules, frozenNonSkill, expectations: () => expectations, execution, ...(semantics ? { semantics } : {}) });
   };
@@ -462,13 +511,27 @@ describe('report: v4 imputation of truncated slots', () => {
   it('imputes a truncated with slot as no and a truncated without slot as yes, never counted, labelled', () => {
     const report = build(V4);
     const [w, wo] = truncatedIds.map((id) => report.rows.find((r) => r.slot_id === id)!);
-    expect(w).toMatchObject({ counted: false, imputed: { verdict: 'no', label: 'imputed (truncated)' } });
+    expect(w).toMatchObject({ counted: false, imputed: { verdict: 'no', label: 'imputed (truncated)', provenance: 'verified' } });
     expect(wo).toMatchObject({ counted: false, imputed: { verdict: 'yes', label: 'imputed (truncated)' } });
     expect(report.rows.filter((r) => !truncatedIds.includes(r.slot_id)).every((r) => r.counted && r.imputed === null)).toBe(true);
     expect(report.summaries[0]).toMatchObject({ outcome: 'incomplete', with: { counted: 4 }, without: { counted: 4 }, imputed: { with: 1, without: 1 } });
     expect(report.summaries[0]!.note).toMatch(/imputed \(truncated\): 1 with as no, 1 without as yes/);
     expect(renderReport(report)).toContain('no; imputed (truncated): no');
     expect(renderReport(report)).toContain('no; imputed (truncated): yes');
+  });
+
+  it('imputes a v3-shaped router-only truncation and records its provenance level in the row', () => {
+    const report = build(V4, accepted('router_metadata_only'), V3_SHAPED_ATTEMPT);
+    const rows = truncatedIds.map((id) => report.rows.find((r) => r.slot_id === id)!);
+    expect(rows.map((r) => r.imputed)).toEqual([
+      { verdict: 'no', label: 'imputed (truncated)', provenance: 'router_metadata_only' },
+      { verdict: 'yes', label: 'imputed (truncated)', provenance: 'router_metadata_only' },
+    ]);
+    expect(renderReport(report)).toContain('no; imputed (truncated): no [router_metadata_only]');
+    // The trace must support the level the runner recorded.
+    expect(build(V4, accepted('verified'), V3_SHAPED_ATTEMPT).rows.filter((r) => r.imputed)).toEqual([]);
+    // Version 3 semantics do not impute it.
+    expect(build(undefined, accepted('router_metadata_only'), V3_SHAPED_ATTEMPT).rows.some((r) => 'imputed' in r)).toBe(false);
   });
 
   it('a version 3 report of the same data imputes nothing and has no imputation fields', () => {

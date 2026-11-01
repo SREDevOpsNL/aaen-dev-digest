@@ -16,7 +16,7 @@ A version 4 manifest carries this block, exactly
 (`STUDY_V4` in `server/src/experiments/hw2/manifest.ts`):
 
 ```json
-{"id":"itemb-v4","slot_tag":"v4","experiments":["17"],"per_condition":5,"truncation":"continue-impute","adjudication_packet":2,"redaction":"r1"}
+{"id":"itemb-v4","slot_tag":"v4","experiments":["17"],"per_condition":5,"truncation":"continue-impute","truncation_provenance":"single-router-attempt","adjudication_packet":2,"redaction":"r1"}
 ```
 
 - **Slots.** 5 *with* and 5 *without*, 10 in all. Slot IDs are
@@ -36,11 +36,36 @@ A version 4 manifest carries this block, exactly
 
 A slot whose single attempt ends with outcome `truncated`
 (`finish_reason=length`) is terminal. It is not retried or replaced, and it
-does not stop the schedule. It continues only when its cost is known, it
-reproduces the frozen non-Skill fingerprint and its provenance is complete.
-Every other stop condition still stops the schedule: a 429, a timeout,
-unknown cost, a provenance gap, a fingerprint mismatch or an ambiguous
-outcome.
+does not stop the schedule. It continues only when all of these hold:
+
+- its cost is known;
+- it reproduces the frozen fingerprints (non-Skill fingerprint and diff
+  hash);
+- its provenance meets one of two levels (`truncation_provenance:
+  single-router-attempt`, `truncationCheck` in
+  `server/src/experiments/hw2/eligibility.ts`):
+  - `verified`: everything strict eligibility asks for, apart from the
+    truncation itself;
+  - `router_metadata_only`: the router metadata proves exactly one upstream
+    attempt. That means `attempt` 1, `attempts` 1 or absent, and one
+    selected endpoint equal to the frozen provider and served model. The
+    generation lookup is `not_found`, or found with exactly one response
+    from that provider and model.
+
+The `router_metadata_only` level exists because OpenRouter's generation
+lookup can return `not_found` for a truncated generation, as it did for v3
+`c-17-with-2`. The imputation counts against the hypothesis, so accepting
+the weaker level cannot help a pass. The level used is recorded on the
+ledger record (`truncation_provenance`) and in the report row.
+
+Every other stop condition still stops the schedule:
+
+- a 429, a timeout or an ambiguous outcome;
+- unknown cost;
+- a fingerprint mismatch;
+- any other provenance gap: no router metadata, another provider or model,
+  a router record of more than one attempt, or a generation found with other
+  or several responses.
 
 In the report and the reveal, a truncated *with* slot counts as `no` and a
 truncated *without* slot as `yes`. Both are labelled `imputed (truncated)`,
