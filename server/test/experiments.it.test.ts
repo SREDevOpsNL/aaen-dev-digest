@@ -5,14 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import type {
-  LLMProvider,
-  ModelInfo,
-  OpenRouterEndpointInfo,
-  StructuredAttemptTelemetry,
-  StructuredRequest,
-  StructuredResult,
-} from '@devdigest/shared';
 import { OpenRouterProvider } from '@devdigest/reviewer-core';
 import { buildApp } from '../src/app.js';
 import { MockGitClient, MockGitHubClient } from '../src/adapters/mocks.js';
@@ -26,83 +18,14 @@ import { canonicalJson, sha256 } from '../src/modules/_shared/experiment.js';
 import { expectedSkillFingerprint, writeCapability } from '../src/experiments/hw2/cli.js';
 import { evaluateSlot } from '../src/experiments/hw2/eligibility.js';
 import { dockerAvailable, startPg, type PgFixture } from './helpers/pg.js';
+import { FAKE_ENDPOINT, FAKE_MODEL, FakeExperimentProvider } from './helpers/fake-experiment-provider.js';
 
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
 if (!hasDocker) console.warn('[experiments] Docker not available — skipping integration tests.');
 
-const MODEL = 'deepseek/deepseek-v4-flash';
-const ENDPOINT: OpenRouterEndpointInfo = {
-  providerName: 'DeepInfra',
-  tag: 'deepinfra',
-  quantization: 'fp8',
-  contextLength: 128_000,
-  maxCompletionTokens: 16_384,
-  pricing: { prompt: 0.00000014, completion: 0.00000028, request: 0 },
-};
-
-/** Stands in for OpenRouter: reports one attempt the way the real provider does, and costs nothing. */
-class FakeExperimentProvider implements LLMProvider {
-  readonly id = 'openrouter' as const;
-  requests: StructuredRequest<unknown>[] = [];
-  mode: 'ok' | 'fail-after-dispatch' | 'hold' = 'ok';
-  private release?: () => void;
-  held = new Promise<void>((resolve) => (this.release = resolve));
-  endpoints: OpenRouterEndpointInfo[] = [ENDPOINT];
-
-  releaseHeld() {
-    this.release?.();
-  }
-  async listModels(): Promise<ModelInfo[]> {
-    return [];
-  }
-  async listEndpoints(): Promise<OpenRouterEndpointInfo[]> {
-    return this.endpoints;
-  }
-  async complete(): Promise<never> {
-    throw new Error('not used');
-  }
-  async embed(): Promise<number[][]> {
-    return [];
-  }
-  async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
-    this.requests.push(req as StructuredRequest<unknown>);
-    if (this.mode === 'hold') await this.held;
-    const attempt: StructuredAttemptTelemetry = {
-      sequence: 1,
-      dispatch: 'dispatched',
-      outcome: this.mode === 'fail-after-dispatch' ? 'network_error' : 'valid',
-      failureReason: this.mode === 'fail-after-dispatch' ? 'socket hang up' : null,
-      httpStatus: this.mode === 'fail-after-dispatch' ? null : 200,
-      startedAt: new Date().toISOString(),
-      durationMs: 5,
-      requested: { model: req.model, routing: req.experiment?.routing ?? null, maxTokens: req.experiment?.maxTokens ?? null },
-      responseId: 'gen-test',
-      generationIdHeader: null,
-      servedModel: MODEL,
-      finishReason: 'stop',
-      tokensIn: this.mode === 'fail-after-dispatch' ? null : 900,
-      tokensOut: this.mode === 'fail-after-dispatch' ? null : 120,
-      costUsd: this.mode === 'fail-after-dispatch' ? null : 0.0002,
-      router: { selected: [{ provider: 'DeepInfra', model: MODEL }], attempt: 1, attemptsCount: 1, requested: MODEL, strategy: 'direct' },
-      generation: null,
-      routerMetadataRaw: null,
-      errorDetail: null,
-    };
-    req.onAttempt?.(attempt);
-    if (this.mode === 'fail-after-dispatch') throw new Error('socket hang up');
-    return {
-      data: { verdict: 'approve', summary: 'ok', score: 100, findings: [] } as T,
-      model: req.model,
-      tokensIn: 900,
-      tokensOut: 120,
-      providerCostUsd: 0.0002,
-      costUsd: 0.0002,
-      raw: '{}',
-      attempts: 1,
-    };
-  }
-}
+const MODEL = FAKE_MODEL;
+const ENDPOINT = FAKE_ENDPOINT;
 
 const EXPERIMENT_ENV = {
   DEVDIGEST_EXPERIMENT_STACK_ID: 'hw2f-itest1',

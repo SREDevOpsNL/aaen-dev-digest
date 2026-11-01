@@ -683,7 +683,7 @@ export class ReviewRunExecutor {
 const PRE_DISPATCH_CODES = new Set(['config_error', 'skill_not_approved', 'experiment_spend_refused']);
 
 /** The refusal an error represents when it stopped the run before dispatch, else null. */
-function preDispatchRefusal(err: unknown): { code: string; reason: string } | null {
+export function preDispatchRefusal(err: unknown): { code: string; reason: string } | null {
   if (err instanceof ExperimentRefusedError) return { code: 'experiment_refused', reason: err.reason };
   if (err instanceof ReviewRefusedError) return { code: err.code, reason: err.message };
   if (err instanceof AppError && PRE_DISPATCH_CODES.has(err.code)) return { code: err.code, reason: err.message };
