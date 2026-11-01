@@ -1,0 +1,180 @@
+{
+  "version": 4,
+  "implementation_fingerprint": "61145a400570094d81007e28abb06f2e14e0e17fe82971394d18da33cec25db1",
+  "non_skill_fingerprints": {
+    "17": "7aea99454106fbd442970622e4bbd916445a7f05ac6910fd2646f2a914f48358"
+  },
+  "stack": {
+    "database": "devdigest_hw2f_5b00487b",
+    "provider": "deepinfra/fp8",
+    "providerName": "DeepInfra",
+    "model": "deepseek/deepseek-v4-flash",
+    "servedModel": "deepseek/deepseek-v4-flash-20260423",
+    "maxOutputTokens": 8000,
+    "prices": {
+      "input": 9e-8,
+      "output": 1.8e-7,
+      "request": 0
+    },
+    "generationLookup": {
+      "attempts": 13,
+      "delayMs": 5000
+    }
+  },
+  "retry": {
+    "transport": 0,
+    "structured": 0
+  },
+  "temperature": 0,
+  "fixtures": [
+    {
+      "number": 501,
+      "reviewer": "Test Quality Reviewer",
+      "target_skill": "Edge Cases and Error Paths",
+      "title": "Add coupon discounts to checkout totals",
+      "body_sha": "b5f97b1344d9373409683432b2afa1af87accc47e1eafad0650cb7e2c84d168d",
+      "files": [
+        {
+          "path": "src/billing/discount.ts",
+          "patch_sha": "7eb352792002ea7fc5529a569389e2494f4e2fc092a73b795605e3d558c125b3"
+        },
+        {
+          "path": "src/billing/discount.test.ts",
+          "patch_sha": "5f24016e1b325057ae923b19a38e5dd6d096b0cab4b6996db4daa5a4e7de5db1"
+        }
+      ],
+      "diff_sha256": "8e0ba13345806d37f29233f6ba28057f52fd17c010ce0a482267b8cbc527d186",
+      "expected_anchors": [
+        {
+          "file": "src/billing/discount.test.ts",
+          "start_line": 4,
+          "end_line": 8
+        },
+        {
+          "file": "src/billing/discount.ts",
+          "start_line": 11,
+          "end_line": 12
+        }
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "name": "Edge Cases and Error Paths",
+      "body_sha": "82a7461ebbbe62468b147ed04fb2571b0bf7d8d1adeb794839739e77d48ed17f",
+      "enabled": true,
+      "approval": {
+        "status": "approved",
+        "approved_version": 1
+      }
+    }
+  ],
+  "agents": [
+    {
+      "name": "Test Quality Reviewer",
+      "enabled": true,
+      "system_prompt_sha": "8ad1660b08790d0506aebbfa2f2b7b69c5f130155edc31ca9771aae4fea6c3ad",
+      "output_schema_sha": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v4-flash",
+      "strategy": "single-pass",
+      "repo_intel": false
+    }
+  ],
+  "rules": {
+    "17": {
+      "anchors": [
+        {
+          "file": "src/billing/discount.test.ts",
+          "start_line": 4,
+          "end_line": 8
+        },
+        {
+          "file": "src/billing/discount.ts",
+          "start_line": 9,
+          "end_line": 12
+        }
+      ],
+      "keywords": [
+        "\\b(expir\\w*)\\b[^.]{0,80}\\b(boundary|equal\\w*|exactly|same (instant|time|moment)|>=|at (the )?expir\\w*)\\b",
+        "\\b(boundary|equal\\w*|exactly)\\b[^.]{0,80}\\bexpir\\w*",
+        "now\\s*(==|===|>=)\\s*(coupon\\.)?expiresAt",
+        "\\b(unknown|expired|invalid)\\b[^.]{0,60}\\b(code|coupon)\\b[^.]{0,60}\\b(test\\w*|untested|covered|coverage)\\b",
+        "\\b(error|failure|exception|throw\\w*|negative|sad)[- ](paths?|cases?|branch(es)?)\\b",
+        "happy[- ]path"
+      ]
+    }
+  },
+  "per_slot_reservation_usd": 0.005,
+  "study": {
+    "id": "itemb-v4",
+    "slot_tag": "v4",
+    "experiments": [
+      "17"
+    ],
+    "per_condition": 5,
+    "truncation": "continue-impute",
+    "truncation_provenance": "single-router-attempt",
+    "adjudication_packet": 2,
+    "redaction": "r1"
+  },
+  "schedule": {
+    "seed": 4284451045,
+    "seed_derivation": {
+      "method": "uint32 of the first 8 hex digits of sha256(\"hw2-\" + study.id + \"|\" + basis_fingerprint)",
+      "basis_fingerprint": "e23f56144a569da7bd5bc830e95a2b3fadf6860023e1fd34d0b7d24695d190b4"
+    },
+    "slots": [
+      {
+        "slot_id": "c-v4-17-without-2",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v4-17-with-2",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-with-1",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-without-1",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v4-17-without-5",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v4-17-with-5",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-with-3",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-without-3",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v4-17-with-4",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v4-17-without-4",
+        "experiment": "17",
+        "condition": "without"
+      }
+    ]
+  }
+}
