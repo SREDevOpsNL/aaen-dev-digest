@@ -204,6 +204,21 @@ correction. Genuinely cross-package findings belong in
   ("sanitizeErrorText redacts credentials… and keeps fingerprints"),
   `server/src/modules/reviews/run-executor.ts` (`errorText`).
 
+- **2026-11-01** — OpenRouter reports two different token counts for the same
+  generation. The response `usage.completion_tokens` and `prompt_tokens` are
+  the provider-native counts, and they are what is billed: cost = tokens ×
+  price exactly, for all six Item B v3 slots. The generation record's
+  `tokens_completion` and `tokens_prompt` are OpenRouter-normalized; the
+  native counts are in its `native_tokens_*` fields. For example, run
+  `c-17-with-1` shows 1,736 in `usage` against 1,388 in the generation
+  record. The input counts differ in both directions (1,373 vs 1,501), so the
+  gap is not hidden reasoning output. Earlier raw records from the same
+  `deepinfra/fp8` endpoint show `native_tokens_reasoning: 0`. Compare
+  `max_tokens` and cost with the native `usage` counts, never with the
+  normalized generation counts. Attempt records now keep both families,
+  plus the reasoning tokens when reported. Evidence:
+  `docs/homework/L02/evidence/successor-study-analysis-20261101.md` §2.2.
+
 ## Decisions
 
 ## Recurring Errors & Fixes

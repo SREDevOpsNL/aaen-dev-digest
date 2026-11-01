@@ -100,6 +100,86 @@ may get there.
    skill there is no block and no count. Traces written before the change
    (Skills in the user message) render with a legacy label.
 
+## Run lifecycle evidence and failure traces (2026-11-01)
+
+Item B v3 showed that a failed run's trace did not record what was sent. The
+failure path wrote the agent's raw prompt, no Skills and zero usage, while
+the run row held the billed tokens. The repair, in
+`reviewer-core/src/review/run.ts`, `reviewer-core/src/llm/lifecycle.ts`,
+`server/src/modules/reviews/{run-executor,trace-recorder,repository}.ts`
+and `server/src/modules/_shared/trace-evidence.ts`, works as follows.
+
+1. **Stages.** The engine reports each stage just before its provider call,
+   with the exact `PromptAssembly` it sends:
+   - stage IDs `single-0` or `map-N`;
+   - reduce is deterministic and sends no request.
+
+   Stages are kept in order in `stages[]`. Each holds its state, usage,
+   attempts and an assembly digest. Each distinct full assembly is stored
+   once, bounded at 256 KiB per copy and 1 MiB per trace. If a copy is cut,
+   `assembly_complete: false` is set and the byte count and sha256 of the
+   full text are kept.
+2. **Attempts.** Each adapter records attempts under the stage:
+   - OpenRouter, both the normal and the experiment path;
+   - OpenAI;
+   - Anthropic.
+
+   An attempt moves through `submitted` (handed to the HTTP client),
+   `response_received` (with a provider response ID, usage and reasoning
+   tokens) and `usage_verified` (a generation record found), or ends
+   `failed`. A structured retry is another attempt under the same stage.
+   `submitted` is never treated as proof that the provider processed the
+   request. SDK-internal transport retries are not visible.
+3. **Dispatch classification.** `dispatch.state` is one of
+   `not_dispatched`, `dispatched` or `completed`. A refusal before
+   dispatch is recorded with an explicit code, zero attempts and
+   `usage_state: 'none'`, and no prompt is invented for it. The codes are
+   `skill_not_approved`, `experiment_refused`,
+   `experiment_spend_refused`, `strategy_guard`, `config_error`,
+   `diff_unavailable` and others.
+4. **Truncated and schema-invalid output.** These raise a typed
+   `ProviderOutputError`. It carries the partial text, bounded to 16 KiB,
+   plus usage, the finish reason and the response ID. The trace stores this
+   as `partial_output` (`provider_incomplete: true`); it is never parsed
+   into findings. Prompts and partial output are stored only in
+   `run_traces`, behind the workspace-scoped trace route, and never in logs
+   or the run bus. Provider IDs and error text are sanitized and bounded
+   before they reach any record or log.
+5. **One set of totals.** The run row and the trace stats come from the same
+   totals. Unknown usage stays `null`, never 0. The global experiment
+   ledger stays authoritative for billing; a null cost is charged the full
+   reservation.
+6. **Atomic persistence.**
+   - The terminal row update and the trace are written in one transaction
+     on both the success and the failure path.
+   - Postgres-invalid text (U+0000, lone surrogates) is replaced before the
+     write, through a depth-bounded walk.
+   - If the full failure trace still cannot be written, one retry writes a
+     minimal labelled trace (`persistence: 'fallback'`).
+   - A cancel through the API keeps its status; the measured usage is
+     filled into the row under a guarded update.
+   - The boot reaper labels runs that crashed or were cancelled without a
+     trace (`persistence: 'reaped'`, prompt `unrecorded`). It keeps any
+     persisted usage and partial trace, and fabricates nothing.
+7. **Legacy traces.** A trace written before this change has no
+   `prompt_assembly_source`. It is classified at read time and never
+   rewritten:
+   - `legacy_single_pass`;
+   - `legacy_map_reduce_whole_diff`;
+   - `legacy_failed_fallback`.
+
+   A new trace whose top-level prompt was cut reads as
+   `dispatched_request_incomplete`. The HW2 report and the experiment slot
+   view use this classification. A legacy failed trace reads as "prompt not
+   recorded", never as "sent 0 skills", and a cut prompt never counts as
+   proof of the Skills section.
+
+The system-role Skill placement, the approval gate, the enabled-Skill
+filter, the drag order and `skills_tokens` are unchanged. All new trace
+fields are optional, so stored traces still validate; both contract copies
+match. The run-trace drawer shows the persisted run status
+(`RunSummary.status`) in its header.
+
 ## Skill content approval
 
 - **Rule.** A skill is approved only if its latest decision is `approve` and
