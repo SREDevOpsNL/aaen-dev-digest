@@ -540,6 +540,27 @@ correction. Repo-intel remains server-scoped;
   truncation shaped like v3 c-17-with-2 … continues at
   router_metadata_only"), `docs/homework/L02/prereg/study-v4-frozen-text.md`.
 
+- **2026-11-02** — In HW2, a 429 policy that re-attempts grows the
+  conservative ledger mostly through reservations, not spend. `charge` in
+  `budget.ts` keeps a terminal slot with unknown cost at its full
+  reservation, and a pre-generation 429 has unknown cost even after a
+  settlement proves it was not billed. The v4 429 still holds $0.005.
+  - **Scale.** Under a K = 3 attempt pool at p = 0.2, the expected actual
+    spend is $0.0035–0.0079. The expected conservative growth is
+    $0.0159–0.0203, mostly 2.48 expected 429s × $0.005.
+  - **The runner would stop anyway.** The default
+    `maxConsecutiveUnknownCost: 2` in `runner.ts` would fire on two 429s in a
+    row, and any confirmatory failure already stops the schedule. A non-stop
+    429 policy therefore needs an explicit, classified exception, not just a
+    new stop rule.
+  - **A binding cap biases missingness.** A total-attempt cap below
+    trials × K binds late in the order, so the condition of the later trials
+    decides which arm loses them. Make the cap equal to the plan length.
+
+  Evidence: `server/src/experiments/hw2/throttle-policy.ts`
+  (`expectedSpend`, `exactMetrics`), `server/test/hw2-throttle-policy.test.ts`,
+  `docs/homework/L02/proposals/429-policy-proposal.md` (sections 4 and 6).
+
 ## Session Notes
 
 ## Open Questions
