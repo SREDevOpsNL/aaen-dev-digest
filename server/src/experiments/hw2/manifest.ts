@@ -2,6 +2,7 @@ import { EXPERIMENT_FIXTURES, patchStats, type ExperimentFixture } from '../../d
 import { diffFromPrFiles } from '../../modules/reviews/diff-loader.js';
 import type { ReviewRepository } from '../../modules/reviews/repository.js';
 import { canonicalJson, sha256 } from '../../modules/_shared/experiment.js';
+import { P3_ATTEMPT_POLICY_V5, attemptPlan, frozenAttempts, type AttemptPolicyP3, type FrozenAttempt } from './attempt-policy.js';
 import type { TruncationProvenancePolicy } from './eligibility.js';
 import type { ExpectedRule } from './rules.js';
 import { buildSchedule, type Slot } from './schedule.js';
@@ -151,8 +152,38 @@ export const STUDY_V4: StudyBlock = {
   redaction: 'r1',
 };
 
-/** The studies a version 4 manifest may name. */
-const KNOWN_STUDIES: Record<string, StudyBlock> = { [STUDY_V4.id]: STUDY_V4 };
+/**
+ * Study v5 (2026-11-02): the v4 design for #17 plus the owner-approved P3
+ * attempt pool, P4 reporting and no warm-ups, frozen in a version 5 manifest.
+ * Its trials keep v4's slot-ID form with the `v5` tag; only attempt IDs
+ * (`<trial>-a<k>`) are ever dispatched.
+ */
+export interface StudyBlockV5 extends StudyBlock {
+  attempt_policy: AttemptPolicyP3;
+  /** `p4`: observed results apart from worst- and best-case bounds over the trials lost to classified 429s. */
+  reporting: 'p4';
+  warmups: 0;
+}
+
+export const STUDY_V5: StudyBlockV5 = {
+  id: 'itemb-v5',
+  slot_tag: 'v5',
+  experiments: ['17'],
+  per_condition: 5,
+  truncation: 'continue-impute',
+  truncation_provenance: 'single-router-attempt',
+  adjudication_packet: 2,
+  redaction: 'r1',
+  attempt_policy: P3_ATTEMPT_POLICY_V5,
+  reporting: 'p4',
+  warmups: 0,
+};
+
+/** The studies each tagged manifest version may name: a version never carries another version's study. */
+const KNOWN_STUDIES: Record<4 | 5, Record<string, StudyBlock>> = {
+  4: { [STUDY_V4.id]: STUDY_V4 },
+  5: { [STUDY_V5.id]: STUDY_V5 },
+};
 
 export interface SeedDerivation {
   method: string;
@@ -166,11 +197,22 @@ export type ManifestV4 = Omit<ManifestV3, 'version' | 'schedule'> & {
   schedule: ManifestV3['schedule'] & { seed_derivation: SeedDerivation };
 };
 
-export type Manifest = ManifestV3 | ManifestV4;
+export type ManifestV5 = Omit<ManifestV4, 'version' | 'study' | 'schedule'> & {
+  version: 5;
+  study: StudyBlockV5;
+  /** `slots` are the trials; `attempts` every attempt ID the policy may use, in plan order. */
+  schedule: ManifestV4['schedule'] & { attempts: FrozenAttempt[] };
+};
+
+export type Manifest = ManifestV3 | ManifestV4 | ManifestV5;
+
+/** A manifest of a tagged successor study (version 4 or 5): seed derived from its content. */
+export type TaggedManifest = ManifestV4 | ManifestV5;
+export const isTagged = (manifest: Manifest): manifest is TaggedManifest => manifest.version === 4 || manifest.version === 5;
 
 /** What a frozen manifest's version means for the runner, the report and the adjudication. */
 export interface StudySemantics {
-  version: 3 | 4;
+  version: 3 | 4 | 5;
   /** null: untagged v3 slot IDs. */
   slotTag: string | null;
   experiments: string[];
@@ -180,6 +222,10 @@ export interface StudySemantics {
   truncationProvenance: TruncationProvenancePolicy;
   adjudicationPacket: 1 | 2;
   redaction: 'none' | 'r1';
+  /** Version 5 only: the frozen attempt pool (absent in versions 3 and 4, which never re-attempt). */
+  attemptPolicy?: AttemptPolicyP3;
+  /** Version 5 only. */
+  reporting?: 'p4';
 }
 
 /** The closed v3 study: 17 and 18, five per condition, any truncation stops the schedule, packet v1 unredacted. */
@@ -197,10 +243,11 @@ export const V3_SEMANTICS: StudySemantics = Object.freeze({
 /** The semantics of a manifest version. Throws on any version or study this runner does not know. */
 export function studySemantics(manifest: { version: unknown; study?: unknown }): StudySemantics {
   if (manifest.version === 3) return V3_SEMANTICS;
-  if (manifest.version === 4) {
-    const study = knownStudy(manifest.study);
-    return {
-      version: 4,
+  if (manifest.version === 4 || manifest.version === 5) {
+    const version = manifest.version;
+    const study = knownStudy(manifest.study, version);
+    const base: StudySemantics = {
+      version,
       slotTag: study.slot_tag,
       experiments: [...study.experiments],
       perCondition: study.per_condition,
@@ -209,17 +256,26 @@ export function studySemantics(manifest: { version: unknown; study?: unknown }):
       adjudicationPacket: study.adjudication_packet,
       redaction: study.redaction,
     };
+    if (version === 4) return base;
+    const v5 = study as StudyBlockV5;
+    return { ...base, attemptPolicy: v5.attempt_policy, reporting: v5.reporting };
   }
-  throw new Error(`The pre-registration is manifest version ${String(manifest.version)}; this runner freezes versions 3 and 4`);
+  throw new Error(`The pre-registration is manifest version ${String(manifest.version)}; this runner freezes versions 3, 4 and 5`);
 }
 
-function knownStudy(study: unknown): StudyBlock {
+function knownStudy(study: unknown, version: 4 | 5 = 4): StudyBlock {
   const id = (study as { id?: unknown } | null | undefined)?.id;
-  const known = typeof id === 'string' ? KNOWN_STUDIES[id] : undefined;
+  const known = typeof id === 'string' ? KNOWN_STUDIES[version][id] : undefined;
   if (!known || canonicalJson(known) !== canonicalJson(study)) {
-    throw new Error(`A version 4 manifest must carry a known study block exactly (got ${canonicalJson(study ?? null)})`);
+    throw new Error(`A version ${version} manifest must carry a known study block exactly (got ${canonicalJson(study ?? null)})`);
   }
   return known;
+}
+
+/** The version a study block is frozen under (4 or 5); throws on an unknown block. */
+export function versionOfStudy(study: StudyBlock): 4 | 5 {
+  for (const version of [4, 5] as const) if (KNOWN_STUDIES[version][study.id] && canonicalJson(KNOWN_STUDIES[version][study.id]) === canonicalJson(study)) return version;
+  throw new Error(`Unknown study block ${canonicalJson(study)}`);
 }
 
 /** The slots a frozen manifest's semantics schedule from `seed`, in their randomized order. */
@@ -249,7 +305,21 @@ const withoutSchedule = (manifest: Record<string, unknown>) => Object.fromEntrie
  * schedule, then the tagged schedule is built from it.
  */
 export async function buildManifestV4(input: Omit<ManifestInput, 'schedule'> & { study: StudyBlock }): Promise<ManifestV4> {
-  const study = knownStudy(input.study);
+  return (await buildTagged(input, 4)) as ManifestV4;
+}
+
+/**
+ * A version 5 manifest: built exactly as version 4 (same frozen content, the
+ * seed derived the same way from the study ID and the manifest without its
+ * schedule), with the v5 study block, and the full attempt-ID plan frozen
+ * next to the trial schedule.
+ */
+export async function buildManifestV5(input: Omit<ManifestInput, 'schedule'> & { study: StudyBlockV5 }): Promise<ManifestV5> {
+  return (await buildTagged(input, 5)) as ManifestV5;
+}
+
+async function buildTagged(input: Omit<ManifestInput, 'schedule'> & { study: StudyBlock }, version: 4 | 5): Promise<TaggedManifest> {
+  const study = knownStudy(input.study, version);
   const fixtures = study.experiments.map((experiment) => {
     const number = EXPERIMENT_FIXTURE[experiment];
     const fixture = EXPERIMENT_FIXTURES.find((f) => f.number === number);
@@ -275,18 +345,23 @@ export async function buildManifestV4(input: Omit<ManifestInput, 'schedule'> & {
   }
   const body = {
     ...withoutSchedule(base),
-    version: 4 as const,
+    version,
     study,
     fixtures: base.fixtures.filter((f) => fixtures.some((x) => x.number === f.number)),
-  } as Omit<ManifestV4, 'schedule'>;
+  } as Omit<TaggedManifest, 'schedule'>;
   const basis = sha256(canonicalJson(body));
   const seed = deriveSeed(study.id, basis);
-  const slots = scheduleFor(studySemantics(body), seed).map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition }));
-  return { ...body, schedule: { seed, seed_derivation: { method: SEED_METHOD, basis_fingerprint: basis }, slots } };
+  const semantics = studySemantics(body);
+  const trials = scheduleFor(semantics, seed);
+  const slots = trials.map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition }));
+  const derivation = { method: SEED_METHOD, basis_fingerprint: basis };
+  if (version === 4) return { ...(body as Omit<ManifestV4, 'schedule'>), schedule: { seed, seed_derivation: derivation, slots } };
+  const attempts = frozenAttempts(attemptPlan(trials, semantics.attemptPolicy!));
+  return { ...(body as Omit<ManifestV5, 'schedule'>), schedule: { seed, seed_derivation: derivation, slots, attempts } };
 }
 
-/** Why a version 4 manifest's seed or schedule is not the one its content derives (empty when it is). */
-export function seedProblems(manifest: ManifestV4): string[] {
+/** Why a version 4 or 5 manifest's seed, schedule or attempt plan is not the one its content derives (empty when it is). */
+export function seedProblems(manifest: TaggedManifest): string[] {
   const problems: string[] = [];
   const basis = sha256(canonicalJson(withoutSchedule(manifest as unknown as Record<string, unknown>)));
   const derivation = manifest.schedule?.seed_derivation;
@@ -295,6 +370,12 @@ export function seedProblems(manifest: ManifestV4): string[] {
   if (manifest.schedule?.seed !== deriveSeed(manifest.study.id, basis)) problems.push('the seed is not the one its basis derives');
   const expected = scheduleFor(studySemantics(manifest), deriveSeed(manifest.study.id, basis)).map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition }));
   if (canonicalJson(manifest.schedule?.slots ?? null) !== canonicalJson(expected)) problems.push('the schedule is not the one the derived seed builds');
+  if (manifest.version === 5) {
+    const semantics = studySemantics(manifest);
+    const trials = scheduleFor(semantics, deriveSeed(manifest.study.id, basis));
+    const plan = frozenAttempts(attemptPlan(trials, semantics.attemptPolicy!));
+    if (canonicalJson(manifest.schedule?.attempts ?? null) !== canonicalJson(plan)) problems.push('the attempt plan is not the one the frozen policy and the derived schedule build');
+  }
   return problems;
 }
 
@@ -312,15 +393,16 @@ export function manifestDifferences(frozen: Manifest, current: Manifest): string
 
 /**
  * A committed, unmodified pre-registration of a manifest version this runner
- * builds: version 3 as before, or version 4 with a known study block and the
- * seed and schedule its content derives.
+ * builds: version 3 as before, or version 4 or 5 with a known study block of
+ * that version and the seed and schedule (version 5: and the attempt plan)
+ * its content derives.
  */
 export function readFrozen(file: string, root: string): Manifest {
   const frozen = preregisteredManifest<Manifest>(file, root);
   studySemantics(frozen);
-  if (frozen.version === 4) {
+  if (isTagged(frozen)) {
     const problems = seedProblems(frozen);
-    if (problems.length > 0) throw new Error(`The version 4 pre-registration is inconsistent: ${problems.join('; ')}`);
+    if (problems.length > 0) throw new Error(`The version ${frozen.version} pre-registration is inconsistent: ${problems.join('; ')}`);
   }
   return frozen;
 }

@@ -293,9 +293,13 @@ describe('adjudication CLI with a version 4 input', () => {
     const noRules = join(base, 'no-rules.json');
     writeFileSync(noRules, JSON.stringify({ ...input, screen_rules: undefined }));
     await expect(run('prepare', '--input', noRules)).rejects.toThrow(/needs the frozen screen_rules/);
-    const unknown = join(base, 'v5.json');
-    writeFileSync(unknown, JSON.stringify({ ...input, manifest_version: 5 }));
-    await expect(run('prepare', '--input', unknown)).rejects.toThrow(/manifest version 5/);
+    // Version 5 exists since study v5: it is refused with a v4 study block; version 6 is unknown.
+    const v5WithV4Study = join(base, 'v5.json');
+    writeFileSync(v5WithV4Study, JSON.stringify({ ...input, manifest_version: 5 }));
+    await expect(run('prepare', '--input', v5WithV4Study)).rejects.toThrow(/version 5 manifest must carry a known study block/);
+    const unknown = join(base, 'v6.json');
+    writeFileSync(unknown, JSON.stringify({ ...input, manifest_version: 6 }));
+    await expect(run('prepare', '--input', unknown)).rejects.toThrow(/manifest version 6/);
     expect(existsSync(join(dir, 'packet.json'))).toBe(false);
   });
 });

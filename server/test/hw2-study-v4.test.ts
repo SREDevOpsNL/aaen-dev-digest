@@ -192,7 +192,8 @@ describe('readFrozen and verifyPreregistration across versions (real git)', () =
   });
 
   it.each([
-    ['an unknown version', () => ({ ...v4, version: 5 }), /manifest version 5; this runner freezes versions 3 and 4/],
+    ['an unknown version', () => ({ ...v4, version: 6 }), /manifest version 6; this runner freezes versions 3, 4 and 5/],
+    ['a version 5 file carrying the v4 study block', () => ({ ...v4, version: 5 }), /version 5 manifest must carry a known study block exactly/],
     ['a version 4 file without a study block', () => { const { study: _s, ...rest } = v4; return rest; }, /known study block exactly/],
     ['a version 4 file with an edited study block', () => ({ ...v4, study: { ...v4.study, truncation: 'stop' } }), /known study block exactly/],
     ['a version 4 file with an edited seed', () => ({ ...v4, schedule: { ...v4.schedule, seed: v4.schedule.seed + 1 } }), /inconsistent: .*seed/],
@@ -253,7 +254,7 @@ describe('`--study v4 --experiments 17`', () => {
   it('selects exactly the frozen study, and nothing else', () => {
     expect(studyFromFlags({})).toBeNull();
     expect(studyFromFlags({ study: 'v4', experiments: '17' })).toBe(STUDY_V4);
-    expect(() => studyFromFlags({ study: 'v5', experiments: '17' })).toThrow(/--study must be v4/);
+    expect(() => studyFromFlags({ study: 'v6', experiments: '17' })).toThrow(/--study must be v4 or v5/);
     expect(() => studyFromFlags({ study: 'v4', experiments: '17,18' })).toThrow(/needs --experiments 17/);
     expect(() => studyFromFlags({ study: 'v4', experiments: '17', seed: '7' })).toThrow(/drop --seed/);
     expect(() => studyFromFlags({ experiments: '17' })).toThrow(/needs --study/);
