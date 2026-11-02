@@ -262,7 +262,35 @@ stay private.
 - No capability file; the last authorization event is this revoke.
 - All ledger slots are terminal.
 - The runner and driver processes have exited.
-- Stack `hw2f-a88a535d` is still up (tmux `hw2-freeze-v5`) for read-only
-  forensics. Its teardown is the owner's call.
+- Stack `hw2f-a88a535d` was torn down on the owner's instruction (see
+  below).
 - The 10 unused attempt IDs were not dispatched. Any further #17 study needs
   a new decision and a new pre-registration.
+
+## Teardown (2026-11-02)
+
+The owner authorized tearing down the disposable stack `hw2f-a88a535d`.
+
+- **Gate.** All 65 archive hashes passed. The dump was restored into a
+  throwaway container (no port, no volume left behind): `pg_restore` exits 0,
+  and the row counts equal the exports (20 runs, 20 traces, 6 reviews,
+  39 findings of the observed runs, 5 agents, 7 Skills). No capability, no
+  open slot, and key usage was unchanged since the settlement.
+- **Removed:**
+  - the stack, through its own Ctrl-C teardown (container
+    `devdigest-hw2f-a88a535d`, its processes and tmux session);
+  - the headless browser the click driver had started (`agent-browser
+    close`);
+  - the stack's anonymous volume `5f5713dd…`, which the teardown left
+    behind. `docker inspect` had shown it as the container's only mount, and
+    nothing referenced it.
+- **After, compared with the recorded baseline:**
+  - only the items above changed; volumes went 155 → 154;
+  - key usage ($0.00951048), the ledger (108 records, $0.0991026), and the
+    hashes of the ledger, authorization and key-usage logs and of the v3,
+    v4 and v5 archive manifests are unchanged;
+  - `devdigest-postgres` and `devdigest_pgdata` are unchanged (12 runs);
+  - the six unidentified anonymous volumes are kept.
+- **Kept:** both inventories, privately, as `teardown-baseline.txt` and
+  `teardown-after.txt`; `~/.devdigest/hw2-experiments/hw2f-a88a535d/clones`;
+  and the detached audit worktree.

@@ -346,3 +346,19 @@ needs a corrected freeze and a fresh approval.
   `46822a07…`); public `evidence/item-b-v5-confirmatory/`.
 - **Stack** `hw2f-a88a535d` is still up for read-only forensics; its
   teardown is the owner's call.
+
+## 2026-11-02: v5 stack torn down (owner-authorized)
+
+- **Gate.** The 65 archive hashes passed and a throwaway restore of the dump
+  matched the exports. No capability or open slot; key unchanged.
+- **Removed:** `hw2f-a88a535d` (container, processes, tmux), the driver's
+  headless browser, and the stack's leftover volume `5f5713dd…`.
+- **Unchanged against the baseline:**
+  - the key ($0.00951048) and the ledger (108 records, $0.0991026);
+  - all log and archive hashes;
+  - `devdigest-postgres` / `devdigest_pgdata` (12 runs);
+  - the six unidentified volumes.
+- **Record:**
+  [evidence/item-b-v5-confirmatory/README.md](evidence/item-b-v5-confirmatory/README.md#teardown-2026-11-02).
+- **No disposable HW2 stack is running.** #17 stays Implemented;
+  acceptance stays 50/2/1.
