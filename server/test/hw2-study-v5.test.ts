@@ -24,7 +24,7 @@
  * The DB-backed hw2-study-v5-runner.it.test.ts also fails on 1, 2, 4, 6, 7 and 8b.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +43,7 @@ import {
   type AttemptRunView,
 } from '../src/experiments/hw2/attempt-policy.js';
 import { preparePacketV2, reveal, sealJudgment, TECHNICAL_RULES, type Judgment, type P3TrialEntry } from '../src/experiments/hw2/adjudication.js';
+import { main as adjudicationMain } from '../src/experiments/hw2/adjudication-cli.js';
 import { attemptReservationTotal, authorize, main, studyFromFlags, type Stack } from '../src/experiments/hw2/cli.js';
 import type { FrozenExpectations } from '../src/experiments/hw2/eligibility.js';
 import { Ledger } from '../src/experiments/hw2/ledger.js';
@@ -744,6 +745,36 @@ describe('adjudication: condition-blinded packet, P4 at the reveal', () => {
       expect(blocked.experiments[0]!.p4).toMatchObject({ claim: 'incomplete' });
     } finally {
       h.done();
+    }
+  });
+
+  it('`adjudication-cli prepare` takes packet v2 and the attempt pools from a version 5 input, and refuses one without them', async () => {
+    const h = (await pool([T429, ...detectingScript()])).h;
+    const base = mkdtempSync(join(tmpdir(), 'hw2-v5-adj-'));
+    try {
+      const r = reportOf(h);
+      const trials = Object.fromEntries(r.trials.map((x) => [x.trial_id, { label: x.label, label_reason: x.label_reason, scoring_attempt_id: x.scoring_attempt_id, attempt_ids: x.attempts.map((a) => a.attempt_id) }]));
+      const input = {
+        design: { manifest_fingerprint: MANIFEST, experiments: ['17'], per_condition: 5, slots: TRIALS.map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition })) },
+        rows: r.trial_rows, runs: Object.fromEntries(r.trial_runs), skill_names: ['Edge Cases and Error Paths'],
+        manifest_version: 5, study: STUDY_V5, screen_rules: RULES, trials,
+      };
+      const file = join(base, 'input.json');
+      writeFileSync(file, JSON.stringify(input));
+      await adjudicationMain(['prepare', '--dir', join(base, 'record'), '--input', file], () => new Date('2026-11-03T00:00:00Z'), () => {});
+      const mapping = JSON.parse(readFileSync(join(base, 'record', 'private', 'mapping.json'), 'utf8'));
+      const packet = JSON.parse(readFileSync(join(base, 'record', 'packet.json'), 'utf8'));
+      expect(packet.version).toBe(2);
+      expect(packet.cases).toHaveLength(10);
+      expect(JSON.stringify(packet)).not.toContain('c-v5-');
+      expect(mapping.attempt_policy).toBe('p3');
+      expect(mapping.entries.find((e: { slot_id: string }) => e.slot_id === TRIALS[0]!.slot_id).p3).toMatchObject({ label: 'observed', scoring_attempt_id: ids(0, 2)[0] });
+      const bare = join(base, 'bare.json');
+      writeFileSync(bare, JSON.stringify({ ...input, trials: undefined }));
+      await expect(adjudicationMain(['prepare', '--dir', join(base, 'record2'), '--input', bare], () => new Date(), () => {})).rejects.toThrow(/needs every trial's attempt-pool entry/);
+    } finally {
+      h.done();
+      rmSync(base, { recursive: true, force: true });
     }
   });
 
