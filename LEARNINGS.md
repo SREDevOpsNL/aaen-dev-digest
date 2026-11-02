@@ -256,6 +256,25 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   `docs/homework/L02/evidence/item-b-confirmatory/` (five logs missing from
   `a782927`, restored as `*-log.txt`).
 
+- **2026-11-02** — `scripts/e2e.sh` leaks one anonymous Docker volume per
+  stack.
+  - **Cause.** It starts Postgres with `docker run -d --rm`, but its teardown
+    (line 139, and the pre-start cleanup at line 146) runs
+    `docker rm -f "$PG_CONTAINER"` without `-v`.
+  - **What `--rm` does.** It removes the image's anonymous data volume only
+    when the container exits on its own. `docker rm -f` without `-v` leaves
+    the volume behind.
+  - **Evidence.** The v5 stack's normal Ctrl-C teardown removed the container
+    but left its only mount, volume `5f5713dd…`, with no users. Another
+    unattached volume, `744cbee1…`, appeared during that day's
+    `npm run e2e:hermetic` matrix run. The other unidentified anonymous
+    volumes on this host plausibly have the same origin, but that is not
+    proven per volume.
+  - **How to apply.** Use `docker rm -f -v` (or `docker stop`, so `--rm`
+    applies) in the teardown. Until it is fixed, identify a stack's volume
+    with `docker inspect` *before* tearing it down. Never bulk-prune: the
+    host also holds `devdigest_pgdata`.
+
 ## Session Notes
 
 ## Open Questions
