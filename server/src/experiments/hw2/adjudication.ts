@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { EXPERIMENT_FIXTURES } from '../../db/seed-fixtures.js';
 import { imputedVerdict, type ScheduledSlot, type SlotRow, type SlotRunData } from './report.js';
 import { detection, experimentOutcome, type ExpectedRule } from './rules.js';
+import { p4Result, type P4Result, type P4Tally, type TrialLabel } from './attempt-policy.js';
 
 /**
  * Sealed, condition-blinded technical adjudication (PROSPECTIVE-STUDY.md),
@@ -61,6 +62,16 @@ export interface MappingEntry {
   redactions?: number;
   /** Version 2 only: digest of this case's unredacted findings (in private/originals.json). */
   original_findings_sha256?: string | null;
+  /** Study v5 only (private): the trial's label, its attempts and the one it is scored from. */
+  p3?: P3TrialEntry;
+}
+
+/** What a v5 trial's mapping entry records about its attempt pool; never in the packet. */
+export interface P3TrialEntry {
+  label: TrialLabel;
+  label_reason: string;
+  scoring_attempt_id: string | null;
+  attempt_ids: string[];
 }
 
 export interface BlindingWarning {
@@ -98,6 +109,8 @@ export interface CaseMapping {
   redaction?: { method: 'r1'; terms_sha256: string };
   originals_sha256?: string;
   residual?: ResidualCompromise[];
+  /** Study v5 only: the reveal applies P4 to the adjudicated verdicts. */
+  attempt_policy?: 'p3';
 }
 
 /** Version 2: the unredacted finding text, kept in private/originals.json (mode 0600). */
@@ -312,12 +325,23 @@ export function preparePacketV2(input: {
   /** Target Skill names; each must be an r1 term. */
   skillNames: string[];
   newCaseId?: () => string;
+  /** Study v5: every scheduled trial's attempt-pool entry, kept in the private mapping only. */
+  trials?: Record<string, P3TrialEntry>;
 }): { packet: BlindPacket; packet_sha256: string; mapping: CaseMapping; mapping_sha256: string; originals: Originals; originals_sha256: string } {
   const problems = designProblems(input.design, input.rows);
   if (problems.length > 0) throw new Error(`input does not match the pre-registered schedule: ${problems.join('; ')}`);
   const unknown = input.skillNames.filter((name) => !REDACTION_TERMS_R1.includes(name.toLowerCase()));
   if (unknown.length > 0) throw new Error(`Skill name(s) not covered by redaction r1: ${unknown.join(', ')}`);
   for (const experiment of input.design.experiments) if (!input.screenRules[experiment]) throw new Error(`no frozen screening rule for experiment ${experiment}`);
+  if (input.trials) {
+    for (const row of input.rows) {
+      const trial = input.trials[row.slot_id];
+      if (!trial) throw new Error(`trial ${row.slot_id} has no attempt-pool entry`);
+      if ((trial.label === 'observed') !== row.counted) throw new Error(`trial ${row.slot_id} is labelled ${trial.label} but is${row.counted ? '' : ' not'} counted`);
+      if ((trial.label === 'imputed') !== Boolean(row.imputed)) throw new Error(`trial ${row.slot_id} is labelled ${trial.label} but is${row.imputed ? '' : ' not'} imputed`);
+    }
+  }
+  const p3Of = (slotId: string) => (input.trials ? { p3: input.trials[slotId]! } : {});
   const newCaseId = input.newCaseId ?? (() => `case-${randomBytes(6).toString('hex')}`);
   const used = new Set<string>();
   const cases: BlindCase[] = [];
@@ -333,11 +357,11 @@ export function preparePacketV2(input: {
       if (row.imputed.verdict !== expected.verdict) throw new Error(`slot ${row.slot_id}: an imputed ${row.condition} slot is "${expected.verdict}", not "${row.imputed.verdict}"`);
       if (row.counted) throw new Error(`slot ${row.slot_id} is both counted and imputed`);
       const imputed = { ...expected, ...(row.imputed.provenance ? { provenance: row.imputed.provenance } : {}) };
-      return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: null, not_counted_reason: expected.label, imputed, ...empty };
+      return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: null, not_counted_reason: expected.label, imputed, ...empty, ...p3Of(row.slot_id) };
     }
     if (!row.counted || !run) {
       const reason = !run ? `no run (${row.state})` : row.execution_issues[0] ?? row.eligibility?.reasons?.[0] ?? 'not counted';
-      return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: null, not_counted_reason: reason, imputed: null, ...empty };
+      return { slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: null, not_counted_reason: reason, imputed: null, ...empty, ...p3Of(row.slot_id) };
     }
     let caseId = newCaseId();
     while (used.has(caseId)) caseId = newCaseId();
@@ -357,7 +381,7 @@ export function preparePacketV2(input: {
     if (detection(original, rule).detected !== detection(findings, rule).detected) residual.push({ case_id: caseId, reason: 'evidence-changed' });
     return {
       slot_id: row.slot_id, experiment: row.experiment, condition: row.condition, case_id: caseId, not_counted_reason: null, imputed: null,
-      redactions, original_findings_sha256: digest(originalText),
+      redactions, original_findings_sha256: digest(originalText), ...p3Of(row.slot_id),
     };
   });
   cases.sort((a, b) => (a.case_id < b.case_id ? -1 : 1));
@@ -383,6 +407,7 @@ export function preparePacketV2(input: {
     redaction: { method: 'r1', terms_sha256: REDACTION_TERMS_R1_SHA256 },
     originals_sha256,
     residual,
+    ...(input.trials ? { attempt_policy: 'p3' as const } : {}),
   };
   return { packet, packet_sha256, mapping, mapping_sha256: digest(mapping), originals: record, originals_sha256 };
 }
@@ -404,6 +429,8 @@ export interface AdjudicatedExperiment {
   without: ConditionTally;
   outcome: 'success' | 'negative' | 'inconclusive' | 'incomplete';
   note: string | null;
+  /** Study v5 only: the adjudicated verdicts under P4 (observed apart from the bounds, and the claim). */
+  p4?: P4Result;
 }
 
 export type RevealResult =
@@ -418,6 +445,39 @@ export type RevealResult =
       /** Version 2 only. */
       blinding?: { method: 'r1'; warnings_original: number; redacted_cases: number; redactions: number; residual: ResidualCompromise[] };
     };
+
+/**
+ * Study v5: P4 over the adjudicated verdicts. A case with a yes or no verdict
+ * is observed; an ambiguous one is missing for a reason other than a 429
+ * (`incomplete`); an imputed truncation keeps its conservative verdict; a
+ * trial without a case is `bounded` only when its private entry says it was
+ * lost to classified 429s. Anything the mapping cannot account for blocks the
+ * claim.
+ */
+function adjudicatedP4(mapping: CaseMapping, cases: Array<{ slot_id: string; final: Verdict }>, experiment: string): P4Result {
+  const blockers: string[] = [];
+  const tally = (condition: 'with' | 'without'): P4Tally => {
+    const t: P4Tally = { scheduled: 0, observed: 0, detected: 0, imputed: 0, bounded: 0, incomplete: 0 };
+    for (const e of mapping.entries.filter((x) => x.experiment === experiment && x.condition === condition)) {
+      t.scheduled++;
+      if (!e.p3) blockers.push(`${e.slot_id} has no attempt-pool entry`);
+      if (e.case_id !== null) {
+        if (e.p3 && e.p3.label !== 'observed') blockers.push(`${e.slot_id} has a case but is labelled ${e.p3.label}`);
+        const final = cases.find((c) => c.slot_id === e.slot_id)?.final ?? 'ambiguous';
+        if (final === 'ambiguous') t.incomplete++;
+        else {
+          t.observed++;
+          if (final === 'yes') t.detected++;
+        }
+      } else if (e.imputed) t.imputed++;
+      else if (e.p3?.label === 'bounded') t.bounded++;
+      else t.incomplete++;
+    }
+    return t;
+  };
+  const tallies = { with: tally('with'), without: tally('without') };
+  return p4Result(tallies, blockers);
+}
 
 /** Problems with one judgment; `cases` = the case IDs it must cover (null = every case). */
 export function judgmentErrors(j: Judgment, packet: BlindPacket, packetSha: string, cases: Set<string> | null): string[] {
@@ -520,7 +580,7 @@ export function reveal(input: {
       return { experiment, with: w, without: wo, outcome: 'incomplete', note };
     }
     return { experiment, with: w, without: wo, outcome: experimentOutcome(w.detected, w.adjudicated, wo.detected, wo.adjudicated) as AdjudicatedExperiment['outcome'], note: null };
-  });
+  }).map((x) => (input.mapping.attempt_policy === 'p3' ? { ...x, p4: adjudicatedP4(input.mapping, cases, x.experiment) } : x));
 
   if (!v2) return { status: 'revealed', cases, experiments, blinding_compromised: input.mapping.blinding_warnings.length > 0 };
   const residual = input.mapping.residual ?? [];

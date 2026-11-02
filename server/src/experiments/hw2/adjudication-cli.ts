@@ -42,6 +42,7 @@ import {
   type CaseMapping,
   type Judgment,
   type Originals,
+  type P3TrialEntry,
   type RevealResult,
 } from './adjudication.js';
 import { studySemantics } from './manifest.js';
@@ -62,6 +63,8 @@ export interface AdjudicationInput {
   manifest_version?: number;
   study?: unknown;
   screen_rules?: Record<string, ExpectedRule>;
+  /** Version 5 only: every trial's attempt-pool entry (label, attempts, scoring attempt), for the private mapping. */
+  trials?: Record<string, P3TrialEntry>;
 }
 
 interface Digests {
@@ -184,6 +187,23 @@ export function renderAdjudicationReport(rec: { digests: Digests; seals: SealEve
   for (const x of rec.result.experiments) {
     lines.push(`| ${x.experiment} | ${x.with.detected} / ${x.with.scheduled} (${x.with.ambiguous}) | ${x.without.detected} / ${x.without.scheduled} (${x.without.ambiguous}) | ${x.outcome}${x.note ? ` — ${x.note}` : ''} |`);
   }
+  for (const x of rec.result.experiments) {
+    if (!x.p4) continue;
+    const p = x.p4;
+    lines.push(
+      '',
+      `### Experiment ${x.experiment}: P4 over the adjudicated verdicts`,
+      '',
+      '| Condition | Scheduled | Observed | Detected | Imputed (truncated) | Bounded (classified 429s) | Incomplete |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
+      ...(['with', 'without'] as const).map((c) => `| ${c} | ${p.tallies[c].scheduled} | ${p.tallies[c].observed} | ${p.tallies[c].detected} | ${p.tallies[c].imputed} | ${p.tallies[c].bounded} | ${p.tallies[c].incomplete} |`),
+      '',
+      `- Observed (strict): ${p.strict}. Worst case: ${p.worst_case}. Best case: ${p.best_case}.`,
+      `- Claim: **${p.claim}**: ${p.claim_label}.`,
+      '- A worst-case success is a conditional bound. It is never a Verified or accepted result.',
+      `- Missing: with ${p.balance.missing_with} of ${p.balance.scheduled_with}, without ${p.balance.missing_without} of ${p.balance.scheduled_without}; Fisher two-sided p = ${p.balance.fisher_two_sided_p.toFixed(3)}.`,
+    );
+  }
   lines.push('', '| Case | Slot | Condition | Final | Per adjudicator |', '| --- | --- | --- | --- | --- |');
   for (const c of rec.result.cases) lines.push(`| ${c.case_id} | ${c.slot_id} | ${c.condition} | ${c.final} | ${Object.entries(c.verdicts).map(([k, v]) => `${k}: ${v}`).join(', ')} |`);
   if (rec.result.imputed) {
@@ -230,7 +250,12 @@ export async function main(argv: string[], now: () => Date = () => new Date(), l
         if (!input.screen_rules) throw new Error('a version 4 adjudication input needs the frozen screen_rules');
         // Only the design's experiments, so a version 4 packet carries no #18 text.
         const only = (texts: Record<string, string>) => Object.fromEntries(input.design.experiments.map((e) => [e, texts[e]!]));
-        prepared = preparePacketV2({ ...args, rules: only(TECHNICAL_RULES), groundTruth: only(FIXTURE_GROUND_TRUTH), screenRules: input.screen_rules });
+        // Version 5: the trials' attempt pools go to the private mapping; the reveal applies P4.
+        if (semantics.attemptPolicy && !input.trials) throw new Error('a version 5 adjudication input needs every trial\'s attempt-pool entry');
+        prepared = preparePacketV2({
+          ...args, rules: only(TECHNICAL_RULES), groundTruth: only(FIXTURE_GROUND_TRUTH), screenRules: input.screen_rules,
+          ...(semantics.attemptPolicy ? { trials: input.trials! } : {}),
+        });
       } else {
         prepared = preparePacket(args);
       }

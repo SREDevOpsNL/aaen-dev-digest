@@ -164,7 +164,7 @@ export function buildReport(input: {
   /** The frozen manifest's semantics; absent = version 3, unchanged. */
   semantics?: StudySemantics;
 }): { rows: SlotRow[]; summaries: ExperimentSummary[] } {
-  const imputes = input.semantics?.version === 4 && input.semantics.truncation === 'continue-impute';
+  const imputes = (input.semantics?.version === 4 || input.semantics?.version === 5) && input.semantics.truncation === 'continue-impute';
   const rows: SlotRow[] = input.schedule.map((slot) => {
     const record = input.ledger.get(slot.slot_id) ?? null;
     const run = input.runs.get(slot.slot_id) ?? null;
