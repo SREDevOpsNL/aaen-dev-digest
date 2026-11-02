@@ -581,6 +581,39 @@ correction. Repo-intel remains server-scoped;
   record, items 7 and 2), `docs/homework/L02/proposals/429-policy-proposal.md`
   (section 4).
 
+- **2026-11-02** — Adding a manifest version to the `Manifest` union did not
+  break the typecheck, although the HW2 CLI then misrouted it. `cli.ts`
+  branched as `frozen.version === 4 ? <v4 path> : <v3 path>` in
+  `verifiedPreregistration`, `run`, `slotRuns`, `report` and the adjudication
+  input. With `ManifestV5` added, `pnpm typecheck` passed with `cli.ts`
+  unchanged. A version 5 pre-registration would then have been rebuilt with
+  the v3 seed and the 17 + 18 schedule, and run with v3 semantics: no
+  imputation, no attempt pool. A binary ternary on the version narrows the
+  else branch to "everything else", so the compiler cannot flag a new member.
+  When adding a version, grep for every `version ===` and `version !==`, and
+  route tagged versions through one predicate (`isTagged`). Also make
+  `runSchedule` refuse the new version outright, so a missed path fails
+  closed. Evidence: `server/src/experiments/hw2/cli.ts` (`isTagged` call
+  sites), `server/src/experiments/hw2/manifest.ts` (`isTagged`),
+  `server/src/experiments/hw2/runner.ts` (`runSchedule` refuses v5).
+
+- **2026-11-02** — Extension of the 2026-11-02 429-policy entries above: the
+  strict v5 throttle rule accepts both recorded 429s with their real shapes,
+  so requiring the frozen provider name excludes no known 429. The rule is
+  `throttleProblems`: one dispatched attempt, numeric 429, origin
+  `upstream_provider`, `limit_source` exactly `upstream_provider_shared_pool`,
+  provider name `DeepInfra`, and no response ID, generation ID, usage or
+  cost. Both the v4 `c-v4-17-with-2` slot view and the Gate 3
+  `x-17-with-1` record have exactly that shape, with `upstreamRawPresent:
+  true` and `requestId: null`. A 429 without `provider_name` would get
+  origin `upstream_provider` only from `provider_code`. It would then fail the
+  provider check and stop the study, which is the intended conservative
+  outcome. Evidence: `server/src/experiments/hw2/attempt-policy.ts`
+  (`throttleProblems`), `server/test/hw2-study-v5.test.ts` (`http429`
+  fixture), and the read-only records
+  `~/.devdigest/hw2-experiments/itemb-v4-20261101/forensics/slot-c-v4-17-with-2.json`
+  and `hw2f-39febf41/gate3-x-17-with-1/slot-record.json`.
+
 ## Session Notes
 
 ## Open Questions

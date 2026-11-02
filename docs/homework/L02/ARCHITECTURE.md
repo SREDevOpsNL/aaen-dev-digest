@@ -232,6 +232,61 @@ See [EXPERIMENTS.md](EXPERIMENTS.md).
 - The runner keeps a shared, fsynced ledger and settles against the key's own
   usage.
 
+### Study v5: the P3 attempt pool (runner support, not authorized)
+
+A version 5 manifest (`STUDY_V5`, `itemb-v5`, tag `v5`) freezes the v4 #17
+design plus the owner-approved 429 policy from the
+[proposal](proposals/429-policy-proposal.md): K = 3 attempts per trial,
+M = 30 attempts in total, an outage stop after L = 6 classified 429s in a row,
+pacing of 30 s between trials and 60 s / 180 s before a2 / a3, P4 reporting
+and no warm-ups. Versions 3 and 4 behave exactly as before; each version
+accepts only its own study block. The code is in
+`server/src/experiments/hw2/attempt-policy.ts`, `runner.ts`
+(`runAttemptPool`) and `report-p3.ts`. Nothing here authorizes spending.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Armed: next planned attempt, after its fixed delay
+  Armed --> Settled: own ID, own reservation, one request
+  Settled --> Armed: classified 429 and k < 3 (same trial, a k+1)
+  Settled --> NextTrial: observed, or truncated (imputed)
+  Settled --> NextTrial: classified 429 on a3 (pool exhausted, bounded)
+  Settled --> Stopped: any other outcome (incomplete)
+  Settled --> Stopped: 6 classified 429s in a row (outage, bounded)
+  NextTrial --> Armed: 30 s
+  NextTrial --> [*]: last trial resolved
+```
+
+- **Plan.** The manifest freezes the trials (seeded as in v4) and all 30
+  attempt IDs `c-v5-17-<condition>-<trial>-a<k>` with their delays. A trial
+  ID is never dispatched. The capability budget must cover M × the
+  per-attempt reservation (`authorize` refuses less), and `plan` prints both.
+- **Classification.** `throttleProblems` reads structured fields only: one
+  dispatched attempt, numeric HTTP 429, origin `upstream_provider`,
+  `limit_source` exactly `upstream_provider_shared_pool`, the frozen provider
+  name, and no response ID, generation ID, usage or cost. Anything else, an
+  OpenRouter-side 429 included, is a failure that stops the study.
+- **Stops.** Every existing confirmatory stop still applies: a refusal, a
+  fingerprint mismatch, unknown cost, and a provenance gap on an observed
+  attempt (strict eligibility). The only exception is that a classified 429
+  neither counts toward nor resets the consecutive unknown-cost and
+  infrastructure counters. A 429's reservation stays charged in full.
+- **Restart.** A restarted runner rebuilds the protocol state from the
+  ledger alone. It refuses any history the protocol could not have produced,
+  checked with `traceProblems` in its in-progress form. It classifies a
+  reconciled attempt again from the stack's record. It never reuses an
+  attempt ID.
+- **Report and adjudication.** Each attempt shows its UTC armed, submitted
+  and finished times, its class (re-derived from the trace and compared with
+  the ledger), and every 429's position and condition. Each trial is labelled
+  `observed`, `imputed`, `bounded` (lost to classified 429s only) or
+  `incomplete`. The strict result is reported apart from the worst- and
+  best-case bounds, with the missingness balance. A claim beyond `incomplete`
+  needs every missing trial to be `bounded`. A worst-case success is a
+  conditional bound, never a verified result. The packet stays one case per
+  observed trial. The private mapping holds the attempt pools, and the reveal
+  applies the same P4 rule to the adjudicated verdicts.
+
 ## One-use extraction authorization
 
 The isolated conventions experiment reuses the existing extraction endpoint
