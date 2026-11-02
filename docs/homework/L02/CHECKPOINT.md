@@ -253,3 +253,26 @@ needs a corrected freeze and a fresh approval.
     pre-registration that treats an upstream-pool 429 differently);
   - the #18 Skill v2 review;
   - #21.
+
+## 2026-11-02: v4 stack torn down (owner-authorized)
+
+- **What happened.** A host restart (08:10Z) had already removed the `--rm`
+  container `devdigest-hw2f-5b00487b`. Only its anonymous volume `6fe96158…`
+  was left, and it was removed after the gate:
+  - the 45 archive hashes pass;
+  - a throwaway restore of the dump matches the exports;
+  - no capability, open slot or late billing (key $0.00714906, unchanged);
+  - no container references the volume.
+- **Unchanged against the baseline:**
+  - `devdigest-postgres`, `devdigest_pgdata` (12 runs);
+  - the ledger, authorization and key-usage logs (48 / 17 / 6 lines);
+  - both archives;
+  - the five unidentified volumes.
+- **Record:**
+  [evidence/item-b-v4-confirmatory/README.md](evidence/item-b-v4-confirmatory/README.md#teardown-2026-11-02).
+- **No disposable HW2 stack is running.** #17 stays Implemented (v4
+  incomplete); acceptance stays 50/2/1.
+- **Owner actions still open:**
+  - any further #17 decision;
+  - the #18 Skill v2 review;
+  - #21.

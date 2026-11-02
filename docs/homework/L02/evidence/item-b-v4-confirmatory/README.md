@@ -180,3 +180,50 @@ excludes `*.log`. The dump, the traces and the raw responses stay private.
   forensics. Its teardown is the owner's call.
 - The 8 undispatched v4 slots were not run. Any further #17 attempt needs a
   new decision.
+
+## Teardown (2026-11-02)
+
+The owner authorized tearing down the disposable stack `hw2f-5b00487b`.
+
+- **The stack was already down.** The WSL host restarted at 08:10Z on
+  2026-11-02, before the teardown began. The container had been started with
+  `--rm`, so the restart removed it, along with its tmux session and
+  processes, as happened to the v3 stack. Its anonymous data volume
+  `6fe96158…` survived, with no container attached. It was the container's
+  only mount, recorded by `docker inspect` on 2026-11-01, and it was created
+  at the stack's start (16:15:06Z).
+- **Archive and dump.** All 45 archive hashes pass, and the v3 archive's 48
+  own files still pass. The v3 entries for the three global logs no longer
+  match because v4 appended to those logs; each v3 snapshot is still an
+  exact prefix of the current file (42/48, 15/17 and 5/6 lines).
+
+  The dump was restored into a throwaway container (`--rm`, no published
+  port, no volume left behind):
+  - `pg_restore` exits 0;
+  - the row counts of `agent_runs`, `run_traces`, `reviews`, findings,
+    agents, Skills, links, approvals and versions equal the JSON exports;
+  - `agent_runs` and both traces are canonically equal to the exports.
+- **Money.** No live capability, no open slot (17 terminal), no in-flight
+  generation. The last authorization event is the v4 revoke. Key usage is
+  still $0.00714906, equal to the last settlement, so nothing was billed
+  late.
+
+  The two raw `capability.token` files in the sealed Gate 3 closures of
+  `hw2f-39febf41` and `hw2f-f53ed971` (2026-10-21/22) are already recorded
+  as inert. They are not v4 resources and were left untouched.
+- **Removed.** Only volume `6fe96158…`, after checking that no container
+  referenced it.
+- **After teardown,** compared with the recorded baseline:
+  - volumes 154 → 153; only `6fe96158…` is gone;
+  - the five unidentified anonymous volumes are kept;
+  - `devdigest-postgres` and `devdigest_pgdata` are unchanged: same
+    databases, 12 runs;
+  - the hashes of the ledger, authorization and key-usage logs and of both
+    archive manifests are unchanged;
+  - key usage is unchanged;
+  - no v4 port, process or tmux session remains.
+
+  Both inventories are kept privately as `teardown-baseline.txt` and
+  `teardown-after.txt`. `~/.devdigest/hw2-experiments/hw2f-5b00487b/clones`
+  is kept, as with earlier stacks, and so is the detached audit worktree
+  `aaen-dev-digest-l02-verify-final`.
