@@ -285,8 +285,10 @@ export interface TraceStep {
 /**
  * Every way a recorded sequence of attempts departs from the declared
  * protocol (empty when it follows it). This is how a protocol variant that
- * re-attempts after a non-429, reorders trials, or catches up a lagging arm is
- * rejected.
+ * re-attempts after a non-429, reorders trials, catches up a lagging arm, or
+ * stops early (optional stopping, or abandoning a trial's remaining attempt
+ * IDs) is rejected. A trace must end where the protocol terminates: after a
+ * declared stop, at the attempt cap, or with the last trial resolved.
  */
 export function traceProblems(schedule: readonly Slot[], policy: Policy, trace: readonly TraceStep[], pacing: Pacing = PROPOSED_PACING): string[] {
   const plan = planAttempts(schedule, policy, pacing);
@@ -323,6 +325,14 @@ export function traceProblems(schedule: readonly Slot[], policy: Policy, trace: 
     previous = { planned, outcome };
     if (problems.length > 0) break;
   }
+  if (problems.length === 0 && !ended && trace.length < cap && schedule.length > 0) {
+    if (!previous) problems.push('the trace ends before the protocol terminates: no attempt was dispatched');
+    else if (previous.outcome.kind === 'throttled' && policy.id === 'P3' && previous.planned.attempt < per) {
+      problems.push(`the trace ends before the protocol terminates: ${previous.planned.trial_id} still owes attempt a${previous.planned.attempt + 1}`);
+    } else if (previous.planned.trial_index < schedule.length - 1) {
+      problems.push(`the trace ends before the protocol terminates: after trial ${previous.planned.trial_index + 1} of ${schedule.length}`);
+    }
+  }
   return problems;
 }
 
@@ -330,38 +340,68 @@ export function traceProblems(schedule: readonly Slot[], policy: Policy, trace: 
 // The frozen rule, strict and with P4 sensitivity bounds
 // ---------------------------------------------------------------------------
 
-export type StrictVerdict = 'pass' | 'fail' | 'undecidable';
+/** The frozen rule's four values (`experimentOutcome` in rules.ts). */
+export type RuleOutcome = ReturnType<typeof experimentOutcome>;
+
+/** What a study may claim about #17. */
+export type Claim = 'detected' | 'not_detected' | 'incomplete';
 
 export interface Sensitivity {
-  /** The frozen rule on counted trials only: undecidable unless all five per condition are counted. */
-  strict: StrictVerdict;
+  /** The frozen rule on counted trials only: `incomplete` unless every scheduled trial is counted. */
+  strict: RuleOutcome;
   /** Missing with → not detected, missing without → detected (against the hypothesis). */
-  worst_case_pass: boolean;
+  worst_case: RuleOutcome;
   /** Missing with → detected, missing without → not detected (for the hypothesis). */
+  best_case: RuleOutcome;
+  worst_case_pass: boolean;
   best_case_pass: boolean;
-  /** The verdict every imputation agrees on, or `undecided` when worst and best case differ. */
-  bounded: 'pass' | 'fail' | 'undecided';
+  /** The outcome both bounds share, or `undecided`. Descriptive: it does not by itself license a claim. */
+  bounded: RuleOutcome | 'undecided';
+  /** Every missing trial was lost to a classified pre-generation 429 (none to a failure stop). */
+  missing_only_throttled: boolean;
+  /**
+   * What may be claimed. All counted: the strict rule. Otherwise, only when
+   * every missing trial is a classified 429: `detected` if the worst case
+   * succeeds, `not_detected` if even the best case does not. A non-429 stop
+   * leaves the study `incomplete`, exactly as in v4; its bounds are
+   * descriptive only.
+   */
+  claim: Claim;
 }
 
 /**
  * The frozen #17 rule (`experimentOutcome`, ≥4/5 with and ≤1/5 without),
  * applied to a tally. v4-imputed truncations keep their frozen conservative
- * value in both bounds; only missing trials (429, failure, not dispatched)
- * are imputed both ways.
+ * value in both bounds; only missing trials are imputed both ways. The rule
+ * is monotone (more *with* detections or fewer *without* detections never
+ * turn a success into a non-success), so a worst-case success implies
+ * success for every possible value of the missing trials, under any
+ * missingness mechanism.
  */
 export function sensitivity(tallies: Record<Condition, Tally>): Sensitivity {
   const w = tallies.with;
   const wo = tallies.without;
   const withDetected = w.detected;
   const withoutDetected = wo.detected + wo.imputed;
-  const pass = (wd: number, wc: number, wod: number, woc: number) => experimentOutcome(wd, wc, wod, woc) === 'success';
-  const strict: StrictVerdict =
-    counted(w) < w.scheduled || counted(wo) < wo.scheduled || w.scheduled < 5 || wo.scheduled < 5
-      ? 'undecidable'
-      : pass(withDetected, counted(w), withoutDetected, counted(wo)) ? 'pass' : 'fail';
-  const worst = pass(withDetected, w.scheduled, withoutDetected + missing(wo), wo.scheduled);
-  const best = pass(withDetected + missing(w), w.scheduled, withoutDetected, wo.scheduled);
-  return { strict, worst_case_pass: worst, best_case_pass: best, bounded: worst === best ? (worst ? 'pass' : 'fail') : 'undecided' };
+  const complete = counted(w) === w.scheduled && counted(wo) === wo.scheduled;
+  const strict = complete ? experimentOutcome(withDetected, counted(w), withoutDetected, counted(wo)) : 'incomplete';
+  const worst = experimentOutcome(withDetected, w.scheduled, withoutDetected + missing(wo), wo.scheduled);
+  const best = experimentOutcome(withDetected + missing(w), w.scheduled, withoutDetected, wo.scheduled);
+  const onlyThrottled = w.failed === 0 && wo.failed === 0;
+  let claim: Claim = 'incomplete';
+  if (strict !== 'incomplete') claim = strict === 'success' ? 'detected' : 'not_detected';
+  else if (onlyThrottled && worst === 'success') claim = 'detected';
+  else if (onlyThrottled && best !== 'success' && best !== 'incomplete') claim = 'not_detected';
+  return {
+    strict,
+    worst_case: worst,
+    best_case: best,
+    worst_case_pass: worst === 'success',
+    best_case_pass: best === 'success',
+    bounded: worst === best ? worst : 'undecided',
+    missing_only_throttled: onlyThrottled,
+    claim,
+  };
 }
 
 /**
@@ -402,10 +442,14 @@ export function fisherTwoSided(a: number, b: number, c: number, d: number): numb
 // Outcome model, exact distribution and seeded simulation
 // ---------------------------------------------------------------------------
 
-/** Independent per-attempt outcome probabilities (the model behind the probability tables). */
+/** Per-attempt outcome probabilities (the model behind the probability tables). */
 export interface OutcomeModel {
-  /** P(HTTP 429) per attempt, independent of condition, time and every other attempt. */
+  /** P(HTTP 429) per attempt, independent of condition, time and every other attempt unless overridden below. */
   throttle: number;
+  /** A position hazard: P(429) for every attempt of the trial at this schedule index, in place of `throttle`. */
+  throttleByPosition?: readonly number[];
+  /** A burst: P(429 | the previous dispatched attempt, in any trial, got a 429), in place of the above. */
+  burst?: number;
   /** P(detected | observed) per condition. */
   detect: Record<Condition, number>;
   /** P(truncated | not throttled); default 0. */
@@ -416,16 +460,35 @@ export interface OutcomeModel {
   fail?: number;
 }
 
+/** The 429 probability of an attempt, from its trial's schedule index and whether the previous attempt got a 429. */
+export function throttleProbability(model: OutcomeModel, trialIndex: number, previousThrottled: boolean): number {
+  if (model.burst !== undefined && previousThrottled) return model.burst;
+  return model.throttleByPosition?.[trialIndex] ?? model.throttle;
+}
+
+export function modelProblems(model: OutcomeModel): string[] {
+  const unit = (x: number | undefined) => x === undefined || (Number.isFinite(x) && x >= 0 && x <= 1);
+  const problems: string[] = [];
+  const values = [model.throttle, model.detect.with, model.detect.without, model.truncate, model.truncationEligible, model.fail, model.burst, ...(model.throttleByPosition ?? [])];
+  if (!values.every(unit)) problems.push('every model probability must be in [0, 1]');
+  if ((model.truncate ?? 0) + (model.fail ?? 0) > 1) problems.push('truncate + fail must not exceed 1');
+  return problems;
+}
+
 export interface PolicyMetrics {
   /** P(all trials counted): the strict rule is decidable. */
   all_observed: number;
   /** P(exactly k trials counted), k = 0 … trials. */
   counted_distribution: number[];
   strict_pass: number;
+  /** P(claim = detected): a strict success, or a worst-case success with only 429s missing. */
   worst_case_pass: number;
+  /** P(best case succeeds), descriptive. */
   best_case_pass: number;
-  /** P(worst and best case agree): the rule is decided whatever the missing trials were. */
+  /** P(claim is not `incomplete`): the claim is decided whatever the missing trials were. */
   bounded_decided: number;
+  /** P(both bounds give the same four-valued outcome, with only 429s missing). */
+  bounded_same_outcome: number;
   expected_attempts: number;
   expected_throttled_attempts: number;
   expected_missing: Record<Condition, number>;
@@ -442,27 +505,30 @@ interface TerminalState { tallies: Record<Condition, Tally>; attempts: number }
  * cross-check in the tests is what ties the two together.
  */
 export function exactTerminalStates(schedule: readonly Slot[], policy: Policy, model: OutcomeModel): Array<{ state: TerminalState; probability: number }> {
+  const problems = [...policyProblems(policy), ...modelProblems(model)];
+  if (problems.length > 0) throw new Error(problems.join('; '));
   const per = attemptsPerTrial(policy);
   const cap = maxAttempts(policy, schedule.length);
-  const p = model.throttle;
   const t = model.truncate ?? 0;
   const e = model.truncationEligible ?? 1;
   const f = model.fail ?? 0;
-  type Live = { state: TerminalState; probability: number; stopped: boolean };
-  const key = (s: TerminalState, stopped: boolean) => JSON.stringify([s.attempts, stopped, s.tallies.with, s.tallies.without]);
+  // `last`: whether the previous dispatched attempt got a 429 (only the burst model reads it).
+  type Live = { state: TerminalState; probability: number; stopped: boolean; last: boolean };
+  const key = (s: TerminalState, stopped: boolean, last: boolean) => JSON.stringify([s.attempts, stopped, last, s.tallies.with, s.tallies.without]);
   const clone = (s: TerminalState): TerminalState => ({ attempts: s.attempts, tallies: { with: { ...s.tallies.with }, without: { ...s.tallies.without } } });
   let states = new Map<string, Live>();
   const start: TerminalState = { attempts: 0, tallies: { with: emptyTally(), without: emptyTally() } };
-  states.set(key(start, false), { state: start, probability: 1, stopped: false });
+  states.set(key(start, false, false), { state: start, probability: 1, stopped: false, last: false });
 
-  for (const slot of schedule) {
+  for (let index = 0; index < schedule.length; index++) {
+    const slot = schedule[index]!;
     const next = new Map<string, Live>();
-    const add = (state: TerminalState, probability: number, stopped: boolean) => {
+    const add = (state: TerminalState, probability: number, stopped: boolean, last: boolean) => {
       if (probability === 0) return;
-      const k = key(state, stopped);
+      const k = key(state, stopped, last);
       const existing = next.get(k);
       if (existing) existing.probability += probability;
-      else next.set(k, { state, probability, stopped });
+      else next.set(k, { state, probability, stopped, last });
     };
     for (const live of states.values()) {
       const base = clone(live.state);
@@ -470,26 +536,28 @@ export function exactTerminalStates(schedule: readonly Slot[], policy: Policy, m
       if (live.stopped) {
         const s = clone(base);
         s.tallies[slot.condition].not_dispatched++;
-        add(s, live.probability, true);
+        add(s, live.probability, true, live.last);
         continue;
       }
       let reach = live.probability; // P(every earlier attempt of this trial got a 429)
+      let last = live.last;
       for (let attempt = 1; attempt <= per; attempt++) {
         if (base.attempts + attempt - 1 >= cap) {
           const s = clone(base);
           s.attempts += attempt - 1;
           if (attempt === 1) s.tallies[slot.condition].not_dispatched++;
           else s.tallies[slot.condition].throttled++;
-          add(s, reach, true);
+          add(s, reach, true, last);
           reach = 0;
           break;
         }
-        const after = (mutate: (tally: Tally) => void, probability: number, stopped: boolean) => {
+        const after = (mutate: (tally: Tally) => void, probability: number, stopped: boolean, throttled = false) => {
           const s = clone(base);
           s.attempts += attempt;
           mutate(s.tallies[slot.condition]);
-          add(s, reach * probability, stopped);
+          add(s, reach * probability, stopped, throttled);
         };
+        const p = throttleProbability(model, index, last);
         const go = 1 - p;
         const scored = go * (1 - t - f);
         const q = model.detect[slot.condition];
@@ -498,11 +566,12 @@ export function exactTerminalStates(schedule: readonly Slot[], policy: Policy, m
         after((tally) => { tally.imputed++; }, go * t * e, false);
         after((tally) => { tally.failed++; }, go * (t * (1 - e) + f), true);
         if (policy.id === 'P1' || attempt === per) {
-          after((tally) => { tally.throttled++; }, p, policy.id === 'P1');
+          after((tally) => { tally.throttled++; }, p, policy.id === 'P1', true);
           reach = 0;
           break;
         }
         reach *= p;
+        last = true;
       }
     }
     states = next;
@@ -518,6 +587,7 @@ function metricsFrom(entries: Iterable<{ state: TerminalState; probability: numb
     worst_case_pass: 0,
     best_case_pass: 0,
     bounded_decided: 0,
+    bounded_same_outcome: 0,
     expected_attempts: 0,
     expected_throttled_attempts: 0,
     expected_missing: { with: 0, without: 0 },
@@ -530,10 +600,11 @@ function metricsFrom(entries: Iterable<{ state: TerminalState; probability: numb
     m.counted_distribution[total]! += probability;
     if (total === trials) m.all_observed += probability;
     const s = sensitivity(state.tallies);
-    if (s.strict === 'pass') m.strict_pass += probability;
-    if (s.worst_case_pass) m.worst_case_pass += probability;
+    if (s.strict === 'success') m.strict_pass += probability;
+    if (s.claim === 'detected') m.worst_case_pass += probability;
     if (s.best_case_pass) m.best_case_pass += probability;
-    if (s.bounded !== 'undecided') m.bounded_decided += probability;
+    if (s.claim !== 'incomplete') m.bounded_decided += probability;
+    if (s.bounded !== 'undecided' && s.missing_only_throttled) m.bounded_same_outcome += probability;
     m.expected_attempts += probability * state.attempts;
     // Every dispatched attempt that did not end its trial with a response or a failure got a 429.
     const answered = w.observed + w.imputed + w.failed + wo.observed + wo.imputed + wo.failed;
@@ -571,8 +642,8 @@ export function seedFromHex(hex: string): number {
 }
 
 /** Draw one attempt outcome from the model with a seeded generator. */
-export function drawOutcome(random: () => number, model: OutcomeModel, condition: Condition): AttemptOutcome {
-  if (random() < model.throttle) return { kind: 'throttled' };
+export function drawOutcome(random: () => number, model: OutcomeModel, condition: Condition, throttle: number = model.throttle): AttemptOutcome {
+  if (random() < throttle) return { kind: 'throttled' };
   const u = random();
   const f = model.fail ?? 0;
   const t = model.truncate ?? 0;
@@ -582,11 +653,21 @@ export function drawOutcome(random: () => number, model: OutcomeModel, condition
 }
 
 /** Seeded Monte Carlo estimate of the same metrics, through the real `execute` state machine. */
+export const MAX_SIMULATION_RUNS = 1_000_000;
+
 export function simulate(schedule: readonly Slot[], policy: Policy, model: OutcomeModel, runs: number, seed: number): PolicyMetrics {
+  if (!Number.isInteger(runs) || runs < 1 || runs > MAX_SIMULATION_RUNS) throw new Error(`runs must be an integer from 1 to ${MAX_SIMULATION_RUNS}`);
+  const problems = modelProblems(model);
+  if (problems.length > 0) throw new Error(problems.join('; '));
   const random = mulberry32(seed);
   const entries: Array<{ state: TerminalState; probability: number }> = [];
   for (let run = 0; run < runs; run++) {
-    const execution = execute(schedule, policy, (attempt) => drawOutcome(random, model, attempt.condition));
+    let last = false;
+    const execution = execute(schedule, policy, (attempt) => {
+      const outcome = drawOutcome(random, model, attempt.condition, throttleProbability(model, attempt.trial_index, last));
+      last = outcome.kind === 'throttled';
+      return outcome;
+    });
     entries.push({ state: { tallies: execution.tallies, attempts: execution.steps.length }, probability: 1 / runs });
   }
   return metricsFrom(entries, schedule.length);
@@ -596,7 +677,11 @@ export function simulate(schedule: readonly Slot[], policy: Policy, model: Outco
 // Cost ceilings
 // ---------------------------------------------------------------------------
 
-/** Measured inputs as of 2026-11-02; recompute before any freeze. */
+/**
+ * An illustrative snapshot of the measured inputs on 2026-11-02. Every cost
+ * function takes the inputs as a parameter; before any freeze, pass the live
+ * ledger, prices and caps instead. This snapshot is not a ledger reading.
+ */
 export const COST_INPUTS_20261102 = Object.freeze({
   /** Per-attempt reservation, unchanged from v4. */
   reservationUsd: 0.005,
@@ -626,12 +711,21 @@ export interface CostCeiling {
   cumulative_ceiling_usd: number;
   /** If every attempt stayed at unknown cost, the ledger rises by the full budget. */
   worst_case_ledger_impact_usd: number;
+  /**
+   * The bound on real spend if every attempt, 429s included, were billed at
+   * the per-attempt worst case. "Actual spend under one cent" holds only while
+   * 429s stay unbilled (four events so far); this does not depend on that.
+   */
+  billed_worst_case_usd: number;
   /** The reservation covers 1.2 × the per-attempt worst case (the phase-0 rule). */
   reservation_covers_worst_case: boolean;
   fits_caps: boolean;
 }
 
 export function costCeiling(policy: Policy, trials: number, inputs: CostInputs = COST_INPUTS_20261102): CostCeiling {
+  const problems = policyProblems(policy);
+  if (problems.length > 0) throw new Error(problems.join('; '));
+  if (!Number.isInteger(trials) || trials < 0) throw new Error('trials must be a non-negative integer');
   const attempts = maxAttempts(policy, trials);
   const budget = attempts * units(inputs.reservationUsd);
   const ceiling = units(inputs.ledgerConservativeUsd) + budget;
@@ -640,6 +734,7 @@ export function costCeiling(policy: Policy, trials: number, inputs: CostInputs =
     new_reservations_usd: usd(budget),
     cumulative_ceiling_usd: usd(ceiling),
     worst_case_ledger_impact_usd: usd(budget),
+    billed_worst_case_usd: usd(attempts * units(inputs.worstCasePerAttemptUsd)),
     reservation_covers_worst_case: 1.2 * inputs.worstCasePerAttemptUsd <= inputs.reservationUsd + 1e-12,
     fits_caps: units(inputs.ledgerConfirmatoryUsd) + budget <= units(inputs.confirmatoryCapUsd) && ceiling <= units(inputs.totalCapUsd),
   };

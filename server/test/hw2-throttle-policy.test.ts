@@ -1,3 +1,17 @@
+/**
+ * Mutation record (rerun by hand: apply one change to throttle-policy.ts, run
+ * this file, expect at least one failure, revert). Each was checked on
+ * 2026-11-02:
+ *   1. drop the P1 stop on a 429 (`if (policy.id === 'P1') stopped = …`);
+ *   2. cap off by one (`steps.length >= cap` → `>`);
+ *   3. validator: allow a re-attempt after a non-429 (`previous.outcome.kind !== 'throttled'` → false);
+ *   4. worst case without the missing *without* trials (`withoutDetected + missing(wo)` → `withoutDetected`);
+ *   5. validator: drop the pacing check;
+ *   6. validator: drop the fixed-order check (`planned.trial_index !== expectedTrial` → false);
+ *   7. validator: drop the end-of-trace completeness check;
+ *   8. claim: ignore non-429 failures (`onlyThrottled = …` → true);
+ *   9. DP: ignore the burst state (`throttleProbability(model, index, last)` → `(model, index, false)`).
+ */
 import { describe, expect, it } from 'vitest';
 import { CAPS } from '../src/experiments/hw2/budget.js';
 import { buildSchedule, mulberry32, type Slot } from '../src/experiments/hw2/schedule.js';
@@ -5,6 +19,7 @@ import {
   ATTEMPT_ID,
   COST_INPUTS_20261102,
   EMPIRICAL_THROTTLE_RATE,
+  MAX_SIMULATION_RUNS,
   PROPOSED_PACING,
   PROPOSED_POLICIES,
   THROTTLE_SCENARIOS,
@@ -77,13 +92,24 @@ describe('HW2 429 policy: the predeclared plan', () => {
     expect(() => planAttempts(SCHEDULE, { id: 'P3', attemptsPerTrial: 0, maxTotalAttempts: 10 })).toThrow(/attemptsPerTrial/);
   });
 
-  it('every executed attempt waits exactly its planned delay, whatever earlier attempts returned', () => {
+  it('gives an attempt the same delay in every outcome sequence, and the same delay to both conditions at equal index', () => {
+    // An all-429 run dispatches every planned attempt: its delays are the reference.
+    const reference = new Map(execute(SCHEDULE, P3, () => THR).steps.map((step) => [step.attempt.attempt_id, step.attempt.delay_before_ms]));
+    expect(reference.size).toBe(30);
     for (let seed = 1; seed <= 200; seed++) {
-      const execution = execute(SCHEDULE, P3, randomOutcomes(seed));
-      for (const step of execution.steps) {
-        expect(step.attempt.delay_before_ms).toBe(delayBefore(PROPOSED_PACING, step.attempt.trial_index, step.attempt.attempt));
+      for (const step of execute(SCHEDULE, P3, randomOutcomes(seed)).steps) {
+        expect(step.attempt.delay_before_ms).toBe(reference.get(step.attempt.attempt_id));
       }
     }
+    const byIndex = new Map<string, Set<number>>();
+    for (const attempt of planAttempts(SCHEDULE, P3)) {
+      const k = `${attempt.trial_index === 0 ? 'first' : 'later'}-${attempt.attempt}`;
+      byIndex.set(k, (byIndex.get(k) ?? new Set()).add(attempt.delay_before_ms));
+    }
+    for (const delays of byIndex.values()) expect(delays.size).toBe(1);
+    // A different schedule (different conditions per position) gets the same delays per position.
+    const other = buildSchedule({ seed: 7, phase: 'confirmatory', experiments: ['17'], trials: 5, tag: 'v5' });
+    expect(planAttempts(other, P3).map((a) => a.delay_before_ms)).toEqual(planAttempts(SCHEDULE, P3).map((a) => a.delay_before_ms));
   });
 });
 
@@ -141,9 +167,15 @@ describe('HW2 429 policy: protocol state machines', () => {
   it('keeps condition allocation and trial order unchanged whatever the outcomes (randomization invariance)', () => {
     const plan = planAttempts(SCHEDULE, P3).map((a) => a.attempt_id);
     for (const policy of [P1, P2, P3, P3_CAPPED]) {
+      const planBefore = planAttempts(SCHEDULE, policy);
+      // Reference allocation from a run where nothing goes wrong; every other outcome sequence must match it.
+      const allocation = execute(SCHEDULE, policy, () => OBS()).trials.map((t) => [t.trial_id, t.condition]);
       for (let seed = 1; seed <= 300; seed++) {
         const run = execute(SCHEDULE, policy, randomOutcomes(seed));
-        expect(run.trials.map((t) => [t.trial_id, t.condition])).toEqual(SCHEDULE.map((s) => [s.slot_id, s.condition]));
+        expect(run.trials.map((t) => [t.trial_id, t.condition])).toEqual(allocation);
+        // The trials actually entered are a prefix of that allocation, in the same order.
+        const enteredIds = run.trials.filter((t) => t.attempts > 0).map((t) => t.trial_id);
+        expect(enteredIds).toEqual(allocation.slice(0, enteredIds.length).map(([id]) => id));
         // The attempts used are a subsequence of the predeclared plan, in plan order.
         const used = run.steps.map((step) => plan.indexOf(step.attempt.attempt_id));
         expect(used.every((index) => index >= 0)).toBe(true);
@@ -153,6 +185,7 @@ describe('HW2 429 policy: protocol state machines', () => {
         expect(entered).toEqual(entered.map((_, i) => i));
         expect(traceProblems(SCHEDULE, policy, toTrace(run))).toEqual([]);
       }
+      expect(planAttempts(SCHEDULE, policy)).toEqual(planBefore);
     }
   });
 
@@ -223,6 +256,23 @@ describe('HW2 429 policy: trace validator rejects protocol mutations', () => {
     expect(traceProblems(SCHEDULE, P3_CAPPED, overCap).join()).toMatch(/exceed the cap/);
   });
 
+  it('rejects a trace that stops early (optional stopping) after six observed trials', () => {
+    const early = reference(Array(10).fill(OBS())).slice(0, 6);
+    expect(traceProblems(SCHEDULE, P3, early).join()).toMatch(/ends before the protocol terminates: after trial 6 of 10/);
+    expect(traceProblems(SCHEDULE, P2, reference(Array(10).fill(OBS()), P2).slice(0, 6)).join()).toMatch(/ends before/);
+    expect(traceProblems(SCHEDULE, P3, []).join()).toMatch(/no attempt was dispatched/);
+  });
+
+  it('rejects abandoning the last trial after a 429 on a1, with a2 and a3 never sent', () => {
+    const trace = reference([...Array(9).fill(OBS()), THR, OBS()]).slice(0, 10);
+    expect(trace[9]!.attempt_id).toBe(id(9, 1));
+    expect(traceProblems(SCHEDULE, P3, trace).join()).toMatch(/still owes attempt a2/);
+    // The same ending is complete under P2, where a 429 resolves the trial.
+    expect(traceProblems(SCHEDULE, P2, reference([...Array(9).fill(OBS()), THR], P2))).toEqual([]);
+    // And a trace that ends at the attempt cap is complete.
+    expect(traceProblems(SCHEDULE, P3_CAPPED, toTrace(execute(SCHEDULE, P3_CAPPED, () => THR)))).toEqual([]);
+  });
+
   it('rejects pacing that shortens or lengthens a delay in reaction to an outcome', () => {
     const trace = reference([OBS(true), ...Array(9).fill(OBS())]);
     trace[1] = { ...trace[1]!, delay_before_ms: 0 };
@@ -234,20 +284,48 @@ describe('HW2 429 policy: P4 sensitivity', () => {
   it('imputes missing with → no and missing without → yes in the worst case, the opposite in the best', () => {
     // 4/4 observed with detected, 1 missing; 0/4 observed without detected, 1 missing.
     const s = sensitivity({ with: tally({ observed: 4, detected: 4, throttled: 1 }), without: tally({ observed: 4, throttled: 1 }) });
-    expect(s).toEqual({ strict: 'undecidable', worst_case_pass: true, best_case_pass: true, bounded: 'pass' });
-    // 3/4 with, 1 missing: passes only if the missing with trial would have detected.
+    expect(s).toMatchObject({ strict: 'incomplete', worst_case: 'success', best_case: 'success', bounded: 'success', missing_only_throttled: true, claim: 'detected' });
+    // 3/4 with, 1 missing: succeeds only if the missing with trial would have detected.
     const t = sensitivity({ with: tally({ observed: 4, detected: 3, throttled: 1 }), without: tally({ observed: 5 }) });
-    expect(t).toEqual({ strict: 'undecidable', worst_case_pass: false, best_case_pass: true, bounded: 'undecided' });
-    // 2 missing without trials and 1 observed detection: worst case 3/5 without, fails.
+    expect(t).toMatchObject({ strict: 'incomplete', worst_case: 'inconclusive', best_case: 'success', bounded: 'undecided', claim: 'incomplete' });
+    // 2 missing without trials and 1 observed detection: worst case 3/5 without.
     const u = sensitivity({ with: tally({ observed: 5, detected: 5 }), without: tally({ observed: 3, detected: 1, throttled: 2 }) });
-    expect(u).toMatchObject({ worst_case_pass: false, best_case_pass: true, bounded: 'undecided' });
+    expect(u).toMatchObject({ worst_case: 'inconclusive', best_case: 'success', bounded: 'undecided', claim: 'incomplete' });
+    // Even the best case fails: not detected, whatever the missing trials were.
+    const v = sensitivity({ with: tally({ observed: 3, detected: 1, throttled: 2 }), without: tally({ observed: 5, detected: 1 }) });
+    expect(v).toMatchObject({ worst_case: 'negative', best_case: 'inconclusive', bounded: 'undecided', claim: 'not_detected' });
+  });
+
+  it('licenses no claim when a trial is missing because of a non-429 failure stop (v4: incomplete)', () => {
+    const tallies = { with: tally({ observed: 4, detected: 4, failed: 1 }), without: tally({ observed: 5 }) };
+    expect(sensitivity(tallies)).toMatchObject({ worst_case: 'success', missing_only_throttled: false, claim: 'incomplete' });
+    // Through the state machine: nine clean trials, then a provenance failure on the last one.
+    const run = execute(SCHEDULE, P3, fromSequence([...SCHEDULE.slice(0, 9).map((slot) => OBS(slot.condition === 'with')), FAIL]));
+    expect(run.stopped?.reason).toBe('failure');
+    expect(sensitivity(run.tallies).claim).toBe('incomplete');
+    // A model with failures: the claim probability never exceeds that of the same study without the failure branch.
+    const withFail = exactMetrics(SCHEDULE, P3, { throttle: 0.2, detect: H1, fail: 0.05 });
+    expect(withFail.worst_case_pass).toBeLessThan(exactMetrics(SCHEDULE, P3, { throttle: 0.2, detect: H1 }).worst_case_pass);
+  });
+
+  it('is monotone: a worst-case success implies success, and a best-case non-success implies non-success, for every value of the missing trials', () => {
+    for (let wo = 0; wo <= 5; wo++) for (let wd = 0; wd <= wo; wd++) for (let oo = 0; oo <= 5; oo++) for (let od = 0; od <= oo; od++) {
+      const tallies = { with: tally({ observed: wo, detected: wd, throttled: 5 - wo }), without: tally({ observed: oo, detected: od, throttled: 5 - oo }) };
+      const s = sensitivity(tallies);
+      for (let x = 0; x <= 5 - wo; x++) for (let y = 0; y <= 5 - oo; y++) {
+        const full = sensitivity({ with: tally({ observed: 5, detected: wd + x }), without: tally({ observed: 5, detected: od + y }) }).strict;
+        if (s.claim === 'detected') expect(full).toBe('success');
+        if (s.claim === 'not_detected') expect(full).not.toBe('success');
+      }
+    }
   });
 
   it('keeps a v4-imputed truncation conservative in both bounds and decides fully observed tallies strictly', () => {
     const s = sensitivity({ with: tally({ observed: 5, detected: 4 }), without: tally({ observed: 4, imputed: 1, detected: 1 }) });
     // The imputed without truncation counts as a detection: 2/5 without fails, in every bound.
-    expect(s).toEqual({ strict: 'fail', worst_case_pass: false, best_case_pass: false, bounded: 'fail' });
-    expect(sensitivity({ with: tally({ observed: 5, detected: 4 }), without: tally({ observed: 5, detected: 1 }) }).strict).toBe('pass');
+    expect(s).toMatchObject({ strict: 'inconclusive', worst_case: 'inconclusive', best_case: 'inconclusive', bounded: 'inconclusive', claim: 'not_detected' });
+    expect(sensitivity({ with: tally({ observed: 5, detected: 4 }), without: tally({ observed: 5, detected: 1 }) }).strict).toBe('success');
+    expect(sensitivity({ with: tally({ observed: 5, detected: 1 }), without: tally({ observed: 5, detected: 3 }) }).strict).toBe('negative');
   });
 
   it('reports missingness per condition with a Fisher exact p-value', () => {
@@ -285,6 +363,74 @@ describe('HW2 429 policy: exact probabilities and seeded simulation', () => {
     expect(exactMetrics(SCHEDULE, P3, { throttle: EMPIRICAL_THROTTLE_RATE.experiment17, detect: H1 }).all_observed).toBeCloseTo(0.6856, 4);
   });
 
+  it('bounds false positives under every equal-rate null: 0.0352 at q = 0.5, never raised by P4', () => {
+    let peak = 0;
+    for (let i = 0; i <= 20; i++) {
+      const q = i / 20;
+      const full = exactMetrics(SCHEDULE, P1, { throttle: 0, detect: { with: q, without: q } }).strict_pass;
+      peak = Math.max(peak, full);
+      for (const policy of [P1, P2, P3]) {
+        for (const p of [0.02, 0.2, 0.4]) expect(exactMetrics(SCHEDULE, policy, { throttle: p, detect: { with: q, without: q } }).worst_case_pass).toBeLessThanOrEqual(full + 1e-12);
+      }
+    }
+    expect(peak).toBeCloseTo(0.0352, 4);
+    expect(exactMetrics(SCHEDULE, P3, { throttle: 0.2, detect: { with: 0.5, without: 0.5 } }).worst_case_pass).toBeCloseTo(0.0333, 4);
+    expect(exactMetrics(SCHEDULE, P3, { throttle: 0.02, detect: { with: 0.2, without: 0.2 } }).worst_case_pass).toBeLessThanOrEqual(0.005);
+  });
+
+  it('models a position hazard (0.6 at schedule position 2, 0.15 elsewhere) and a burst carried across trials', () => {
+    const position = Array(10).fill(0.15);
+    position[1] = 0.6;
+    expect(SCHEDULE[1]!.condition).toBe('with');
+    const p3 = exactMetrics(SCHEDULE, P3, { throttle: 0.15, throttleByPosition: position, detect: H1 });
+    expect(p3.expected_missing.with).toBeCloseTo(0.229, 3);
+    expect(p3.expected_missing.without).toBeCloseTo(0.017, 3);
+    const p2 = exactMetrics(SCHEDULE, P2, { throttle: 0.15, throttleByPosition: position, detect: H1 });
+    expect(p2.expected_missing.with).toBeCloseTo(1.2, 3);
+    expect(p2.expected_missing.without).toBeCloseTo(0.75, 3);
+    for (const [rho, all, decided] of [[0.5, 0.5987, 0.8464], [0.8, 0.2542, 0.5641]] as const) {
+      const m = exactMetrics(SCHEDULE, P3, { throttle: 0.2, burst: rho, detect: H1 });
+      expect(m.all_observed).toBeCloseTo(all, 4);
+      expect(m.bounded_decided).toBeCloseTo(decided, 4);
+    }
+  });
+
+  it('matches every published table cell of the proposal', () => {
+    const policies = [P1, P2, { id: 'P3', attemptsPerTrial: 2, maxTotalAttempts: 20 } as Policy, P3];
+    const rates = [0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 4 / 19, 3 / 9, 4 / 11];
+    // P(all observed) (P1 = P2), 4 decimals.
+    const all = [[0.8171, 0.996, 0.9999], [0.5987, 0.9753, 0.9988], [0.3487, 0.9044, 0.99], [0.1074, 0.6648, 0.9228], [0.0282, 0.3894, 0.7606], [0.006, 0.1749, 0.5161], [0.0941, 0.6355, 0.9105], [0.0173, 0.3079, 0.6856], [0.0109, 0.2421, 0.6109]];
+    // P(claim decided), H1 / H0, 3 decimals.
+    const decided = [
+      [[0.85, 0.923], [0.94, 0.998], [0.999, 1], [1, 1]],
+      [[0.664, 0.818], [0.854, 0.993], [0.992, 1], [1, 1]],
+      [[0.437, 0.666], [0.72, 0.984], [0.97, 0.999], [0.997, 1]],
+      [[0.184, 0.433], [0.501, 0.952], [0.882, 0.995], [0.976, 0.999]],
+      [[0.076, 0.272], [0.345, 0.897], [0.745, 0.986], [0.92, 0.997]],
+      [[0.031, 0.162], [0.239, 0.811], [0.58, 0.967], [0.815, 0.991]],
+      [[0.168, 0.413], [0.482, 0.948], [0.87, 0.994], [0.972, 0.999]],
+      [[0.056, 0.23], [0.305, 0.872], [0.692, 0.981], [0.891, 0.995]],
+      [[0.043, 0.197], [0.273, 0.846], [0.642, 0.976], [0.859, 0.994]],
+    ];
+    // Pass probability under H1, strict / claim (worst case), 3 decimals, for the rows the proposal prints.
+    const pass: Record<number, number[][]> = {
+      0: [[0.444, 0.452], [0.444, 0.496], [0.541, 0.543], [0.544, 0.544]],
+      2: [[0.19, 0.208], [0.19, 0.325], [0.492, 0.52], [0.538, 0.541]],
+      3: [[0.058, 0.072], [0.058, 0.168], [0.361, 0.45], [0.502, 0.524]],
+      5: [[0.003, 0.006], [0.003, 0.027], [0.095, 0.222], [0.281, 0.397]],
+      6: [[0.051, 0.064], [0.051, 0.155], [0.345, 0.44], [0.495, 0.521]],
+      7: [[0.009, 0.014], [0.009, 0.054], [0.167, 0.304], [0.373, 0.457]],
+      8: [[0.006, 0.009], [0.006, 0.04], [0.132, 0.267], [0.332, 0.432]],
+    };
+    rates.forEach((p, row) => {
+      const h1 = policies.map((policy) => exactMetrics(SCHEDULE, policy, { throttle: p, detect: H1 }));
+      const h0 = policies.map((policy) => exactMetrics(SCHEDULE, policy, { throttle: p, detect: { with: 0.2, without: 0.2 } }));
+      expect([h1[1]!, h1[2]!, h1[3]!].map((m) => Number(m.all_observed.toFixed(4)))).toEqual(all[row]);
+      expect(h1.map((m, i) => [Number(m.bounded_decided.toFixed(3)), Number(h0[i]!.bounded_decided.toFixed(3))])).toEqual(decided[row]);
+      if (pass[row]) expect(h1.map((m) => [Number(m.strict_pass.toFixed(3)), Number(m.worst_case_pass.toFixed(3))])).toEqual(pass[row]);
+    });
+  });
+
   it('a fixed seed gives a fixed simulation result', () => {
     const a = simulate(SCHEDULE, P3, { throttle: 0.3, detect: H1 }, 2_000, seedFromHex('5eed0001'));
     const b = simulate(SCHEDULE, P3, { throttle: 0.3, detect: H1 }, 2_000, seedFromHex('5eed0001'));
@@ -300,6 +446,8 @@ describe('HW2 429 policy: exact probabilities and seeded simulation', () => {
       { throttle: 0.2, detect: H1 },
       { throttle: 0.4, detect: { with: 0.2, without: 0.2 } },
       { throttle: 0.3, detect: H1, truncate: 0.05, truncationEligible: 0.5, fail: 0.02 },
+      { throttle: 0.2, burst: 0.6, detect: H1 },
+      { throttle: 0.15, throttleByPosition: [0.15, 0.6, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15], detect: H1 },
     ];
     let seed = 1;
     for (const model of models) {
@@ -307,7 +455,7 @@ describe('HW2 429 policy: exact probabilities and seeded simulation', () => {
         const exact = exactMetrics(SCHEDULE, policy, model);
         const sim = simulate(SCHEDULE, policy, model, runs, seed++);
         const tol = (x: number) => 4.5 * Math.sqrt((x * (1 - x)) / runs) + 1e-3;
-        for (const key of ['all_observed', 'strict_pass', 'worst_case_pass', 'best_case_pass', 'bounded_decided'] as const) {
+        for (const key of ['all_observed', 'strict_pass', 'worst_case_pass', 'best_case_pass', 'bounded_decided', 'bounded_same_outcome'] as const) {
           expect(Math.abs(sim[key] - exact[key])).toBeLessThan(tol(exact[key]));
         }
         exact.counted_distribution.forEach((mass, k) => expect(Math.abs(sim.counted_distribution[k]! - mass)).toBeLessThan(tol(mass)));
@@ -322,7 +470,7 @@ describe('HW2 429 policy: cost ceilings', () => {
   it('declares max attempts × $0.005 as the capability budget on top of the $0.02174118 ledger', () => {
     expect(costCeiling(P1, 10)).toMatchObject({ max_attempts: 10, new_reservations_usd: 0.05, cumulative_ceiling_usd: 0.07174118 });
     expect(costCeiling(P2, 10)).toMatchObject({ max_attempts: 10, new_reservations_usd: 0.05 });
-    expect(costCeiling(P3, 10)).toMatchObject({ max_attempts: 30, new_reservations_usd: 0.15, cumulative_ceiling_usd: 0.17174118 });
+    expect(costCeiling(P3, 10)).toMatchObject({ max_attempts: 30, new_reservations_usd: 0.15, cumulative_ceiling_usd: 0.17174118, billed_worst_case_usd: 0.1031697 });
     expect(costCeiling(P3_CAPPED, 10)).toMatchObject({ max_attempts: 12, new_reservations_usd: 0.06 });
     for (const policy of Object.values(PROPOSED_POLICIES)) {
       const ceiling = costCeiling(policy, 10);
@@ -332,6 +480,17 @@ describe('HW2 429 policy: cost ceilings', () => {
     }
     expect(costCeiling({ id: 'P3', attemptsPerTrial: 9, maxTotalAttempts: 1_000 }, 30, { ...COST_INPUTS_20261102, reservationUsd: 0.005 }).max_attempts).toBe(270);
     expect(costCeiling({ id: 'P3', attemptsPerTrial: 9, maxTotalAttempts: 250 }, 30).fits_caps).toBe(false);
+  });
+
+  it('refuses an invalid policy, an invalid model or an unbounded simulation', () => {
+    const bad = { id: 'P3', attemptsPerTrial: 0, maxTotalAttempts: 10 } as Policy;
+    expect(() => costCeiling(bad, 10)).toThrow(/attemptsPerTrial/);
+    expect(() => costCeiling({ id: 'P3', attemptsPerTrial: 3, maxTotalAttempts: 1.5 }, 10)).toThrow(/maxTotalAttempts/);
+    expect(() => exactMetrics(SCHEDULE, bad, { throttle: 0.1, detect: H1 })).toThrow(/attemptsPerTrial/);
+    expect(() => exactMetrics(SCHEDULE, P3, { throttle: 1.2, detect: H1 })).toThrow(/\[0, 1\]/);
+    expect(() => simulate(SCHEDULE, P3, { throttle: 0.1, detect: H1 }, 0, 1)).toThrow(/runs/);
+    expect(() => simulate(SCHEDULE, P3, { throttle: 0.1, detect: H1 }, 1.5, 1)).toThrow(/runs/);
+    expect(() => simulate(SCHEDULE, P3, { throttle: 0.1, detect: H1 }, MAX_SIMULATION_RUNS + 1, 1)).toThrow(/runs/);
   });
 
   it('no execution, whatever the outcomes, reserves more than the declared budget', () => {
