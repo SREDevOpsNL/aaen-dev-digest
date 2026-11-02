@@ -43,9 +43,13 @@ export type PolicyId = 'P1' | 'P2' | 'P3';
 
 export type Policy =
   | { id: 'P1' }
-  | { id: 'P2' }
+  /** `maxConsecutiveThrottles`: an outage stop after this many classified 429s in a row, across trials (optional). */
+  | { id: 'P2'; maxConsecutiveThrottles?: number }
   /** `maxTotalAttempts` is the hard cap across the whole study; it never exceeds trials × `attemptsPerTrial`. */
-  | { id: 'P3'; attemptsPerTrial: number; maxTotalAttempts: number };
+  | { id: 'P3'; attemptsPerTrial: number; maxTotalAttempts: number; maxConsecutiveThrottles?: number };
+
+/** The outage stop: the number of consecutive 429s that stops the study, or null (P1 stops at the first anyway). */
+export const outageLimit = (policy: Policy): number | null => (policy.id === 'P1' ? null : policy.maxConsecutiveThrottles ?? null);
 
 export const attemptsPerTrial = (policy: Policy): number => (policy.id === 'P3' ? policy.attemptsPerTrial : 1);
 
@@ -55,8 +59,10 @@ export function maxAttempts(policy: Policy, trials: number): number {
 }
 
 export function policyProblems(policy: Policy): string[] {
-  if (policy.id !== 'P3') return [];
   const problems: string[] = [];
+  const limit = outageLimit(policy);
+  if (limit !== null && (!Number.isInteger(limit) || limit < 1)) problems.push('maxConsecutiveThrottles must be a positive integer');
+  if (policy.id !== 'P3') return problems;
   if (!Number.isInteger(policy.attemptsPerTrial) || policy.attemptsPerTrial < 1 || policy.attemptsPerTrial > 9) {
     problems.push('attemptsPerTrial must be an integer from 1 to 9');
   }
@@ -176,7 +182,8 @@ export interface Tally {
   not_dispatched: number;
 }
 
-export type StopReason = 'throttle' | 'failure' | 'ineligible_truncation' | 'attempt_cap';
+/** `throttle_outage`: the declared number of consecutive 429s was reached (a 429-caused stop, like `throttle` and `attempt_cap`). */
+export type StopReason = 'throttle' | 'throttle_outage' | 'failure' | 'ineligible_truncation' | 'attempt_cap';
 
 export interface ExecutionStep {
   attempt: PlannedAttempt;
@@ -217,6 +224,8 @@ export function execute(
   const trials: TrialResult[] = [];
   const tallies: Record<Condition, Tally> = { with: emptyTally(), without: emptyTally() };
   let stopped: Execution['stopped'] = null;
+  const limit = outageLimit(policy);
+  let streak = 0;
 
   for (let index = 0; index < schedule.length; index++) {
     const slot = schedule[index]!;
@@ -237,10 +246,14 @@ export function execute(
       steps.push({ attempt: planned, outcome });
       result.attempts = attempt;
       if (outcome.kind === 'throttled') {
+        streak++;
+        const outage = limit !== null && streak >= limit;
         if (policy.id === 'P1') stopped = { reason: 'throttle', attempt_id: planned.attempt_id };
-        if (policy.id === 'P1' || attempt === per) { result.status = 'throttled'; tally.throttled++; break; }
+        else if (outage) stopped = { reason: 'throttle_outage', attempt_id: planned.attempt_id };
+        if (policy.id === 'P1' || attempt === per || outage) { result.status = 'throttled'; tally.throttled++; break; }
         continue;
       }
+      streak = 0;
       if (outcome.kind === 'observed') {
         result.status = 'observed';
         result.detected = outcome.detected;
@@ -299,6 +312,8 @@ export function traceProblems(schedule: readonly Slot[], policy: Policy, trace: 
   if (trace.length > cap) problems.push(`${trace.length} attempts exceed the cap of ${cap}`);
   let previous: { planned: PlannedAttempt; outcome: AttemptOutcome } | null = null;
   let ended = false;
+  const limit = outageLimit(policy);
+  let streak = 0;
   for (const step of trace) {
     const planned = byId.get(step.attempt_id);
     if (!planned) { problems.push(`${step.attempt_id} is not a predeclared attempt ID`); break; }
@@ -322,6 +337,8 @@ export function traceProblems(schedule: readonly Slot[], policy: Policy, trace: 
     const { outcome } = step;
     if (outcome.kind === 'failed' || (outcome.kind === 'truncated' && !outcome.eligible)) ended = true;
     if (outcome.kind === 'throttled' && policy.id === 'P1') ended = true;
+    streak = outcome.kind === 'throttled' ? streak + 1 : 0;
+    if (limit !== null && streak >= limit) ended = true;
     previous = { planned, outcome };
     if (problems.length > 0) break;
   }
@@ -512,23 +529,28 @@ export function exactTerminalStates(schedule: readonly Slot[], policy: Policy, m
   const t = model.truncate ?? 0;
   const e = model.truncationEligible ?? 1;
   const f = model.fail ?? 0;
-  // `last`: whether the previous dispatched attempt got a 429 (only the burst model reads it).
-  type Live = { state: TerminalState; probability: number; stopped: boolean; last: boolean };
-  const key = (s: TerminalState, stopped: boolean, last: boolean) => JSON.stringify([s.attempts, stopped, last, s.tallies.with, s.tallies.without]);
+  // `streak`: consecutive 429s up to the previous dispatched attempt (the burst model and the outage stop read it).
+  type Live = { state: TerminalState; probability: number; stopped: boolean; streak: number };
+  const tallyKey = (t: Tally) => `${t.scheduled},${t.observed},${t.detected},${t.imputed},${t.throttled},${t.failed},${t.not_dispatched}`;
+  const key = (s: TerminalState, stopped: boolean, streak: number) =>
+    `${s.attempts}|${stopped ? 1 : 0}|${streak}|${tallyKey(s.tallies.with)}|${tallyKey(s.tallies.without)}`;
+  const limit = outageLimit(policy);
   const clone = (s: TerminalState): TerminalState => ({ attempts: s.attempts, tallies: { with: { ...s.tallies.with }, without: { ...s.tallies.without } } });
   let states = new Map<string, Live>();
   const start: TerminalState = { attempts: 0, tallies: { with: emptyTally(), without: emptyTally() } };
-  states.set(key(start, false, false), { state: start, probability: 1, stopped: false, last: false });
+  states.set(key(start, false, 0), { state: start, probability: 1, stopped: false, streak: 0 });
 
   for (let index = 0; index < schedule.length; index++) {
     const slot = schedule[index]!;
     const next = new Map<string, Live>();
-    const add = (state: TerminalState, probability: number, stopped: boolean, last: boolean) => {
+    const add = (state: TerminalState, probability: number, stopped: boolean, streak: number) => {
       if (probability === 0) return;
-      const k = key(state, stopped, last);
+      // Once stopped, the streak no longer matters: merge those states.
+      if (stopped) streak = 0;
+      const k = key(state, stopped, streak);
       const existing = next.get(k);
       if (existing) existing.probability += probability;
-      else next.set(k, { state, probability, stopped, last });
+      else next.set(k, { state, probability, stopped, streak });
     };
     for (const live of states.values()) {
       const base = clone(live.state);
@@ -536,28 +558,28 @@ export function exactTerminalStates(schedule: readonly Slot[], policy: Policy, m
       if (live.stopped) {
         const s = clone(base);
         s.tallies[slot.condition].not_dispatched++;
-        add(s, live.probability, true, live.last);
+        add(s, live.probability, true, 0);
         continue;
       }
       let reach = live.probability; // P(every earlier attempt of this trial got a 429)
-      let last = live.last;
+      let streak = live.streak;
       for (let attempt = 1; attempt <= per; attempt++) {
         if (base.attempts + attempt - 1 >= cap) {
           const s = clone(base);
           s.attempts += attempt - 1;
           if (attempt === 1) s.tallies[slot.condition].not_dispatched++;
           else s.tallies[slot.condition].throttled++;
-          add(s, reach, true, last);
+          add(s, reach, true, 0);
           reach = 0;
           break;
         }
-        const after = (mutate: (tally: Tally) => void, probability: number, stopped: boolean, throttled = false) => {
+        const after = (mutate: (tally: Tally) => void, probability: number, stopped: boolean, nextStreak = 0) => {
           const s = clone(base);
           s.attempts += attempt;
           mutate(s.tallies[slot.condition]);
-          add(s, reach * probability, stopped, throttled);
+          add(s, reach * probability, stopped, nextStreak);
         };
-        const p = throttleProbability(model, index, last);
+        const p = throttleProbability(model, index, streak > 0);
         const go = 1 - p;
         const scored = go * (1 - t - f);
         const q = model.detect[slot.condition];
@@ -565,13 +587,14 @@ export function exactTerminalStates(schedule: readonly Slot[], policy: Policy, m
         after((tally) => { tally.observed++; }, scored * (1 - q), false);
         after((tally) => { tally.imputed++; }, go * t * e, false);
         after((tally) => { tally.failed++; }, go * (t * (1 - e) + f), true);
-        if (policy.id === 'P1' || attempt === per) {
-          after((tally) => { tally.throttled++; }, p, policy.id === 'P1', true);
+        const outage = limit !== null && streak + 1 >= limit;
+        if (policy.id === 'P1' || attempt === per || outage) {
+          after((tally) => { tally.throttled++; }, p, policy.id === 'P1' || outage, streak + 1);
           reach = 0;
           break;
         }
         reach *= p;
-        last = true;
+        streak++;
       }
     }
     states = next;
@@ -779,4 +802,5 @@ export const PROPOSED_POLICIES: Readonly<Record<string, Policy>> = Object.freeze
   'P3 (K=2, cap 20)': { id: 'P3', attemptsPerTrial: 2, maxTotalAttempts: 20 },
   'P3 (K=3, cap 30)': { id: 'P3', attemptsPerTrial: 3, maxTotalAttempts: 30 },
   'P3 (K=3, cap 20)': { id: 'P3', attemptsPerTrial: 3, maxTotalAttempts: 20 },
+  'P3 (K=3, cap 30, outage stop 6)': { id: 'P3', attemptsPerTrial: 3, maxTotalAttempts: 30, maxConsecutiveThrottles: 6 },
 });

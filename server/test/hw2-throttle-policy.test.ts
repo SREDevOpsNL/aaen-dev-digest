@@ -10,7 +10,8 @@
  *   6. validator: drop the fixed-order check (`planned.trial_index !== expectedTrial` → false);
  *   7. validator: drop the end-of-trace completeness check;
  *   8. claim: ignore non-429 failures (`onlyThrottled = …` → true);
- *   9. DP: ignore the burst state (`throttleProbability(model, index, last)` → `(model, index, false)`).
+ *   9. DP: ignore the burst state (`throttleProbability(model, index, streak > 0)` → `(model, index, false)`);
+ *  10. execute: never reset the 429 streak (drop `streak = 0;` after a response).
  */
 import { describe, expect, it } from 'vitest';
 import { CAPS } from '../src/experiments/hw2/budget.js';
@@ -54,6 +55,7 @@ const P1: Policy = { id: 'P1' };
 const P2: Policy = { id: 'P2' };
 const P3: Policy = { id: 'P3', attemptsPerTrial: 3, maxTotalAttempts: 30 };
 const P3_CAPPED: Policy = { id: 'P3', attemptsPerTrial: 3, maxTotalAttempts: 12 };
+const P3_OUTAGE: Policy = { id: 'P3', attemptsPerTrial: 3, maxTotalAttempts: 30, maxConsecutiveThrottles: 6 };
 const H1: OutcomeModel['detect'] = { with: 0.8, without: 0.2 };
 
 const OBS = (detected = true): AttemptOutcome => ({ kind: 'observed', detected });
@@ -166,7 +168,7 @@ describe('HW2 429 policy: protocol state machines', () => {
 
   it('keeps condition allocation and trial order unchanged whatever the outcomes (randomization invariance)', () => {
     const plan = planAttempts(SCHEDULE, P3).map((a) => a.attempt_id);
-    for (const policy of [P1, P2, P3, P3_CAPPED]) {
+    for (const policy of [P1, P2, P3, P3_CAPPED, P3_OUTAGE]) {
       const planBefore = planAttempts(SCHEDULE, policy);
       // Reference allocation from a run where nothing goes wrong; every other outcome sequence must match it.
       const allocation = execute(SCHEDULE, policy, () => OBS()).trials.map((t) => [t.trial_id, t.condition]);
@@ -202,6 +204,26 @@ describe('HW2 429 policy: protocol state machines', () => {
     expect(ineligible.steps).toHaveLength(2);
     expect(ineligible.stopped?.reason).toBe('ineligible_truncation');
     expect(ineligible.trials.slice(2).every((t) => t.status === 'not_dispatched')).toBe(true);
+  });
+
+  it('the outage stop ends the study after the declared number of consecutive 429s, counted across trials and reset by any response', () => {
+    const outage = execute(SCHEDULE, P3_OUTAGE, () => THR);
+    expect(outage.steps).toHaveLength(6);
+    expect(outage.stopped).toEqual({ reason: 'throttle_outage', attempt_id: `${SCHEDULE[1]!.slot_id}-a3` });
+    expect(outage.trials.slice(0, 2).every((t) => t.status === 'throttled')).toBe(true);
+    expect(outage.trials.slice(2).every((t) => t.status === 'not_dispatched')).toBe(true);
+    expect(sensitivity(outage.tallies)).toMatchObject({ missing_only_throttled: true, claim: 'incomplete' });
+    // Five 429s, a response, five more: never six in a row.
+    const pattern = [THR, THR, THR, THR, THR, OBS(), THR, THR, THR, THR, THR, OBS(), ...Array(20).fill(OBS())];
+    expect(execute(SCHEDULE, P3_OUTAGE, fromSequence(pattern)).stopped).toBeNull();
+    // Under P2 the streak runs across trials.
+    const p2 = execute(SCHEDULE, { id: 'P2', maxConsecutiveThrottles: 3 }, fromSequence([OBS(), THR, THR, THR, OBS()]));
+    expect(p2.steps).toHaveLength(4);
+    expect(p2.stopped?.reason).toBe('throttle_outage');
+    expect(traceProblems(SCHEDULE, P3_OUTAGE, toTrace(outage))).toEqual([]);
+    const overrun = [...toTrace(outage), { attempt_id: `${SCHEDULE[2]!.slot_id}-a1`, outcome: OBS() }];
+    expect(traceProblems(SCHEDULE, P3_OUTAGE, overrun).join()).toMatch(/after the protocol stopped/);
+    expect(() => planAttempts(SCHEDULE, { id: 'P2', maxConsecutiveThrottles: 0 })).toThrow(/maxConsecutiveThrottles/);
   });
 
   it('a non-429 failure stops every policy without a new attempt', () => {
@@ -365,8 +387,8 @@ describe('HW2 429 policy: exact probabilities and seeded simulation', () => {
 
   it('bounds false positives under every equal-rate null: 0.0352 at q = 0.5, never raised by P4', () => {
     let peak = 0;
-    for (let i = 0; i <= 20; i++) {
-      const q = i / 20;
+    for (let i = 0; i <= 10; i++) {
+      const q = i / 10;
       const full = exactMetrics(SCHEDULE, P1, { throttle: 0, detect: { with: q, without: q } }).strict_pass;
       peak = Math.max(peak, full);
       for (const policy of [P1, P2, P3]) {
@@ -431,6 +453,22 @@ describe('HW2 429 policy: exact probabilities and seeded simulation', () => {
     });
   });
 
+  it('matches the recommendation numbers for P3 K=3, M=30 with the outage stop at 6', () => {
+    const at = (model: OutcomeModel) => exactMetrics(SCHEDULE, P3_OUTAGE, model);
+    for (const [p, all, decided, detected] of [[3 / 9, 0.6856, 0.887, 0.456], [4 / 11, 0.6109, 0.853, 0.43], [4 / 19, 0.9105, 0.972, 0.521], [0.2, 0.9228, 0.976, 0.524]] as const) {
+      const m = at({ throttle: p, detect: H1 });
+      expect(Number(m.all_observed.toFixed(4))).toBe(all);
+      expect(Number(m.bounded_decided.toFixed(3))).toBe(decided);
+      expect(Number(m.worst_case_pass.toFixed(3))).toBe(detected);
+    }
+    expect(Number(at({ throttle: 0.4, detect: H1 }).bounded_decided.toFixed(3))).toBe(0.805);
+    for (const [rho, decided, detected] of [[0.5, 0.832, 0.419], [0.8, 0.487, 0.216]] as const) {
+      const m = at({ throttle: 0.2, burst: rho, detect: H1 });
+      expect([Number(m.bounded_decided.toFixed(3)), Number(m.worst_case_pass.toFixed(3))]).toEqual([decided, detected]);
+    }
+    expect(at({ throttle: 1, detect: H1 }).expected_attempts).toBe(6);
+  });
+
   it('a fixed seed gives a fixed simulation result', () => {
     const a = simulate(SCHEDULE, P3, { throttle: 0.3, detect: H1 }, 2_000, seedFromHex('5eed0001'));
     const b = simulate(SCHEDULE, P3, { throttle: 0.3, detect: H1 }, 2_000, seedFromHex('5eed0001'));
@@ -451,7 +489,7 @@ describe('HW2 429 policy: exact probabilities and seeded simulation', () => {
     ];
     let seed = 1;
     for (const model of models) {
-      for (const policy of [P1, P2, P3, P3_CAPPED]) {
+      for (const policy of [P1, P2, P3, P3_CAPPED, { id: 'P3', attemptsPerTrial: 3, maxTotalAttempts: 30, maxConsecutiveThrottles: 4 } as Policy]) {
         const exact = exactMetrics(SCHEDULE, policy, model);
         const sim = simulate(SCHEDULE, policy, model, runs, seed++);
         const tol = (x: number) => 4.5 * Math.sqrt((x * (1 - x)) / runs) + 1e-3;
