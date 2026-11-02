@@ -416,3 +416,18 @@ approved. Phase 1 and v3 stay separate.
 truncation occurred, so nothing was imputed. Spend: $0.00035478 actual, with
 $0.005 held conservatively for the 429 slot in the ledger. See
 [the v4 record](evidence/item-b-v4-confirmatory/README.md).
+
+## Study v5 (2026-11-02, frozen, not authorized)
+
+A new #17 study using the owner-approved P3 attempt pool:
+- 10 trials with 3 predeclared attempt IDs each (30 at most);
+- a re-attempt only after a strictly classified upstream 429;
+- an outage stop after 6 consecutive classified 429s;
+- fixed pacing of 30 / 60 / 180 s;
+- P4 bounds reported apart from the observations.
+
+The fixture, Skill, prompt and two-part rule are unchanged. It is frozen as
+`prereg/manifest-20261102-v5.json` on stack `hw2f-a88a535d`. The design,
+model figures and approval packet are in
+[PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#study-v5-for-17-the-p3-attempt-pool-2026-11-02).
+Phase 1, v3 and v4 stay separate.

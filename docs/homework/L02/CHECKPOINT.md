@@ -304,3 +304,27 @@ needs a corrected freeze and a fresh approval.
 - **Unchanged:** #17 stays Implemented. Frozen records, adjudications, the
   Skill, the rule and the fixture are unchanged; #18 and #21 are untouched.
 - **Owner decisions** are listed in the proposal. Nothing is authorized.
+
+## 2026-11-02: study v5 (P3) implemented, reviewed, integrated and frozen (unpaid)
+
+- **Code:** `7c77489`. The separately reviewed `feat/hw2-study-v5-p3`
+  (worktree `aaen-dev-digest-l02-study-v5`) was fast-forwarded. Reviews:
+  - methodology: 6 minor, resolved;
+  - security/cost: 3 low, resolved;
+  - acceptance: 10/10 decisions PASS, 17/17 adversarial scenarios blocked.
+- **Tests at `7c77489`:** rc 137, server 654 + 210 DB-backed, client 136,
+  e2e 14/14, schema drift and checks clean. CI 7/7.
+- **Freeze:**
+  - stack `hw2f-a88a535d` (tmux `hw2-freeze-v5`, detached checkout
+    `aaen-dev-digest-l02-verify-final`);
+  - implementation fingerprint `dcda964d…4174413`;
+  - manifest `prereg/manifest-20261102-v5.json` (sha256 `f120f086…25d9`),
+    fingerprint `3832fa25…b533`, seed 3545445316, 10 trials / 30 attempt IDs.
+- **Spending:** none. Ledger $0.02174118 (48 records); key $0.00714906.
+- **Packet:** $0.15 new reservations, ceiling $0.17174118, 3 h, Gate 4. Not
+  authorized.
+- **Volumes:** one new anonymous volume `744cbee1…` with no container
+  appeared during the matrix run (13:37Z). It was left alone, like the
+  other unidentified volumes. The stack's own volume is `5f5713dd…`.
+- **Next owner decision:** the v5 spending packet. The freeze holds only
+  while `hw2f-a88a535d` is up.

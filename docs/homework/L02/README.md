@@ -67,6 +67,9 @@ See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md): 50 Verified,
     slot 2 of 10 on an upstream HTTP 429, so it is also `incomplete`: the
     one adjudicated *without* slot is "no", and no *with* slot completed
     ([record](evidence/item-b-v4-confirmatory/README.md)).
+  - Study v5 for #17 (a predeclared attempt pool for upstream 429s) is
+    implemented, reviewed and frozen, and needs a spending decision
+    ([v5](PROSPECTIVE-STUDY.md#study-v5-for-17-the-p3-attempt-pool-2026-11-02)).
   - Under Skill v1, #18 is unresolved/unsupported. A disclosed Skill v2 needs
     the owner's review ([proposal](prereg/proposal-breaking-change-skill-v2.md)).
 - criterion 21 is **Blocked**. It needs a real *interactive* Claude Code

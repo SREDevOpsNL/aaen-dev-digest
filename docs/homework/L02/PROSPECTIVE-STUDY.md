@@ -546,3 +546,123 @@ Nothing was retried or replaced. The full record is in
 would need a new owner decision. That decision includes whether a 429 from a
 shared upstream pool should stay a stop rule or become a terminal,
 non-retried exclusion. Changing it would be a new pre-registration.
+
+## Study v5 for #17: the P3 attempt pool (2026-11-02)
+
+The owner approved P3 as the method for a new prospective #17 study
+([proposal](proposals/429-policy-proposal.md),
+[reliability analysis](proposals/429-reliability-analysis.md)). v5 is a
+**new study**: new tag, seed and attempt IDs. Phase 1, v3 and v4 stay
+separate and unchanged.
+
+### Owner decisions, as implemented
+
+| Decision | Implementation |
+| --- | --- |
+| P3: K = 3, M = 30, L = 6 | Frozen as `attempt_policy` in the manifest. It must equal the compiled `P3_ATTEMPT_POLICY_V5`. |
+| Re-attempt only after a strictly classified upstream pre-generation 429 | `throttleProblems` reads structured fields only: numeric 429, origin `upstream_provider`, `limit_source` exactly `upstream_provider_shared_pool`, the frozen provider, no response or generation ID, no tokens or cost, `usage_known === false`, one dispatched attempt, the frozen non-Skill fingerprint. Every attempt has its own preregistered ID and reservation. |
+| Pacing: 30 s between trials, 60 s before a2, 180 s before a3 | The delays are frozen per attempt, and the runner waits them in full. Timestamps are UTC. The report measures every gap and blocks the claim on a gap shorter than planned (10 s tolerance for the WSL clock). There is no time-of-day window. |
+| No warm-ups | `warmups: 0` is frozen. |
+| Single pinned `deepinfra/fp8` | Routing is unchanged (`only`, no fallbacks). A 429 must name the frozen provider, and an observation must pass the existing provenance checks; otherwise the study stops. |
+| P4 reporting | Separate *strict*, *worst-case* and *best-case* results, with the labels `observed`, `imputed`, `bounded`, `incomplete` and `not_detected`. A worst-case success prints as "conditional bound only, not verified" and is never a Verified result. Any non-429 loss makes the claim `incomplete`. |
+| Nothing suppressed | Every attempt, 429, trial position, condition, exhausted pool and outage stop is reported, with missingness per condition and a Fisher p. Any study-tagged ID outside the plan blocks the claim. |
+| Conservative ledger | Unchanged. An unbilled 429 keeps its $0.005 reservation, and nothing releases it. |
+| Guards and history | `authorize` requires the budget to equal M × reservation exactly. All existing guards are kept. v3/v4 behave as before, and the committed v4 manifest still verifies. |
+
+### Implementation and review
+
+- **Code:** `7c77489` on `homework/l02-mentor-submission`, merged from the
+  separately reviewed branch `feat/hw2-study-v5-p3`.
+  - New modules: `attempt-policy.ts` and `report-p3.ts`.
+  - `runAttemptPool` in `runner.ts`.
+  - The v5 manifest, CLI and adjudication paths.
+- **Reviews:**
+  - methodology: 6 minor and 7 informational findings, all resolved. An
+    independent harness replayed 18,000 seeded sequences against the model
+    and found 0 protocol mismatches;
+  - security/cost: 3 low and 4 informational findings, all resolved;
+  - independent acceptance: all ten decisions PASS, 17 of 17 adversarial
+    scenarios blocked, one wording finding fixed.
+- **Tests at `7c77489`:** reviewer-core 137; server hermetic 654;
+  server DB-backed 210; client 136; e2e 14/14. Schema drift, agent
+  instructions and diff check are clean. CI 7/7.
+- **Mutation record:** 21 listed mutations of the new guards each fail at
+  least one test, apart from one equivalent mutation that is disclosed.
+
+### Frozen pre-registration
+
+| Item | Value |
+| --- | --- |
+| Implementation | `7c77489`, fingerprint `dcda964d694910ff298dfad85e5122765dff6f70252e911a14f98c4944174413`. The manifest commit `8f4d0f0` changes only docs and leaves the fingerprint unchanged. |
+| Pre-registration | [`prereg/manifest-20261102-v5.json`](prereg/manifest-20261102-v5.json), written unchanged by `cli.ts manifest --study v5 --out`, sha256 `f120f08653b60745bba5d54d2aa6d069c87a286516b63fad7806d5331c4b25d9` |
+| Manifest version / fingerprint | 5 / `3832fa254ce83dec6fb5fcf7e44c7158853a77d02ab38489f7a513769fdeb533` |
+| Read-back | `prereg-check --study v5`: "pre-registration matches … 10 slots, seed 3545445316"; 30 predeclared attempt IDs; no attempt and no scheduled slot in the ledger |
+| Seed | 3545445316, derived as in v4 from the study ID and the manifest basis |
+| Trial order | `c-v5-17-with-1`, `c-v5-17-without-1`, `c-v5-17-without-5`, `c-v5-17-with-5`, `c-v5-17-without-3`, `c-v5-17-with-3`, `c-v5-17-with-4`, `c-v5-17-without-4`, `c-v5-17-without-2`, `c-v5-17-with-2`; each trial has the attempts `-a1`, `-a2` and `-a3` |
+| Stack | `hw2f-a88a535d`, database `devdigest_hw2f_a88a535d`, container `devdigest-hw2f-a88a535d` (127.0.0.1:5450, ephemeral), API 127.0.0.1:3251, web localhost:3250, tmux `hw2-freeze-v5`. Built from the clean detached checkout at `7c77489`; isolation checks pass. |
+| Model / provider | `deepseek/deepseek-v4-flash` on the only endpoint `deepinfra/fp8` (DeepInfra), served model `deepseek/deepseek-v4-flash-20260423`. Fallbacks off, temperature 0, single-pass, repo-intel off, output cap 8,000. |
+| Prices | $0.00000009 input, $0.00000018 output, $0 per request. The live endpoint read on 2026-11-02 matches. |
+| Unchanged | The fixture #501 (diff `8e0ba133…d186`), the Skill (Edge Cases and Error Paths), the reviewer prompt, the two-part rule and the adjudication text ([study-v4-frozen-text.md](prereg/study-v4-frozen-text.md)), and the rules file `rules-20261030.json`. |
+
+**Request fingerprints and bounds** (free previews; they equal v4's; phase 0
+passes):
+
+| Condition | Non-Skill fingerprint | Skill fingerprint | Input bound | Worst case per attempt |
+| --- | --- | --- | --- | --- |
+| with | `7aea9945…f48358` | `18efa866…3d83f2` | 9,474 | $0.00343899 |
+| without | `7aea9945…f48358` | `4f53cda1…b945` | 8,967 | $0.00337054 |
+
+1.2 × the larger worst case is $0.00412679, which is below the $0.005
+per-attempt reservation.
+
+### Modelled completion (not a guarantee)
+
+Exact values from `throttle-policy.ts` for the frozen order, assuming true
+detection rates of 0.8 with the Skill and 0.2 without:
+
+| 429 scenario | P(all 10 observed) | P(claim decided) | P(claim `detected`) | E[attempts] |
+| --- | --- | --- | --- | --- |
+| none | 1.000 | 1.000 | 0.544 | 10.0 |
+| #17 rate 3/9 | 0.686 | 0.887 | 0.456 | 14.4 |
+| high-cap rate 4/11 | 0.611 | 0.854 | 0.431 | 14.8 |
+| overall 4/19 | 0.911 | 0.972 | 0.521 | 12.5 |
+| CP lower 0.075 | 0.996 | 0.999 | 0.543 | 10.8 |
+| CP upper for #17, 0.701 | 0.015 | 0.207 | 0.045 | 15.6 |
+| 3/9 with bursts, ρ = 0.5 | 0.419 | 0.736 | 0.349 | 14.7 |
+| 3/9 with bursts, ρ = 0.8 | 0.091 | 0.304 | 0.110 | 12.4 |
+| position hazard (0.6 at position 2, 0.15 elsewhere) | 0.761 | 0.925 | 0.484 | 12.5 |
+
+The 95 % intervals on the rates are wide (3/9: 0.075–0.701), so the
+outcome may fall anywhere in this range. Even with no 429s, the frozen rule
+passes only 54 % of the time. A non-detection says nothing about the
+Skill, and no result may be called significant. "Detected" includes
+worst-case conditional bounds, which are not Verified evidence.
+
+### State before any decision (read live 2026-11-02)
+
+- **Ledger:** 48 records, sha256 `e2e236d4…`, $0.02174118 conservative
+  ($0.0076964 confirmatory, $0.01404478 exploration). No open slot, no
+  live capability; the last authorization event is the v4 revoke.
+- **Key:** $0.00714906 of $2.00 used ($1.99285094 remaining), equal to the
+  last settlement.
+
+### Approval packet v5 (not authorized)
+
+| Value | |
+| --- | --- |
+| Gate / phase | Gate 4, confirmatory, study `itemb-v5` |
+| Calls | at most the 30 predeclared attempt IDs, in the frozen order, one Run Review click each. `a2`/`a3` of a trial only after a strictly classified 429 on that trial's previous attempt. |
+| Per-attempt reservation | $0.005 |
+| New reservations (capability budget, must equal M × reservation) | $0.15000000 |
+| Cumulative conservative ceiling | $0.17174118 (ledger $0.02174118 + $0.15) |
+| Caps | confirmatory $0.1576964 of $1.00; total $0.17174118 of $1.50 |
+| If every attempt were billed at its worst case | $0.10316970 (30 × $0.00343899) |
+| Expected actual spend | about $0.005–0.008, if 429s stay unbilled (so far 4 of 4 were) |
+| Capability lifetime | 3 hours (all pacing waits together are about 45 min at most, plus generation time); revoked after the schedule |
+| Retries, reprompts, fallbacks, replacements, warm-ups | none beyond the predeclared attempt pool |
+| Stop rules | 6 consecutive classified 429s (outage); M reached; any unclassified failure, an ambiguous 429, a timeout, unknown cost not from a classified 429, a provenance or served-model mismatch, a fingerprint mismatch, a refusal or a budget stop. An eligible truncation continues and is imputed as in v4. |
+| Afterwards | `revoke`, `settle`, `report --study v5 --adjudication-input`, then packet v2 / r1 with two independent sealed adjudicators |
+
+The freeze is valid only while stack `hw2f-a88a535d` is up. A host restart
+destroys it and needs a free re-freeze, with new database bindings and a new
+manifest. Before authorization, every free binding is checked again.
