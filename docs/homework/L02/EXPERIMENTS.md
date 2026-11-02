@@ -431,3 +431,12 @@ The fixture, Skill, prompt and two-part rule are unchanged. It is frozen as
 model figures and approval packet are in
 [PROSPECTIVE-STUDY.md](PROSPECTIVE-STUDY.md#study-v5-for-17-the-p3-attempt-pool-2026-11-02).
 Phase 1, v3 and v4 stay separate.
+
+### v5 outcome (authorized and run 2026-11-02)
+
+The outage stop came after 20 of 30 attempts, 15 of them classified,
+unbilled 429s. The adjudication found **0/4** with the Skill against **1/1**
+without (claim `not_detected`). A pacing deviation (waits ~8–9 % short) is
+disclosed. Spend: $0.00236142 actual. See
+[the v5 record](evidence/item-b-v5-confirmatory/README.md).
+

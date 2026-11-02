@@ -1,0 +1,65 @@
+Slot c-v5-17-with-1-a1 is armed until 2026-11-02T16:14:08.902Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-with-1-a1 (trial 1, with, a1): completed, observed
+c-v5-17-without-1-a1: waiting 30 s (predeclared, outcome-independent)
+Slot c-v5-17-without-1-a1 is armed until 2026-11-02T16:15:25.785Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-1-a1 (trial 2, without, a1): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-1-a2: waiting 60 s (predeclared, outcome-independent)
+Slot c-v5-17-without-1-a2 is armed until 2026-11-02T16:16:25.771Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-1-a2 (trial 2, without, a2): completed, observed
+c-v5-17-without-5-a1: waiting 30 s (predeclared, outcome-independent)
+Slot c-v5-17-without-5-a1 is armed until 2026-11-02T16:18:25.966Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-5-a1 (trial 3, without, a1): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-5-a2: waiting 60 s (predeclared, outcome-independent)
+Slot c-v5-17-without-5-a2 is armed until 2026-11-02T16:19:25.870Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-5-a2 (trial 3, without, a2): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-5-a3: waiting 180 s (predeclared, outcome-independent)
+Slot c-v5-17-without-5-a3 is armed until 2026-11-02T16:22:16.602Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-5-a3 (trial 3, without, a3): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-5: pool exhausted (3 classified 429s); the trial is missing (bounded) and the next trial follows
+c-v5-17-with-5-a1: waiting 30 s (predeclared, outcome-independent)
+Slot c-v5-17-with-5-a1 is armed until 2026-11-02T16:22:50.182Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-with-5-a1 (trial 4, with, a1): completed, observed
+c-v5-17-without-3-a1: waiting 30 s (predeclared, outcome-independent)
+Slot c-v5-17-without-3-a1 is armed until 2026-11-02T16:24:08.211Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-3-a1 (trial 5, without, a1): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-3-a2: waiting 60 s (predeclared, outcome-independent)
+Slot c-v5-17-without-3-a2 is armed until 2026-11-02T16:25:08.177Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-3-a2 (trial 5, without, a2): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-3-a3: waiting 180 s (predeclared, outcome-independent)
+Slot c-v5-17-without-3-a3 is armed until 2026-11-02T16:28:01.367Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-3-a3 (trial 5, without, a3): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-3: pool exhausted (3 classified 429s); the trial is missing (bounded) and the next trial follows
+c-v5-17-with-3-a1: waiting 30 s (predeclared, outcome-independent)
+Slot c-v5-17-with-3-a1 is armed until 2026-11-02T16:28:31.427Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-with-3-a1 (trial 6, with, a1): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-with-3-a2: waiting 60 s (predeclared, outcome-independent)
+Slot c-v5-17-with-3-a2 is armed until 2026-11-02T16:29:31.226Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-with-3-a2 (trial 6, with, a2): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-with-3-a3: waiting 180 s (predeclared, outcome-independent)
+Slot c-v5-17-with-3-a3 is armed until 2026-11-02T16:32:23.351Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-with-3-a3 (trial 6, with, a3): completed, observed
+c-v5-17-with-4-a1: waiting 30 s (predeclared, outcome-independent)
+Slot c-v5-17-with-4-a1 is armed until 2026-11-02T16:34:19.435Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-with-4-a1 (trial 7, with, a1): completed, observed
+c-v5-17-without-4-a1: waiting 30 s (predeclared, outcome-independent)
+Slot c-v5-17-without-4-a1 is armed until 2026-11-02T16:36:22.610Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-4-a1 (trial 8, without, a1): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-4-a2: waiting 60 s (predeclared, outcome-independent)
+Slot c-v5-17-without-4-a2 is armed until 2026-11-02T16:37:22.608Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-4-a2 (trial 8, without, a2): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-4-a3: waiting 180 s (predeclared, outcome-independent)
+Slot c-v5-17-without-4-a3 is armed until 2026-11-02T16:40:12.231Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-4-a3 (trial 8, without, a3): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-4: pool exhausted (3 classified 429s); the trial is missing (bounded) and the next trial follows
+c-v5-17-without-2-a1: waiting 30 s (predeclared, outcome-independent)
+Slot c-v5-17-without-2-a1 is armed until 2026-11-02T16:40:44.811Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-2-a1 (trial 9, without, a1): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-2-a2: waiting 60 s (predeclared, outcome-independent)
+Slot c-v5-17-without-2-a2 is armed until 2026-11-02T16:41:44.755Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-2-a2 (trial 9, without, a2): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+c-v5-17-without-2-a3: waiting 180 s (predeclared, outcome-independent)
+Slot c-v5-17-without-2-a3 is armed until 2026-11-02T16:44:35.332Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v5-17-without-2-a3 (trial 9, without, a3): failed, throttled (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+charged: confirmatory $0.085058 of $1, total $0.099103 of $1.5
+STOPPED: outage stop: 6 consecutive classified 429s (last c-v5-17-without-2-a3)
+EXIT=0

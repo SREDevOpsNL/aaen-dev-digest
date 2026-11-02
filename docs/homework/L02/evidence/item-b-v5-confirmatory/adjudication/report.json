@@ -1,0 +1,128 @@
+{
+  "generated_at": "2026-11-02T16:41:56.997Z",
+  "result": {
+    "status": "revealed",
+    "cases": [
+      {
+        "case_id": "case-54a0e22c2df2",
+        "slot_id": "c-v5-17-with-1",
+        "condition": "with",
+        "experiment": "17",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-A": "no",
+          "Technical-Reviewer-B": "no"
+        }
+      },
+      {
+        "case_id": "case-2b595714daad",
+        "slot_id": "c-v5-17-without-1",
+        "condition": "without",
+        "experiment": "17",
+        "final": "yes",
+        "verdicts": {
+          "Technical-Reviewer-A": "yes",
+          "Technical-Reviewer-B": "yes"
+        }
+      },
+      {
+        "case_id": "case-44a057b01071",
+        "slot_id": "c-v5-17-with-5",
+        "condition": "with",
+        "experiment": "17",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-A": "no",
+          "Technical-Reviewer-B": "no"
+        }
+      },
+      {
+        "case_id": "case-a4c38abb3565",
+        "slot_id": "c-v5-17-with-3",
+        "condition": "with",
+        "experiment": "17",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-A": "no",
+          "Technical-Reviewer-B": "no"
+        }
+      },
+      {
+        "case_id": "case-94dd9186c45a",
+        "slot_id": "c-v5-17-with-4",
+        "condition": "with",
+        "experiment": "17",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-A": "no",
+          "Technical-Reviewer-B": "no"
+        }
+      }
+    ],
+    "experiments": [
+      {
+        "experiment": "17",
+        "with": {
+          "scheduled": 5,
+          "adjudicated": 4,
+          "detected": 0,
+          "ambiguous": 0,
+          "imputed": 0
+        },
+        "without": {
+          "scheduled": 5,
+          "adjudicated": 1,
+          "detected": 1,
+          "ambiguous": 0,
+          "imputed": 0
+        },
+        "outcome": "incomplete",
+        "note": "1 with and 4 without scheduled slot(s) lack an unambiguous adjudicated verdict",
+        "p4": {
+          "tallies": {
+            "with": {
+              "scheduled": 5,
+              "observed": 4,
+              "detected": 0,
+              "imputed": 0,
+              "bounded": 1,
+              "incomplete": 0
+            },
+            "without": {
+              "scheduled": 5,
+              "observed": 1,
+              "detected": 1,
+              "imputed": 0,
+              "bounded": 4,
+              "incomplete": 0
+            }
+          },
+          "strict": "incomplete",
+          "worst_case": "negative",
+          "best_case": "negative",
+          "claim": "not_detected",
+          "claim_basis": "bound",
+          "claim_label": "not detected (even the best case over trials lost to classified 429s fails)",
+          "balance": {
+            "missing_with": 1,
+            "missing_without": 4,
+            "scheduled_with": 5,
+            "scheduled_without": 5,
+            "fisher_two_sided_p": 0.20634920634920612
+          },
+          "blockers": [],
+          "bounds_descriptive": false
+        }
+      }
+    ],
+    "blinding_compromised": false,
+    "imputed": [],
+    "blinding": {
+      "method": "r1",
+      "warnings_original": 0,
+      "redacted_cases": 0,
+      "redactions": 0,
+      "residual": []
+    }
+  }
+}

@@ -232,3 +232,20 @@ says which file a finding goes in.
     must check where a trace ends, not only each step.
 
   Records: `docs/homework/L02/proposals/`.
+- **2026-11-02 — v5 settled #17's question as far as this fixture allows,
+  and found a timing defect only because the report checked itself.**
+  - **Outcome.** Under the authorized P3 attempt pool, the study ran 20
+    attempts before the preregistered outage stop. 15 were unbilled upstream
+    429s, mostly in *without* trials.
+  - **Result.** The sealed blinded adjudication found *with* 0/4 against
+    *without* 1/1. With the Skill, the reviewer always flagged the error
+    branches and never the exact expiry boundary, as in every earlier
+    attempt. The frozen rule fails even in the best case.
+  - **The defect.** The report measures each pacing gap from wall-clock
+    ledger timestamps, not from the runner's own timer. That exposed waits
+    8–9 % short, because the host's monotonic clock runs fast (see
+    `server/LEARNINGS.md`).
+  - **Lesson.** A protocol property that matters, such as a minimum delay,
+    should be verified against an independent clock after the fact.
+
+  Record: `docs/homework/L02/evidence/item-b-v5-confirmatory/`.

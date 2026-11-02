@@ -666,3 +666,26 @@ worst-case conditional bounds, which are not Verified evidence.
 The freeze is valid only while stack `hw2f-a88a535d` is up. A host restart
 destroys it and needs a free re-freeze, with new database bindings and a new
 manifest. Before authorization, every free binding is checked again.
+
+### v5 outcome (2026-11-02)
+
+The owner authorized the v5 packet above, unchanged, and every free binding
+matched before the capability was issued. The schedule ended on the
+preregistered **outage stop** after 20 of 30 attempts:
+- 5 observations (4 *with*, 1 *without*);
+- 15 classified upstream 429s (12 of 13 *without* attempts, 2 of 6 *with*);
+- 4 *without* pools exhausted;
+- the last *with* trial not dispatched.
+
+| | |
+| --- | --- |
+| Adjudicated (sealed, blinded, two adjudicators, full agreement) | *with* 0/4 observed detected; *without* 1/1 |
+| P4 over the verdicts | strict `incomplete`; worst case negative; best case negative; **claim `not_detected`** |
+| Imputed truncations | none |
+| Protocol deviation | the pacing waits were ~8–9 % short in real time: this host's monotonic clock runs ~9 % fast against the wall clock and an external clock. The runner report blocks the formal claim (`incomplete`); the deviation cannot change the *with* result. |
+| Spend | $0.00236142 actual (the 5 observations; no 429 was billed). The ledger holds $0.075 for the 15 429s; it shows $0.0991026 conservative. |
+
+#17 stays Implemented. The full record is in
+[evidence/item-b-v5-confirmatory/README.md](evidence/item-b-v5-confirmatory/README.md).
+Phase 1, v3, v4 and v5 stay separate.
+

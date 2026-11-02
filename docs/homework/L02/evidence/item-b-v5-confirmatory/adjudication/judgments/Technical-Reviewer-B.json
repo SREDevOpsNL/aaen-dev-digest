@@ -1,0 +1,52 @@
+{
+  "adjudicator": "Technical-Reviewer-B",
+  "packet_sha256": "2c5160c8265cf026e6521aa79494a8a325cb46a0610681de379cab2449b4396a",
+  "verdicts": [
+    {
+      "case_id": "case-2b595714daad",
+      "detected": "yes",
+      "finding_refs": [
+        "f1",
+        "f2",
+        "f10"
+      ],
+      "reason": "(a) met: f1 (unknown code throws) and f2 (expired coupon throws) are untested error branches. (b) met: f10 explicitly names the missing test for now exactly equal to expiresAt under the >= comparison."
+    },
+    {
+      "case_id": "case-44a057b01071",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "(a) met by f1/f2 (unknown and expired coupon throws untested). (b) missing: no finding mentions the exact expiry-equality boundary now == expiresAt."
+    },
+    {
+      "case_id": "case-54a0e22c2df2",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "(a) met by f1/f2. (b) missing: f2 quotes the now >= expiresAt condition but only asks for an expired-coupon test; nothing identifies a missing test at exactly now == expiresAt."
+    },
+    {
+      "case_id": "case-94dd9186c45a",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "(a) met by f1/f2. (b) missing: f2 mentions a changed comparison operator going undetected, but never explicitly names the now == expiresAt equality boundary test."
+    },
+    {
+      "case_id": "case-a4c38abb3565",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "(a) met by f1/f2. (b) missing: no finding addresses the now == expiresAt boundary; f10 is about a hardcoded date going stale, not the equality case."
+    }
+  ]
+}

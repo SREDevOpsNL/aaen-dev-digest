@@ -617,3 +617,22 @@ correction. Repo-intel remains server-scoped;
 ## Session Notes
 
 ## Open Questions
+
+- **2026-11-02** — On this WSL2 host the **monotonic** clock runs about 9 %
+  fast against real time. This is separate from the wall-clock jumps in the
+  2026-10-20 entry above.
+  - **Measurement.** A `setTimeout(120000)` (and `performance.now`) spanned
+    120.06 s of monotonic time but only 109.51 s of wall time, and 110 s on
+    an external clock (an HTTPS `Date` header). The wall clock tracks real
+    time; the monotonic one does not.
+  - **Effect.** Every timer-based wait in Node is about 8–9 % short. The
+    HW2 v5 runner's predeclared 30/60/180 s pacing came out as about
+    27.5/55/165 s, and the v5 report caught it by measuring gaps from the
+    UTC ledger timestamps.
+  - **How to apply.** When a protocol requires a *minimum* real delay, wait
+    on the wall clock: loop until `Date.now() - start >= delay`, with short
+    `setTimeout` steps. Or scale timer waits up and verify the gap
+    afterwards. Never assume `setTimeout(d)` means d real milliseconds here.
+
+  Evidence: `docs/homework/L02/evidence/item-b-v5-confirmatory/clock-check.txt`
+  and that record's pacing section.

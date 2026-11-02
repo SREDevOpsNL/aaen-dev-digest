@@ -328,3 +328,21 @@ needs a corrected freeze and a fresh approval.
   other unidentified volumes. The stack's own volume is `5f5713dd…`.
 - **Next owner decision:** the v5 spending packet. The freeze holds only
   while `hw2f-a88a535d` is up.
+
+## 2026-11-02: study v5 executed (owner-authorized)
+
+- **Bindings.** All matched before `authorize` (CI 7/7 at `c229bf9`).
+- **Run.** Capability 16:03:54Z. 20 attempts, then the outage stop after 6
+  consecutive classified 429s. Revoked 16:34:48Z. Settlement PASS: actual
+  $0.00236142, no 429 billed.
+- **Adjudication.** Sealed and blinded, 5 cases: *with* 0/4, *without*
+  1/1 → `not_detected`.
+- **Deviation.** The pacing waits were ~8–9 % short: the host's monotonic
+  clock runs fast, verified against an external clock. The runner report
+  blocks the formal claim.
+- **Status.** #17 stays Implemented; acceptance stays 50/2/1.
+- **Ledger** $0.0991026 conservative (108 records). **Key** $0.00951048.
+- **Evidence:** private `itemb-v5-20261102/` (65 files, `SHA256SUMS`
+  `46822a07…`); public `evidence/item-b-v5-confirmatory/`.
+- **Stack** `hw2f-a88a535d` is still up for read-only forensics; its
+  teardown is the owner's call.
