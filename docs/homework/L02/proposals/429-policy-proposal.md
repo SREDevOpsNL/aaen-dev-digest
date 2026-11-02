@@ -15,7 +15,11 @@
   The runner does not use it.
 - **The tests** are in
   [`server/test/hw2-throttle-policy.test.ts`](../../../../server/test/hw2-throttle-policy.test.ts).
-  They pin every table cell printed below.
+  They pin the completion, decidability and P4 tables, the cost ceilings and
+  the burst rows for P3/K3. The other figures (expected-observed
+  distributions, spend, the position-hazard table, the K2/P2 burst rows and
+  the across-seed spreads) are reproduced by the model and by an independent
+  reviewer's script, but are not pinned by tests.
 - **The empirical 429 record** is Agent R's
   [provider reliability analysis](429-reliability-analysis.md).
 
@@ -69,7 +73,7 @@
     campaign and date, and lowering the cap is excluded in any case: v3
     truncated at 4,000.
   - **Time of day.** The 429s cluster in the UTC evening, which is also when
-    the operator worked.
+    almost all runs were scheduled.
 - **Position in session** (R §4.2). Each of the four 429s was the 2nd paid
   request of its session (X1, X2, Phase 1, v4). R rates this "probably
   coincidence", since v3 then ran six back to back without a 429. It is still
@@ -299,16 +303,25 @@ behaviour.
 | A common cause of load and output (MNAR) | Observed rates can be biased in either direction. P4's claim stays valid, because a worst-case success implies success for every value of the missing trials. |
 
 **A position-hazard scenario** (`throttleByPosition`; H1). The 429
-probability is 0.6 at schedule position 2 and 0.15 elsewhere. Expected
-missing trials, *with* / *without*, and P(claim decided):
+probability is 0.6 at schedule position 2 and 0.15 elsewhere. The model
+applies the 0.6 hazard to **every attempt of trial 2**, re-attempts included.
+That is the pessimistic mechanism: R's pattern concerns the session's 2nd
+*request*, so if only that one request is affected, P3's re-attempts recover
+trial 2 more often than shown, and the case for warm-ups under P3 is weaker
+than this table suggests. Expected missing trials, *with* / *without*, and
+P(claim decided):
 
 | Policy | Expected missing with / without | P(claim decided) |
 | --- | --- | --- |
 | P1 | 3.919 / 3.490 | 0.134 |
 | P2 | 1.200 / 0.750 | 0.503 |
-| P3, K = 2, M = 20 | 0.450 / 0.112 | 0.834 |
+| P3, K = 2, M = 20 | 0.450 / 0.1125 | 0.834 |
 | P3, K = 3, M = 30 | 0.229 / 0.017 | 0.926 |
 | P3, K = 3, M = 30, L = 6 | 0.235 / 0.023 | — |
+
+Under bursts, the outage stop also adds position dependence: for a given
+order it can move the difference in expected missing trials between the arms
+by up to ±0.15, against ±0.014 when 429s are independent.
 
 A non-binding cap removes the *cap* channel of position dependence, but not
 position dependence itself. The arm that holds position 2 loses more trials.
@@ -380,8 +393,9 @@ How the design exposes or limits each source:
   p = 0.3 it gives P(all observed) = 0.7600 (against 0.7606); at p = 0.4,
   0.5131.
 - **The outage stop L = 6** leaves P(all observed) unchanged. It lowers
-  P(claim decided) by at most 0.01: 0.805 against 0.815 at p = 0.4, and
-  0.887 against 0.891 at 3/9.
+  P(claim decided) by at most 0.01 when 429s are independent: 0.805
+  against 0.815 at p = 0.4, and 0.887 against 0.891 at 3/9. Under bursts it
+  costs more: 0.564 → 0.487 at ρ = 0.8 (see the burst table).
 
 **P(all 10 trials observed)**: the strict rule is decidable. P1 and P2 are
 identical here.
@@ -434,7 +448,7 @@ whatever the missing trials would have shown, not `incomplete`. Under H1
 **Same four-valued outcome.** The stricter requirement is that both bounds
 give the same `experimentOutcome`, for example both `negative` rather than
 one `negative` and one `inconclusive`. Under P3/K3, H1, that holds with
-probability 0.971 at p = 0.2, 0.863 at 3/9 and 0.822 at 4/11
+probability 0.970 at p = 0.2, 0.863 at 3/9 and 0.822 at 4/11
 (`bounded_same_outcome`).
 
 **Pass probability under H1**, as strict (all observed and `success`) /
@@ -533,6 +547,7 @@ window or route would.
 | P3, K = 2, M = 20 | 20 | $0.10000000 | $0.12174118 | $0.06877980 | yes |
 | P3, K = 3, M = 20 | 20 | $0.10000000 | $0.12174118 | $0.06877980 | yes |
 | **P3, K = 3, M = 30 (± L = 6)** | 30 | **$0.15000000** | **$0.17174118** | **$0.10316970** | yes |
+| P3, K = 3, M = 30, plus two warm-ups | 32 | $0.16000000 | $0.18174118 | $0.11004768 | yes |
 
 The outage stop does not lower the declared ceiling, because 429s spread
 out with responses in between can still reach M. It caps a persistent
@@ -643,7 +658,8 @@ reporting.**
 - **Why M = 30.** It equals the plan length, so the cap never binds and adds
   no position dependence. It still bounds the reservations at $0.15.
 - **Why L = 6.** It caps a persistent outage at six held reservations. It
-  costs at most 0.01 in decidability, and nothing in completion.
+  costs nothing in completion and at most 0.01 in decidability if 429s are
+  independent; under bursts it costs more (0.564 → 0.487 at ρ = 0.8).
 - **What it gives, at the planning rates** (P(all observed) / P(claim
   decided)):
   - **#17 only, 3/9:** 0.686 / 0.887, against 0.017 / 0.056 under the status
