@@ -45,7 +45,8 @@ export class Ledger {
   private readonly lockFile: string;
   private locked = false;
 
-  constructor(readonly dir: string) {
+  /** `clock` stamps each event's `at` (tests inject a fake one; default: the wall clock). */
+  constructor(readonly dir: string, private readonly clock: () => Date = () => new Date()) {
     this.file = join(dir, 'ledger.jsonl');
     this.lockFile = join(dir, 'runner.lock');
   }
@@ -75,7 +76,7 @@ export class Ledger {
   /** Append one event and fsync it before returning. */
   append(event: Omit<LedgerEvent, 'at'>): LedgerEvent {
     if (!this.locked) throw new Error('Ledger is not locked by this runner');
-    const full: LedgerEvent = { at: new Date().toISOString(), ...event };
+    const full: LedgerEvent = { at: this.clock().toISOString(), ...event };
     const fd = openSync(this.file, 'a', 0o600);
     try {
       writeSync(fd, `${JSON.stringify(full)}\n`);

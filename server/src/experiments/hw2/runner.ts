@@ -4,8 +4,14 @@ import { fits } from './budget.js';
 import { isTerminal, type Ledger, type SlotRecord, type SlotState } from './ledger.js';
 import type { Slot } from './schedule.js';
 import { reconcileExtraction } from './conventions-runner.js';
-import { truncationCheck, type FrozenExpectations, type TruncationProvenance } from './eligibility.js';
+import { evaluateSlot, truncationCheck, type FrozenExpectations, type TruncationProvenance } from './eligibility.js';
 import type { StudySemantics } from './manifest.js';
+import {
+  THROTTLE_STOPS, attemptPlan, modelPacing, modelPolicy, outcomeOfClass, parseAttemptId, protocolNext, throttleProblems,
+  type AttemptClassification, type AttemptPolicyP3, type AttemptRunView,
+} from './attempt-policy.js';
+import { TAGGED_SLOT_ID } from './schedule.js';
+import { traceProblems, type AttemptOutcome, type PlannedAttempt } from './throttle-policy.js';
 
 /**
  * Orchestration of paid experiment slots against the disposable API. It is
@@ -37,8 +43,24 @@ export interface SlotRun {
    * manifest: a truncated confirmatory slot stops the schedule, as in v3.
    */
   semantics?: StudySemantics;
-  /** The frozen provenance a truncated slot must still show to continue (v4 only). */
+  /** The frozen provenance a truncated slot must still show to continue (v4 and v5). */
   expectations?: FrozenExpectations;
+  /**
+   * Version 5 only: this run is one predeclared attempt of a trial (`slot`
+   * then carries the attempt ID). Set by `runAttemptPool`, never by hand.
+   */
+  attempt?: AttemptContext;
+}
+
+/** Where an attempt sits in the frozen v5 plan. */
+export interface AttemptContext {
+  study_id: string;
+  trial_id: string;
+  attempt: number;
+  plan_index: number;
+  /** The predeclared wait before it was armed (applied by the runner). */
+  delay_before_ms: number;
+  policy: AttemptPolicyP3;
 }
 
 interface SlotLookup {
@@ -75,6 +97,12 @@ export interface RunnerDeps {
    * Absent: the runner dispatches with POST /experiments/runs.
    */
   viaUi?: { prompt: (message: string) => void; clickTimeoutMs: number };
+  /**
+   * The predeclared v5 pacing waits (30 s, 60 s, 180 s); defaults to `sleep`,
+   * then a real timer. Separate from the poll interval so tests can record
+   * exactly the pacing.
+   */
+  pacingSleep?: (ms: number) => Promise<void>;
 }
 
 const wait = (deps: RunnerDeps, ms: number) => (deps.sleep ?? ((t) => new Promise((r) => setTimeout(r, t))))(ms);
@@ -160,6 +188,8 @@ export type SlotResult = {
    * (known cost, frozen fingerprint, full provenance), else the problems.
    */
   truncation?: { continue: boolean; problems: string[]; provenance: TruncationProvenance | null };
+  /** Version 5 attempts only: what the protocol makes of the settled attempt (`classifyAttempt`). */
+  p3?: AttemptClassification;
 };
 
 /**
@@ -219,6 +249,13 @@ export async function runSlot(deps: RunnerDeps, run: SlotRun): Promise<SlotResul
       // 20, never part of an experiment's with/without comparison.
       purpose: run.skillIds === null ? 'trace-evidence' : 'comparison',
       expected_non_skill_fingerprint: run.expectedNonSkillFingerprint,
+      // Version 5: the attempt's place in the frozen plan, for the restart and report cross-checks.
+      ...(run.attempt ? {
+        p3_attempt: {
+          study_id: run.attempt.study_id, trial_id: run.attempt.trial_id, attempt: run.attempt.attempt,
+          plan_index: run.attempt.plan_index, delay_before_ms: run.attempt.delay_before_ms,
+        },
+      } : {}),
     },
   });
 
@@ -272,6 +309,7 @@ async function dispatchAndFollow(deps: RunnerDeps, run: SlotRun, base: LedgerBas
       const fingerprintMismatch = settled.state !== 'refused' &&
         run.expectedNonSkillFingerprint !== null && fingerprint !== run.expectedNonSkillFingerprint;
       const truncation = truncationOutcome(run, settled, current!, fingerprintMismatch);
+      const p3 = run.attempt ? classifyAttempt(run, current!) : null;
       deps.ledger.append({
         ...base, state: settled.state, run_id: runId, cost_usd: settled.cost,
         detail: {
@@ -282,9 +320,11 @@ async function dispatchAndFollow(deps: RunnerDeps, run: SlotRun, base: LedgerBas
             truncation_provenance: truncation.provenance,
             truncation_problems: truncation.problems,
           } : {}),
+          ...(p3 ? { p3 } : {}),
         },
       });
       return {
+        ...(p3 ? { p3 } : {}),
         ...(truncation ? { truncation } : {}),
         fingerprintMismatch,
         state: settled.state,
@@ -302,9 +342,9 @@ async function dispatchAndFollow(deps: RunnerDeps, run: SlotRun, base: LedgerBas
 
 type LedgerBase = { slot_id: string; phase: SlotRecord['phase']; reservation_usd: number; stack_id?: string };
 
-/** Whether the frozen manifest lets a truncated confirmatory slot continue the schedule (version 4 only). */
+/** Whether the frozen manifest lets a truncated confirmatory slot continue the schedule (versions 4 and 5). */
 const continuesOnTruncation = (run: SlotRun) =>
-  run.slot.phase === 'confirmatory' && run.semantics?.version === 4 && run.semantics.truncation === 'continue-impute';
+  run.slot.phase === 'confirmatory' && (run.semantics?.version === 4 || run.semantics?.version === 5) && run.semantics.truncation === 'continue-impute';
 
 /**
  * A settled confirmatory slot whose single attempt was truncated, under a
@@ -462,6 +502,8 @@ export async function runSchedule(
 ): Promise<{ results: Array<SlotResult & { slot_id: string }>; stopped: string | null }> {
   const unresolved = deps.ledger.unresolved();
   if (unresolved.length > 0) throw new Error(`Reconcile first: ${unresolved.map((s) => s.slot_id).join(', ')} are not terminal`);
+  // A version 5 trial is never dispatched under its own ID: only its attempts are, by `runAttemptPool`.
+  if (runs.some((run) => run.semantics?.version === 5 || run.attempt)) throw new Error('A version 5 schedule runs only through runAttemptPool');
   const results: Array<SlotResult & { slot_id: string }> = [];
   let unknownCost = 0;
   let infra = 0;
@@ -501,4 +543,198 @@ export async function runSchedule(
     if (infra >= rules.maxConsecutiveInfraFailures) return { results, stopped: `${infra} consecutive infrastructure failures` };
   }
   return { results, stopped: null };
+}
+
+// ---------------------------------------------------------------------------
+// Study v5: the P3 attempt pool
+// ---------------------------------------------------------------------------
+
+/**
+ * What the v5 protocol makes of one settled attempt, from the stack's
+ * structured record only:
+ * - `throttled`: a strictly classified upstream pre-generation 429
+ *   (`throttleProblems`) that reproduced the frozen non-Skill fingerprint;
+ * - `truncated`: a truncation the frozen v4 rule lets continue (imputed);
+ * - `observed`: completed, known cost, frozen fingerprint, and strict
+ *   single-generation provenance on the frozen provider and served model;
+ * - `failed`: everything else, with the reasons. It stops the study.
+ */
+export function classifyAttempt(run: SlotRun, current: SlotLookup['runs'][number]): AttemptClassification {
+  if (!run.attempt) throw new Error(`Slot ${run.slot.slot_id} is not a v5 attempt`);
+  const settled = terminalOf(current);
+  if (!settled || current.status === 'running') return { class: 'failed', reasons: ['the attempt did not settle'] };
+  if (settled.state === 'refused') return { class: 'failed', reasons: [`refused by the stack: ${current.experiment?.refusal_reason ?? 'no reason'}`] };
+  const fingerprint = current.experiment?.non_skill_fingerprint ?? null;
+  const fingerprintMismatch = run.expectedNonSkillFingerprint === null || fingerprint !== run.expectedNonSkillFingerprint;
+  const reasons: string[] = [];
+  if (fingerprintMismatch) reasons.push('non-Skill fingerprint differs from the frozen one');
+  if (!run.expectations) reasons.push('no frozen provenance expectations');
+  if (settled.state === 'failed') {
+    const throttle = throttleProblems(current as AttemptRunView, run.attempt.policy.throttle_classification, run.expectations ?? null);
+    if (throttle.length === 0 && reasons.length === 0) return { class: 'throttled', reasons: [] };
+    const truncation = truncationOutcome(run, settled, current, fingerprintMismatch);
+    if (truncation?.continue && reasons.length === 0) return { class: 'truncated', reasons: [] };
+    return { class: 'failed', reasons: [...new Set([...reasons, ...(truncation ? truncation.problems : throttle.map((p) => `not a classified 429: ${p}`))])] };
+  }
+  if (settled.cost === null) reasons.push('unknown cost');
+  if (run.expectations) {
+    const eligibility = evaluateSlot(current, run.expectations);
+    if (!eligibility.eligible) reasons.push(...eligibility.reasons);
+  }
+  return reasons.length === 0 ? { class: 'observed', reasons } : { class: 'failed', reasons };
+}
+
+/**
+ * The narrow v5 exception to the consecutive unknown-cost and infrastructure
+ * stops: a classified 429 has unknown cost and is an HTTP error by
+ * construction, so it neither counts toward nor resets them. Every other
+ * attempt counts as before.
+ */
+export const exemptFromUnknownCostStop = (result: Pick<SlotResult, 'p3'>) => result.p3?.class === 'throttled';
+
+export interface AttemptPoolResult {
+  results: Array<SlotResult & { slot_id: string; trial_id: string; attempt: number }>;
+  stopped: string | null;
+  /** Where the protocol stands after this run (`done` when every trial is resolved). */
+  state: ReturnType<typeof protocolNext> | null;
+}
+
+interface HistoryStep {
+  attempt: PlannedAttempt;
+  outcome: AttemptOutcome;
+  delay_before_ms: number;
+}
+
+/**
+ * The recorded attempts of the frozen plan, in ledger order, with the
+ * protocol outcome of each. A restarted runner continues only from a history
+ * the protocol could have produced: no trial ID dispatched on its own, no
+ * attempt outside the plan, each reservation naming its own place in the
+ * plan, and the whole sequence accepted by `traceProblems` (in-progress form).
+ */
+async function attemptHistory(deps: RunnerDeps, studyId: string, trials: SlotRun[], plan: PlannedAttempt[], slotTag: string): Promise<{ steps: HistoryStep[] } | { problem: string }> {
+  const records = deps.ledger.slots();
+  const byId = new Map(plan.map((a) => [a.attempt_id, a]));
+  const trialIds = new Set(trials.map((t) => t.slot.slot_id));
+  const order: string[] = [];
+  for (const event of deps.ledger.events()) if (!order.includes(event.slot_id)) order.push(event.slot_id);
+  const steps: HistoryStep[] = [];
+  for (const id of order) {
+    if (trialIds.has(id)) return { problem: `trial ID ${id} is in the ledger; a v5 trial is dispatched only under its attempt IDs` };
+    const planned = byId.get(id);
+    if (!planned) {
+      if (parseAttemptId(id)?.tag === slotTag || TAGGED_SLOT_ID.exec(id)?.[1] === slotTag) return { problem: `${id} is in the ledger but not in the frozen attempt plan` };
+      continue;
+    }
+    const record = records.get(id)!;
+    const marker = record.events[0]?.detail?.p3_attempt as { trial_id?: unknown; attempt?: unknown; plan_index?: unknown; delay_before_ms?: unknown } | undefined;
+    if (!marker || marker.trial_id !== planned.trial_id || marker.attempt !== planned.attempt || marker.plan_index !== planned.plan_index) {
+      return { problem: `${id}'s reservation does not record its place in the frozen plan` };
+    }
+    const terminal = record.events.find((event) => event.state === record.state);
+    let classification = terminal?.detail?.p3 as AttemptClassification | undefined;
+    if (!classification && terminal?.detail?.reconciled === true && (record.state === 'completed' || record.state === 'failed')) {
+      // Reconciled after a crash: classify again from the stack's durable record, with the frozen inputs.
+      const trial = trials[planned.trial_index]!;
+      let lookup: SlotLookup;
+      try {
+        lookup = await deps.api.get<SlotLookup>(`/experiments/slots/${id}`);
+      } catch (err) {
+        return { problem: `cannot classify the reconciled attempt ${id}: ${(err as Error).message}` };
+      }
+      const found = lookup.runs.length === 1 && lookup.runs[0]!.run_id === record.run_id ? lookup.runs[0]! : null;
+      classification = found
+        ? classifyAttempt({ ...trial, slot: { ...trial.slot, slot_id: id }, attempt: attemptContext(planned, trial, studyId) }, found)
+        : { class: 'failed', reasons: ['the reconciled run cannot be found again'] };
+      deps.log(`${id}: reconciled attempt classified ${classification.class}${classification.reasons.length ? ` (${classification.reasons.join('; ')})` : ''}`);
+    }
+    const c = classification ?? { class: 'failed' as const, reasons: [`${record.state} without a classification`] };
+    steps.push({ attempt: planned, outcome: outcomeOfClass(c.class), delay_before_ms: typeof marker.delay_before_ms === 'number' ? marker.delay_before_ms : Number.NaN });
+  }
+  const policy = trials[0]!.semantics!.attemptPolicy!;
+  const problems = traceProblems(
+    trials.map((t) => t.slot), modelPolicy(policy),
+    steps.map((s) => ({ attempt_id: s.attempt.attempt_id, outcome: s.outcome, delay_before_ms: s.delay_before_ms })),
+    modelPacing(policy), { prefix: true },
+  );
+  return problems.length > 0 ? { problem: problems.join('; ') } : { steps };
+}
+
+function attemptContext(planned: PlannedAttempt, trial: SlotRun, studyId: string): AttemptContext {
+  return {
+    study_id: studyId, trial_id: planned.trial_id, attempt: planned.attempt, plan_index: planned.plan_index,
+    delay_before_ms: planned.delay_before_ms, policy: trial.semantics!.attemptPolicy!,
+  };
+}
+
+/**
+ * Run a frozen version 5 schedule under its P3 attempt pool. `trials` are the
+ * seeded trials in order (each a `SlotRun` carrying the v5 semantics and the
+ * frozen expectations). Attempts are armed in plan order; after a classified
+ * 429 the same trial's next attempt is armed after its predeclared delay;
+ * a trial whose pool is exhausted is left missing and the next trial follows;
+ * the study stops on the outage limit, the attempt cap, and on everything the
+ * confirmatory runner already stops on (any unclassified failure, unknown
+ * cost apart from a classified 429, a refusal, a fingerprint mismatch, a
+ * provenance gap). Each attempt is an ordinary slot: its own ID, its own
+ * reservation on disk before dispatch, never replayed.
+ */
+export async function runAttemptPool(deps: RunnerDeps, study: { id: string }, trials: SlotRun[], rules: StopRules = DEFAULT_STOP_RULES): Promise<AttemptPoolResult> {
+  const unresolved = deps.ledger.unresolved();
+  if (unresolved.length > 0) throw new Error(`Reconcile first: ${unresolved.map((s) => s.slot_id).join(', ')} are not terminal`);
+  const policy = trials[0]?.semantics?.attemptPolicy;
+  if (!policy || trials.some((t) => t.semantics?.version !== 5 || t.semantics.attemptPolicy !== policy || t.slot.phase !== 'confirmatory' || t.attempt)) {
+    throw new Error('runAttemptPool needs the confirmatory trials of one frozen version 5 schedule');
+  }
+  if (trials.some((t) => !t.expectations || t.expectedNonSkillFingerprint === null)) throw new Error('Every v5 trial needs its frozen provenance expectations and non-Skill fingerprint');
+  const slotTag = trials[0]!.semantics!.slotTag!;
+  const plan = attemptPlan(trials.map((t) => t.slot), policy);
+  const model = modelPolicy(policy);
+  const history = await attemptHistory(deps, study.id, trials, plan, slotTag);
+  if ('problem' in history) return { results: [], stopped: `refusing to continue the frozen attempt plan: ${history.problem}`, state: null };
+  const steps = history.steps.map(({ attempt, outcome }) => ({ attempt, outcome }));
+  let state = protocolNext(plan, model, steps);
+  if (state.kind === 'stopped' && !THROTTLE_STOPS.has(state.reason)) {
+    return { results: [], stopped: `confirmatory attempt ${state.attempt_id} was previously incomplete; refusing to continue the frozen schedule`, state };
+  }
+  const pace = deps.pacingSleep ?? deps.sleep ?? ((t: number) => new Promise<void>((r) => setTimeout(r, t)));
+  const results: AttemptPoolResult['results'] = [];
+  let unknownCost = 0;
+  let infra = 0;
+  const stop = (stopped: string | null): AttemptPoolResult => ({ results, stopped, state });
+  while (state.kind === 'next') {
+    const planned = state.attempt;
+    const trial = trials[planned.trial_index]!;
+    if (planned.delay_before_ms > 0) {
+      deps.log(`${planned.attempt_id}: waiting ${planned.delay_before_ms / 1000} s (predeclared, outcome-independent)`);
+      await pace(planned.delay_before_ms);
+    }
+    const run: SlotRun = { ...trial, slot: { ...trial.slot, slot_id: planned.attempt_id }, attempt: attemptContext(planned, trial, study.id) };
+    const result = await runSlot(deps, run);
+    results.push({ ...result, slot_id: planned.attempt_id, trial_id: planned.trial_id, attempt: planned.attempt });
+    const c: AttemptClassification = result.p3 ?? { class: 'failed', reasons: [result.reason ?? result.state] };
+    deps.log(`${planned.attempt_id} (trial ${planned.trial_index + 1}, ${planned.condition}, a${planned.attempt}): ${result.state}, ${c.class}${result.diagnosis ? ` (${result.diagnosis})` : ''}`);
+    if (result.state === 'refused' && result.runId === null && /budget/.test(result.reason ?? '')) return stop(result.reason!);
+    if (result.state === 'refused' && rules.stopOnRefusal) return stop(`guard refusal on ${planned.attempt_id}: ${result.reason}`);
+    if (result.fingerprintMismatch) return stop(`${planned.attempt_id} did not reproduce the frozen non-Skill fingerprint`);
+    steps.push({ attempt: planned, outcome: outcomeOfClass(c.class) });
+    if (!exemptFromUnknownCostStop(result)) {
+      unknownCost = result.costUsd === null ? unknownCost + 1 : 0;
+      infra = result.infraFailure ? infra + 1 : 0;
+    }
+    state = protocolNext(plan, model, steps);
+    if (c.class === 'failed') return stop(`confirmatory attempt ${planned.attempt_id} is incomplete: ${c.reasons.join('; ') || result.state}`);
+    if (unknownCost >= rules.maxConsecutiveUnknownCost) return stop(`${unknownCost} consecutive slots with unknown cost`);
+    if (infra >= rules.maxConsecutiveInfraFailures) return stop(`${infra} consecutive infrastructure failures`);
+    if (c.class === 'throttled' && planned.attempt === policy.attempts_per_trial && state.kind !== 'stopped') {
+      deps.log(`${planned.trial_id}: pool exhausted (${planned.attempt} classified 429s); the trial is missing (bounded) and the next trial follows`);
+    }
+  }
+  if (state.kind === 'stopped') {
+    const why = state.reason === 'throttle_outage'
+      ? `outage stop: ${policy.outage_consecutive_429} consecutive classified 429s (last ${state.attempt_id})`
+      : state.reason === 'attempt_cap' ? `attempt cap: ${policy.max_total_attempts} attempts used` : `${state.reason} at ${state.attempt_id}`;
+    return stop(why);
+  }
+  return stop(null);
 }
