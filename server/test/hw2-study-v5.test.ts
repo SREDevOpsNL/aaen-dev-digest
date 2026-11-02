@@ -45,6 +45,7 @@ import {
   maxStudyAttempts,
   modelPacing,
   modelPolicy,
+  p4Lines,
   p4Result,
   parseAttemptId,
   protocolNext,
@@ -718,6 +719,12 @@ describe('p4Result', () => {
     expect(p4Result({ with: t(4, 4, 0, 1), without: t(5, 0) })).toMatchObject({ worst_case: 'success', claim: 'incomplete', claim_basis: 'none' });
     expect(p4Result({ with: t(5, 4), without: t(5, 1) }, ['protocol: x'])).toMatchObject({ claim: 'incomplete', claim_label: 'incomplete (protocol: x)' });
     expect(() => p4Result({ with: { ...t(5, 4), scheduled: 6 }, without: t(5, 1) })).toThrow(/inconsistent P4 tally/);
+  });
+  it('never prints a conditional bound as a bare "detected"', () => {
+    const lines = p4Lines(p4Result({ with: t(4, 4, 1), without: t(5, 0) }), 'screen').join('\n');
+    expect(lines).toContain('**conditional bound only, not verified**');
+    expect(lines).not.toContain('**detected**');
+    expect(p4Lines(p4Result({ with: t(5, 4), without: t(5, 1) }), 'adjudicated').join('\n')).toContain('**detected**: detected (strict');
   });
 });
 

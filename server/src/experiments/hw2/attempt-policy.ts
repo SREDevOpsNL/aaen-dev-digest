@@ -387,7 +387,8 @@ export function p4Lines(p: P4Result, source: 'screen' | 'adjudicated'): string[]
   return [
     `- Strict (observed plus v4-imputed truncations; every trial must be counted): ${p.strict}.`,
     `- Sensitivity bounds over bounded trials: worst case ${p.worst_case}, best case ${p.best_case}.`,
-    `- Claim${source === 'screen' ? ' (regex screen)' : ''}: **${p.claim}**: ${p.claim_label}.`,
+    // A worst-case success never appears as a bare "detected" (acceptance review, wording).
+    `- Claim${source === 'screen' ? ' (regex screen)' : ''}: **${p.claim_basis === 'conditional_bound' ? 'conditional bound only, not verified' : p.claim}**: ${p.claim_label}.`,
     ...(p.bounds_descriptive ? ['- The bounds are descriptive only: a trial is missing for a reason other than classified 429s (an incomplete trial or an ambiguous adjudicated verdict), or the record is inconsistent.'] : []),
     '- A worst-case success is a conditional bound. It is never a Verified or accepted result.',
     `- Missing per condition: with ${p.balance.missing_with} of ${p.balance.scheduled_with}, without ${p.balance.missing_without} of ${p.balance.scheduled_without}; Fisher two-sided p = ${p.balance.fisher_two_sided_p.toFixed(3)} (reported, not a gate).`,
