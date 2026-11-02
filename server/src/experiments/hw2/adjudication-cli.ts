@@ -46,6 +46,7 @@ import {
   type RevealResult,
 } from './adjudication.js';
 import { studySemantics } from './manifest.js';
+import { p4Lines, type ProtocolSummary } from './attempt-policy.js';
 import type { SlotRow, SlotRunData } from './report.js';
 import type { ExpectedRule } from './rules.js';
 
@@ -63,8 +64,10 @@ export interface AdjudicationInput {
   manifest_version?: number;
   study?: unknown;
   screen_rules?: Record<string, ExpectedRule>;
-  /** Version 5 only: every trial's attempt-pool entry (label, attempts, scoring attempt), for the private mapping. */
+  /** Version 5 only: every trial's attempt-pool entry (label, attempts and their classes, scoring attempt), for the private mapping. */
   trials?: Record<string, P3TrialEntry>;
+  /** Version 5 only: where each experiment's protocol stands (the report's `protocol`). */
+  protocol?: Record<string, ProtocolSummary>;
 }
 
 interface Digests {
@@ -198,10 +201,7 @@ export function renderAdjudicationReport(rec: { digests: Digests; seals: SealEve
       '| --- | --- | --- | --- | --- | --- | --- |',
       ...(['with', 'without'] as const).map((c) => `| ${c} | ${p.tallies[c].scheduled} | ${p.tallies[c].observed} | ${p.tallies[c].detected} | ${p.tallies[c].imputed} | ${p.tallies[c].bounded} | ${p.tallies[c].incomplete} |`),
       '',
-      `- Observed (strict): ${p.strict}. Worst case: ${p.worst_case}. Best case: ${p.best_case}.`,
-      `- Claim: **${p.claim}**: ${p.claim_label}.`,
-      '- A worst-case success is a conditional bound. It is never a Verified or accepted result.',
-      `- Missing: with ${p.balance.missing_with} of ${p.balance.scheduled_with}, without ${p.balance.missing_without} of ${p.balance.scheduled_without}; Fisher two-sided p = ${p.balance.fisher_two_sided_p.toFixed(3)}.`,
+      ...p4Lines(p, 'adjudicated'),
     );
   }
   lines.push('', '| Case | Slot | Condition | Final | Per adjudicator |', '| --- | --- | --- | --- | --- |');
@@ -251,10 +251,10 @@ export async function main(argv: string[], now: () => Date = () => new Date(), l
         // Only the design's experiments, so a version 4 packet carries no #18 text.
         const only = (texts: Record<string, string>) => Object.fromEntries(input.design.experiments.map((e) => [e, texts[e]!]));
         // Version 5: the trials' attempt pools go to the private mapping; the reveal applies P4.
-        if (semantics.attemptPolicy && !input.trials) throw new Error('a version 5 adjudication input needs every trial\'s attempt-pool entry');
+        if (semantics.attemptPolicy && (!input.trials || !input.protocol)) throw new Error('a version 5 adjudication input needs every trial\'s attempt-pool entry and the protocol state');
         prepared = preparePacketV2({
           ...args, rules: only(TECHNICAL_RULES), groundTruth: only(FIXTURE_GROUND_TRUTH), screenRules: input.screen_rules,
-          ...(semantics.attemptPolicy ? { trials: input.trials! } : {}),
+          ...(semantics.attemptPolicy ? { p3: { trials: input.trials!, protocol: input.protocol!, attemptsPerTrial: semantics.attemptPolicy.attempts_per_trial } } : {}),
         });
       } else {
         prepared = preparePacket(args);

@@ -622,8 +622,9 @@ export async function authorize(
     // Version 5: the capability must cover every attempt the pool may use, each at its full reservation.
     if (frozen.version === 5) {
       const needed = attemptReservationTotal(frozen);
-      if (!(Number(need(flags, 'budget')) + 1e-12 >= needed)) {
-        throw new Error(`--budget $${need(flags, 'budget')} does not cover ${maxStudyAttempts(frozen.schedule.slots.length, frozen.study.attempt_policy)} attempts × $${frozen.per_slot_reservation_usd} = $${needed.toFixed(8)}; nothing was authorized`);
+      // Exactly M × the reservation: enough for every attempt, and no headroom beyond the frozen plan.
+      if (!(Math.abs(Number(need(flags, 'budget')) - needed) <= 1e-9)) {
+        throw new Error(`--budget $${need(flags, 'budget')} must equal ${maxStudyAttempts(frozen.schedule.slots.length, frozen.study.attempt_policy)} attempts × $${frozen.per_slot_reservation_usd} = $${needed.toFixed(8)}; nothing was authorized`);
       }
     }
   }
@@ -1038,9 +1039,10 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
       const ledger = new Ledger(experimentsRoot());
       const { prId } = await lookupIds(stack.api);
       const runs = new Map<string, SlotRunData | null>();
-      // Version 5: every predeclared attempt ID is looked up; trials are never dispatched under their own ID.
+      // Version 5: every predeclared attempt ID is looked up, and every trial ID too: a trial is
+      // never dispatched under its own ID, so a run there is listed and blocks the claim.
       const lookups = frozen.version === 5
-        ? frozen.schedule.attempts.map((a) => ({ slot_id: a.attempt_id, experiment: frozen.schedule.slots.find((t) => t.slot_id === a.trial_id)!.experiment }))
+        ? [...frozen.schedule.attempts.map((a) => ({ slot_id: a.attempt_id, experiment: frozen.schedule.slots.find((t) => t.slot_id === a.trial_id)!.experiment })), ...frozen.schedule.slots]
         : frozen.schedule.slots;
       for (const slot of lookups) {
         const lookup = await stack.api.get<{
@@ -1119,7 +1121,8 @@ export async function main(argv: string[], log: (m: string) => void = console.lo
             // Version 5: one row per trial (its scoring attempt's evidence), the attempt pools private to the mapping.
             design, rows: p3.trial_rows, runs: Object.fromEntries(p3.trial_runs), skill_names: frozen.skills.map((s) => s.name),
             manifest_version: 5, study: (frozen as ManifestV5).study, screen_rules: frozen.rules,
-            trials: Object.fromEntries(p3.trials.map((t) => [t.trial_id, { label: t.label, label_reason: t.label_reason, scoring_attempt_id: t.scoring_attempt_id, attempt_ids: t.attempts.map((a) => a.attempt_id) }])),
+            trials: Object.fromEntries(p3.trials.map((t) => [t.trial_id, { label: t.label, label_reason: t.label_reason, scoring_attempt_id: t.scoring_attempt_id, attempt_ids: t.attempts.map((a) => a.attempt_id), attempt_classes: t.attempts.map((a) => a.class) }])),
+            protocol: Object.fromEntries(p3.p3.map((x) => [x.experiment, x.protocol])),
             attempts: p3.trials.map((t) => ({ trial_id: t.trial_id, position: t.position, condition: t.condition, label: t.label, attempts: t.attempts })),
             p4: p3.p3,
           }

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { EXPERIMENT_FIXTURES } from '../../db/seed-fixtures.js';
 import { imputedVerdict, type ScheduledSlot, type SlotRow, type SlotRunData } from './report.js';
 import { detection, experimentOutcome, type ExpectedRule } from './rules.js';
-import { p4Result, type P4Result, type P4Tally, type TrialLabel } from './attempt-policy.js';
+import { p4Result, trialLabel, type AttemptClass, type P4Result, type P4Tally, type ProtocolSummary, type TrialLabel } from './attempt-policy.js';
 
 /**
  * Sealed, condition-blinded technical adjudication (PROSPECTIVE-STUDY.md),
@@ -72,6 +72,45 @@ export interface P3TrialEntry {
   label_reason: string;
   scoring_attempt_id: string | null;
   attempt_ids: string[];
+  /** The report's class of each attempt, in attempt order: the label is re-derived from these. */
+  attempt_classes: AttemptClass[];
+}
+
+/** Study v5: what `preparePacketV2` needs to re-derive every trial's label. */
+export interface P3PrepareInput {
+  trials: Record<string, P3TrialEntry>;
+  /** Where each experiment's protocol stands, as the report recorded it. */
+  protocol: Record<string, ProtocolSummary>;
+  attemptsPerTrial: number;
+}
+
+/**
+ * Why the v5 trial entries do not support their labels (empty when they do).
+ * Every label is re-derived from the entry's attempt classes and the
+ * protocol state with the report's own rule (`trialLabel`), so a `bounded`
+ * label, the one that can support a claim, is never taken on trust.
+ */
+export function trialEntryProblems(rows: readonly SlotRow[], p3: P3PrepareInput): string[] {
+  const problems: string[] = [];
+  for (const row of rows) {
+    const trial = p3.trials[row.slot_id];
+    if (!trial) { problems.push(`trial ${row.slot_id} has no attempt-pool entry`); continue; }
+    const protocol = p3.protocol[row.experiment];
+    if (!protocol) { problems.push(`experiment ${row.experiment} has no protocol state`); continue; }
+    const planIds = Array.from({ length: p3.attemptsPerTrial }, (_, i) => `${row.slot_id}-a${i + 1}`);
+    if (!Array.isArray(trial.attempt_classes) || trial.attempt_classes.length !== trial.attempt_ids.length ||
+        trial.attempt_ids.some((id, i) => id !== planIds[i])) {
+      problems.push(`trial ${row.slot_id}: its attempts are not a prefix of its planned attempt IDs with one class each`);
+      continue;
+    }
+    const derived = trialLabel({ classes: trial.attempt_classes, attemptsPerTrial: p3.attemptsPerTrial, planIds, protocol });
+    if (derived.label !== trial.label) problems.push(`trial ${row.slot_id} is labelled ${trial.label}; its attempts give ${derived.label}`);
+    const scoring = derived.scoring === null ? null : planIds[derived.scoring - 1]!;
+    if (scoring !== trial.scoring_attempt_id) problems.push(`trial ${row.slot_id}: scoring attempt ${trial.scoring_attempt_id ?? 'none'}, its attempts give ${scoring ?? 'none'}`);
+    if ((trial.label === 'observed') !== row.counted) problems.push(`trial ${row.slot_id} is labelled ${trial.label} but is${row.counted ? '' : ' not'} counted`);
+    if ((trial.label === 'imputed') !== Boolean(row.imputed)) problems.push(`trial ${row.slot_id} is labelled ${trial.label} but is${row.imputed ? '' : ' not'} imputed`);
+  }
+  return problems;
 }
 
 export interface BlindingWarning {
@@ -111,6 +150,8 @@ export interface CaseMapping {
   residual?: ResidualCompromise[];
   /** Study v5 only: the reveal applies P4 to the adjudicated verdicts. */
   attempt_policy?: 'p3';
+  /** Study v5 only: where each experiment's protocol stood when the input was written. */
+  p3_protocol?: Record<string, ProtocolSummary>;
 }
 
 /** Version 2: the unredacted finding text, kept in private/originals.json (mode 0600). */
@@ -325,23 +366,19 @@ export function preparePacketV2(input: {
   /** Target Skill names; each must be an r1 term. */
   skillNames: string[];
   newCaseId?: () => string;
-  /** Study v5: every scheduled trial's attempt-pool entry, kept in the private mapping only. */
-  trials?: Record<string, P3TrialEntry>;
+  /** Study v5: every scheduled trial's attempt-pool entry (kept in the private mapping only), re-checked here. */
+  p3?: P3PrepareInput;
 }): { packet: BlindPacket; packet_sha256: string; mapping: CaseMapping; mapping_sha256: string; originals: Originals; originals_sha256: string } {
   const problems = designProblems(input.design, input.rows);
   if (problems.length > 0) throw new Error(`input does not match the pre-registered schedule: ${problems.join('; ')}`);
   const unknown = input.skillNames.filter((name) => !REDACTION_TERMS_R1.includes(name.toLowerCase()));
   if (unknown.length > 0) throw new Error(`Skill name(s) not covered by redaction r1: ${unknown.join(', ')}`);
   for (const experiment of input.design.experiments) if (!input.screenRules[experiment]) throw new Error(`no frozen screening rule for experiment ${experiment}`);
-  if (input.trials) {
-    for (const row of input.rows) {
-      const trial = input.trials[row.slot_id];
-      if (!trial) throw new Error(`trial ${row.slot_id} has no attempt-pool entry`);
-      if ((trial.label === 'observed') !== row.counted) throw new Error(`trial ${row.slot_id} is labelled ${trial.label} but is${row.counted ? '' : ' not'} counted`);
-      if ((trial.label === 'imputed') !== Boolean(row.imputed)) throw new Error(`trial ${row.slot_id} is labelled ${trial.label} but is${row.imputed ? '' : ' not'} imputed`);
-    }
+  if (input.p3) {
+    const problems = trialEntryProblems(input.rows, input.p3);
+    if (problems.length > 0) throw new Error(`the attempt-pool entries do not support their labels: ${problems.join('; ')}`);
   }
-  const p3Of = (slotId: string) => (input.trials ? { p3: input.trials[slotId]! } : {});
+  const p3Of = (slotId: string) => (input.p3 ? { p3: input.p3.trials[slotId]! } : {});
   const newCaseId = input.newCaseId ?? (() => `case-${randomBytes(6).toString('hex')}`);
   const used = new Set<string>();
   const cases: BlindCase[] = [];
@@ -407,7 +444,7 @@ export function preparePacketV2(input: {
     redaction: { method: 'r1', terms_sha256: REDACTION_TERMS_R1_SHA256 },
     originals_sha256,
     residual,
-    ...(input.trials ? { attempt_policy: 'p3' as const } : {}),
+    ...(input.p3 ? { attempt_policy: 'p3' as const, p3_protocol: input.p3.protocol } : {}),
   };
   return { packet, packet_sha256, mapping, mapping_sha256: digest(mapping), originals: record, originals_sha256 };
 }

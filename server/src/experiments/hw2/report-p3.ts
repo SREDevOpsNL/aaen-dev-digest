@@ -13,11 +13,14 @@
  * sealed adjudication reveal applies the same P4 rule to adjudicated verdicts.
  */
 import {
-  THROTTLE_STOPS,
   attemptPlan,
+  parseAttemptId,
+  trialLabel,
+  type ProtocolSummary,
   modelPacing,
   modelPolicy,
   outcomeOfClass,
+  p4Lines,
   p4Result,
   protocolNext,
   throttleProblems,
@@ -33,7 +36,16 @@ import type { SlotRecord } from './ledger.js';
 import type { StudySemantics } from './manifest.js';
 import { buildReport, renderReport, type ExpectedExecution, type ExperimentSummary, type ScheduledSlot, type SlotRow, type SlotRunData } from './report.js';
 import type { ExpectedRule } from './rules.js';
-import { parseSlotId, type Slot } from './schedule.js';
+import { TAGGED_SLOT_ID, parseSlotId, type Slot } from './schedule.js';
+
+/**
+ * How much shorter than declared a measured pacing gap may look before it
+ * counts as a deviation. The ledger stamps wall-clock UTC, and on the WSL2
+ * host the wall clock jumps back about 6.4 s every few seconds (server
+ * LEARNINGS, 2026-10-20), so a tighter bound would flag a correct wait. A
+ * skipped wait (0 s against 30, 60 or 180 s) is always caught.
+ */
+export const PACING_TOLERANCE_MS = 10_000;
 import { traceProblems } from './throttle-policy.js';
 
 export interface AttemptRow {
@@ -48,6 +60,8 @@ export interface AttemptRow {
   provider_started_at: string | null;
   /** The predeclared wait the runner recorded before arming it. */
   delay_before_ms: number | null;
+  /** The measured gap: this attempt's armed time minus the previous attempt's finished time (null for the first). */
+  gap_ms: number | null;
   state: string;
   run_id: string | null;
   cost_usd: number | null;
@@ -79,7 +93,9 @@ export interface P3Summary {
   attempts_used: number;
   max_attempts: number;
   /** Where the protocol stands: `done`, a stop (with its reason), or `in progress` (an attempt is still owed). */
-  protocol: { state: 'done' | 'stopped' | 'in_progress'; reason: string | null; attempt_id: string | null };
+  protocol: ProtocolSummary;
+  /** IDs with the study's tag outside the frozen plan (a trial ID, an `-a4`, …): listed, and they block the claim. */
+  unplanned: string[];
   throttles: Array<{ attempt_id: string; trial_id: string; position: number; condition: 'with' | 'without'; attempt: number }>;
   exhausted_pools: string[];
   /** Regex screen (non-authoritative) under P4. */
@@ -124,11 +140,22 @@ export function buildP3Report(input: {
   const trials = input.trials.map(asSlot);
   const plan = attemptPlan(trials, policy);
   const model = modelPolicy(policy);
-  const recorded = plan.filter((a) => input.ledger.has(a.attempt_id) || input.runs.get(a.attempt_id));
+  // Every recorded attempt, in the order it was dispatched (its first ledger event), so an
+  // out-of-order dispatch reaches the validator as it happened (F2).
+  const ledgerOrder = [...input.ledger.keys()];
+  const dispatchIndex = (id: string) => { const i = ledgerOrder.indexOf(id); return i === -1 ? Number.MAX_SAFE_INTEGER : i; };
+  const recorded = plan
+    .filter((a) => input.ledger.has(a.attempt_id) || input.runs.get(a.attempt_id))
+    .sort((a, b) => dispatchIndex(a.attempt_id) - dispatchIndex(b.attempt_id) || a.plan_index - b.plan_index);
+  // Never suppress an attempt (F1): any ID carrying the study's tag that is not in the plan.
+  const planned = new Set(plan.map((a) => a.attempt_id));
+  const tag = input.semantics.slotTag;
+  const unplanned = [...new Set([...input.ledger.keys(), ...[...input.runs.entries()].filter(([, run]) => run).map(([id]) => id)])]
+    .filter((id) => !planned.has(id) && (parseAttemptId(id)?.tag === tag || TAGGED_SLOT_ID.exec(id)?.[1] === tag));
   const attemptSchedule: ScheduledSlot[] = recorded.map((a) => ({ slot_id: a.attempt_id, experiment: trials[a.trial_index]!.experiment, condition: a.condition }));
   const base = buildReport({ ...input, schedule: attemptSchedule });
   const rowOf = new Map(base.rows.map((r) => [r.slot_id, r]));
-  const inconsistencies: string[] = [];
+  const inconsistencies: string[] = unplanned.map((id) => `${id} carries the study tag but is not in the frozen attempt plan (${input.ledger.get(id)?.state ?? 'on the stack only'})`);
 
   const attemptRows = new Map<string, AttemptRow>();
   for (const planned of recorded) {
@@ -174,6 +201,7 @@ export function buildP3Report(input: {
       finished_at: record && ['completed', 'failed', 'refused', 'ambiguous'].includes(record.state) ? eventAt(record, [record.state]) : null,
       provider_started_at: typeof started === 'string' ? started : null,
       delay_before_ms: typeof marker?.delay_before_ms === 'number' ? marker.delay_before_ms : null,
+      gap_ms: null,
       state: record?.state ?? row.state,
       run_id: row.run_id,
       cost_usd: row.cost_usd,
@@ -183,6 +211,24 @@ export function buildP3Report(input: {
     });
   }
 
+  // Real pacing (F3): the runner waits between the previous attempt's terminal record and
+  // the next attempt's reservation, so that gap, from the UTC times, must cover the plan's delay.
+  recorded.forEach((a, i) => {
+    const row = attemptRows.get(a.attempt_id)!;
+    if (i === 0 || a.delay_before_ms === 0) return;
+    const previous = attemptRows.get(recorded[i - 1]!.attempt_id)!;
+    const armed = row.armed_at ? Date.parse(row.armed_at) : Number.NaN;
+    const finished = previous.finished_at ? Date.parse(previous.finished_at) : Number.NaN;
+    if (!Number.isFinite(armed) || !Number.isFinite(finished)) {
+      inconsistencies.push(`pacing: the gap before ${a.attempt_id} cannot be measured from the recorded times`);
+      return;
+    }
+    row.gap_ms = armed - finished;
+    if (row.gap_ms < a.delay_before_ms - PACING_TOLERANCE_MS) {
+      inconsistencies.push(`pacing: ${a.attempt_id} was armed ${row.gap_ms} ms after ${previous.attempt_id} finished; the plan declares ${a.delay_before_ms} ms`);
+    }
+  });
+
   // The recorded sequence against the protocol: each step, then where it stands.
   const trace = recorded.map((a) => ({ attempt_id: a.attempt_id, outcome: outcomeOfClass(attemptRows.get(a.attempt_id)!.class), delay_before_ms: attemptRows.get(a.attempt_id)!.delay_before_ms ?? Number.NaN }));
   const stepProblems = traceProblems(trials, model, trace, modelPacing(policy), { prefix: true });
@@ -190,42 +236,21 @@ export function buildP3Report(input: {
   const state: ProtocolState | null = stepProblems.length === 0
     ? protocolNext(plan, model, recorded.map((a, i) => ({ attempt: a, outcome: trace[i]!.outcome })))
     : null;
-  const throttleStop = state?.kind === 'stopped' && THROTTLE_STOPS.has(state.reason);
+  const protocol: ProtocolSummary = !state
+    ? { state: 'in_progress', reason: 'the recorded attempts do not follow the protocol', attempt_id: null }
+    : state.kind === 'next' ? { state: 'in_progress', reason: `${state.attempt.attempt_id} is still owed`, attempt_id: state.attempt.attempt_id }
+      : state.kind === 'stopped' ? { state: 'stopped', reason: state.reason, attempt_id: state.attempt_id } : { state: 'done', reason: null, attempt_id: null };
 
   const trialRows: TrialRow[] = trials.map((slot, index) => {
+    const planIds = plan.filter((a) => a.trial_index === index).map((a) => a.attempt_id);
     const attempts = plan.filter((a) => a.trial_index === index).map((a) => attemptRows.get(a.attempt_id)).filter((a): a is AttemptRow => a !== undefined);
-    const scoring = attempts.find((a) => a.class !== 'throttled') ?? null;
-    const pool_exhausted = attempts.length === policy.attempts_per_trial && attempts.every((a) => a.class === 'throttled');
-    let label: TrialLabel;
-    let reason: string;
-    let detected: boolean | null = null;
-    if (scoring?.class === 'observed') {
-      label = 'observed';
-      reason = scoring.attempt === 1 ? 'observed on a1' : `observed on a${scoring.attempt} after ${scoring.attempt - 1} classified 429(s)`;
-      detected = rowOf.get(scoring.attempt_id)!.detected;
-    } else if (scoring?.class === 'truncated') {
-      label = 'imputed';
-      reason = `truncated on a${scoring.attempt}; imputed against the hypothesis, never re-attempted`;
-      detected = slot.condition === 'without';
-    } else if (scoring) {
-      label = 'incomplete';
-      reason = `a${scoring.attempt} failed: ${scoring.reasons.join('; ') || scoring.state}`;
-    } else if (pool_exhausted) {
-      label = 'bounded';
-      reason = `pool exhausted: ${attempts.length} classified 429s`;
-    } else if (attempts.length > 0 && throttleStop && state?.kind === 'stopped' && attempts.some((a) => a.attempt_id === state.attempt_id)) {
-      label = 'bounded';
-      reason = `${attempts.length} classified 429(s), then the ${state.reason === 'attempt_cap' ? 'attempt cap' : 'outage stop'}`;
-    } else if (attempts.length === 0 && throttleStop) {
-      label = 'bounded';
-      reason = `not dispatched: the study stopped on ${state?.kind === 'stopped' ? state.reason : 'a 429 stop'}`;
-    } else {
-      label = 'incomplete';
-      reason = attempts.length > 0 ? `${attempts.length} classified 429(s) and an attempt still owed` : state?.kind === 'stopped' ? `not dispatched: the study stopped on ${state.reason}` : 'not dispatched';
-    }
+    const derived = trialLabel({ classes: attempts.map((a) => a.class), attemptsPerTrial: policy.attempts_per_trial, planIds, protocol });
+    const scoring = derived.scoring === null ? null : attempts[derived.scoring - 1]!;
+    const detected = derived.label === 'observed' ? rowOf.get(scoring!.attempt_id)!.detected : derived.label === 'imputed' ? slot.condition === 'without' : null;
+    const reason = derived.label === 'incomplete' && scoring ? `${derived.reason}: ${scoring.reasons.join('; ') || scoring.state}` : derived.reason;
     return {
       position: index + 1, trial_id: slot.slot_id, experiment: slot.experiment, condition: slot.condition,
-      attempts, scoring_attempt_id: scoring?.attempt_id ?? null, label, label_reason: reason, detected, pool_exhausted,
+      attempts, scoring_attempt_id: scoring?.attempt_id ?? null, label: derived.label, label_reason: reason, detected, pool_exhausted: derived.pool_exhausted,
     };
   });
 
@@ -243,10 +268,8 @@ export function buildP3Report(input: {
       experiment,
       attempts_used: attempts.length,
       max_attempts: Math.min(policy.max_total_attempts, trials.length * policy.attempts_per_trial),
-      protocol: !state
-        ? { state: 'in_progress', reason: 'the recorded attempts do not follow the protocol', attempt_id: null }
-        : state.kind === 'next' ? { state: 'in_progress', reason: `${state.attempt.attempt_id} is still owed`, attempt_id: state.attempt.attempt_id }
-          : state.kind === 'stopped' ? { state: 'stopped', reason: state.reason, attempt_id: state.attempt_id } : { state: 'done', reason: null, attempt_id: null },
+      protocol,
+      unplanned,
       throttles: attempts.filter(({ a }) => a.class === 'throttled').map(({ a, t }) => ({ attempt_id: a.attempt_id, trial_id: t.trial_id, position: t.position, condition: t.condition, attempt: a.attempt })),
       exhausted_pools: mine.filter((t) => t.pool_exhausted).map((t) => t.trial_id),
       p4: p4Result({ with: tally('with'), without: tally('without') }, blockers),
@@ -294,7 +317,7 @@ export function renderP3Report(report: P3Report, semantics: StudySemantics): str
       '| --- | --- | --- | --- | --- | --- | --- |',
       ...report.trials.filter((t) => t.experiment === s.experiment).map((t) => `| ${[
         t.position, t.trial_id, t.condition, t.label, t.label_reason, t.scoring_attempt_id ?? '—',
-        t.attempts.map((a) => `${a.attempt_id}: ${a.class}${a.reasons.length ? ` (${a.reasons.join('; ')})` : ''}; ${time(a.armed_at)} → ${time(a.submitted_at)} → ${time(a.finished_at)}`).join('<br>') || '—',
+        t.attempts.map((a) => `${a.attempt_id}: ${a.class}${a.reasons.length ? ` (${a.reasons.join('; ')})` : ''}; ${time(a.armed_at)} → ${time(a.submitted_at)} → ${time(a.finished_at)}${a.gap_ms !== null ? `; gap ${a.gap_ms / 1000} s (plan ${(a.delay_before_ms ?? 0) / 1000} s)` : ''}`).join('<br>') || '—',
       ].map((v) => cell(String(v))).join(' | ')} |`),
       '',
       '### P4 (regex screen, non-authoritative; the sealed adjudication reveal applies the same rule to adjudicated verdicts)',
@@ -306,17 +329,14 @@ export function renderP3Report(report: P3Report, semantics: StudySemantics): str
         return `| ${c} | ${t.scheduled} | ${t.observed} | ${t.detected} | ${t.imputed} | ${t.bounded} | ${t.incomplete} |`;
       }),
       '',
-      `- Observed (strict, counted trials only): ${s.p4.strict}.`,
-      `- Sensitivity bounds over bounded trials: worst case ${s.p4.worst_case}, best case ${s.p4.best_case}.`,
-      `- Claim: **${s.p4.claim}**: ${s.p4.claim_label}.`,
-      '- A worst-case success is a conditional bound. It is never a Verified or accepted result.',
+      ...p4Lines(s.p4, 'screen'),
       '',
       '### Missingness',
       '',
       `- Classified 429s: ${s.throttles.length}${s.throttles.length ? `: ${s.throttles.map((x) => `${x.attempt_id} (position ${x.position}, ${x.condition}, a${x.attempt})`).join('; ')}` : ''}.`,
       `- Exhausted pools: ${s.exhausted_pools.join(', ') || 'none'}.`,
       `- Outage stop: ${s.protocol.state === 'stopped' && s.protocol.reason === 'throttle_outage' ? `yes, at ${s.protocol.attempt_id}` : 'no'}.`,
-      `- Missing per condition: with ${s.p4.balance.missing_with} of ${s.p4.balance.scheduled_with}, without ${s.p4.balance.missing_without} of ${s.p4.balance.scheduled_without}; Fisher two-sided p = ${s.p4.balance.fisher_two_sided_p.toFixed(3)} (reported, not a gate).`,
+      `- Attempts outside the frozen plan: ${s.unplanned.join(', ') || 'none'}.`,
       `- Inconsistencies: ${s.inconsistencies.join('; ') || 'none'}.`,
       '',
     );
