@@ -253,7 +253,8 @@ key-usage logs at export. Its sha256 is
 `sha256sum -c` passes.
 
 The committed files here are byte-identical copies of their private
-originals; logs are renamed `*-log.txt`. The dump, traces and raw responses
+originals, except that `runner-report.md` has its trailing blank line removed
+(private `report.md` sha256 `0113d7385b664115…`); logs are renamed `*-log.txt`. The dump, traces and raw responses
 stay private.
 
 ## State afterwards

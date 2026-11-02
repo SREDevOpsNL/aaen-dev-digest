@@ -64,4 +64,3 @@
 - Outage stop: yes, at c-v5-17-without-2-a3.
 - Attempts outside the frozen plan: none.
 - Inconsistencies: pacing: c-v5-17-without-5-a3 was armed 164598 ms after c-v5-17-without-5-a2 finished; the plan declares 180000 ms; pacing: c-v5-17-without-3-a3 was armed 167077 ms after c-v5-17-without-3-a2 finished; the plan declares 180000 ms; pacing: c-v5-17-with-3-a3 was armed 166999 ms after c-v5-17-with-3-a2 finished; the plan declares 180000 ms; pacing: c-v5-17-without-4-a3 was armed 167158 ms after c-v5-17-without-4-a2 finished; the plan declares 180000 ms; pacing: c-v5-17-without-2-a3 was armed 164493 ms after c-v5-17-without-2-a2 finished; the plan declares 180000 ms.
-

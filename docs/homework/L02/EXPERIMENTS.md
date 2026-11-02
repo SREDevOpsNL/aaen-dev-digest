@@ -439,4 +439,3 @@ unbilled 429s. The adjudication found **0/4** with the Skill against **1/1**
 without (claim `not_detected`). A pacing deviation (waits ~8–9 % short) is
 disclosed. Spend: $0.00236142 actual. See
 [the v5 record](evidence/item-b-v5-confirmatory/README.md).
-

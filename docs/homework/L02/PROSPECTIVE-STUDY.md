@@ -688,4 +688,3 @@ preregistered **outage stop** after 20 of 30 attempts:
 #17 stays Implemented. The full record is in
 [evidence/item-b-v5-confirmatory/README.md](evidence/item-b-v5-confirmatory/README.md).
 Phase 1, v3, v4 and v5 stay separate.
-
