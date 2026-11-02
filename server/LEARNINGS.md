@@ -561,6 +561,26 @@ correction. Repo-intel remains server-scoped;
   (`expectedSpend`, `exactMetrics`), `server/test/hw2-throttle-policy.test.ts`,
   `docs/homework/L02/proposals/429-policy-proposal.md` (sections 4 and 6).
 
+- **2026-11-02** — Extension and correction of the entry above (the 429
+  policy and held reservations), after an independent methodology review:
+  - **A step-by-step protocol validator misses optional stopping.** The
+    first `traceProblems` checked only the steps a trace contained. It
+    accepted a trace that stopped after six observed trials, and a last trial
+    abandoned after a 429 on a1. A validator for a predeclared protocol must
+    also require that the trace ends where the protocol terminates. Dropping
+    that check now fails 2 tests.
+  - **Magnitude correction to "a binding cap biases missingness".** It does,
+    but the effect is small. Across 200 seeds at p = 0.4, K = 3, M = 20, the
+    with − without expected-missing difference is at most ±0.018. Stop on
+    the first 429 (P1) reaches ±0.40 at p = 0.2. The larger positional risk
+    is the provider pattern: all four observed 429s were a session's 2nd
+    paid request.
+
+  Evidence: `server/src/experiments/hw2/throttle-policy.ts`
+  (`traceProblems`), `server/test/hw2-throttle-policy.test.ts` (mutation
+  record, items 7 and 2), `docs/homework/L02/proposals/429-policy-proposal.md`
+  (section 4).
+
 ## Session Notes
 
 ## Open Questions
