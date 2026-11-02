@@ -13,10 +13,12 @@
  * - P4 any of the above, plus a worst-case and a best-case imputation of the
  *   missing trials (`sensitivity`), both reported.
  *
- * Nothing here dispatches, reads a file, a clock or `Math.random`. The runner
- * does not use this module; adopting a policy is a new pre-registration and a
- * separate, reviewed runner change. See
- * `docs/homework/L02/proposals/429-policy-proposal.md`.
+ * Nothing here dispatches, reads a file, a clock or `Math.random`. Only the
+ * study v5 runner path uses it (`attempt-policy.ts`): the attempt plan
+ * (`planAttempts`), the protocol validator (`traceProblems`) as a cross-check
+ * of the ledger history, and the P4 bounds (`sensitivity`,
+ * `missingnessBalance`) in the report. The v3 and v4 paths never import it.
+ * See `docs/homework/L02/proposals/429-policy-proposal.md`.
  */
 
 import { experimentOutcome } from './rules.js';
@@ -303,7 +305,18 @@ export interface TraceStep {
  * IDs) is rejected. A trace must end where the protocol terminates: after a
  * declared stop, at the attempt cap, or with the last trial resolved.
  */
-export function traceProblems(schedule: readonly Slot[], policy: Policy, trace: readonly TraceStep[], pacing: Pacing = PROPOSED_PACING): string[] {
+export function traceProblems(
+  schedule: readonly Slot[],
+  policy: Policy,
+  trace: readonly TraceStep[],
+  pacing: Pacing = PROPOSED_PACING,
+  /**
+   * `prefix`: the trace is a run still in progress (a restarted runner's
+   * history), so every step is checked but the end-of-protocol check is
+   * skipped. Never use it for a finished study.
+   */
+  options: { prefix?: boolean } = {},
+): string[] {
   const plan = planAttempts(schedule, policy, pacing);
   const byId = new Map(plan.map((attempt) => [attempt.attempt_id, attempt]));
   const per = attemptsPerTrial(policy);
@@ -342,7 +355,7 @@ export function traceProblems(schedule: readonly Slot[], policy: Policy, trace: 
     previous = { planned, outcome };
     if (problems.length > 0) break;
   }
-  if (problems.length === 0 && !ended && trace.length < cap && schedule.length > 0) {
+  if (!options.prefix && problems.length === 0 && !ended && trace.length < cap && schedule.length > 0) {
     if (!previous) problems.push('the trace ends before the protocol terminates: no attempt was dispatched');
     else if (previous.outcome.kind === 'throttled' && policy.id === 'P3' && previous.planned.attempt < per) {
       problems.push(`the trace ends before the protocol terminates: ${previous.planned.trial_id} still owes attempt a${previous.planned.attempt + 1}`);
