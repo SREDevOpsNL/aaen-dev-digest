@@ -259,8 +259,9 @@ stateDiagram-v2
 
 - **Plan.** The manifest freezes the trials (seeded as in v4) and all 30
   attempt IDs `c-v5-17-<condition>-<trial>-a<k>` with their delays. A trial
-  ID is never dispatched. The capability budget must cover M × the
-  per-attempt reservation (`authorize` refuses less), and `plan` prints both.
+  ID is never dispatched. The capability budget must equal M × the
+  per-attempt reservation (`authorize` refuses anything else), and `plan`
+  prints both.
 - **Classification.** `throttleProblems` reads structured fields only: one
   dispatched attempt, numeric HTTP 429, origin `upstream_provider`,
   `limit_source` exactly `upstream_provider_shared_pool`, the frozen provider
@@ -286,6 +287,13 @@ stateDiagram-v2
   conditional bound, never a verified result. The packet stays one case per
   observed trial. The private mapping holds the attempt pools, and the reveal
   applies the same P4 rule to the adjudicated verdicts.
+- **What blocks the claim in the report.** Any ID with the study tag outside
+  the plan (a trial ID, an `-a4`), on the ledger or the stack. Attempts are
+  checked in the order they were dispatched, not in plan order. A measured gap
+  (armed time minus the previous attempt's finished time) shorter than the
+  declared delay by more than 10 s; the margin covers this host's wall-clock
+  jumps. Adjudication `prepare` re-derives every trial label from its attempt
+  classes and the protocol state (`trialLabel`) and refuses a mismatch.
 
 ## One-use extraction authorization
 

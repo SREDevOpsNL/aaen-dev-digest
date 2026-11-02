@@ -134,7 +134,8 @@ d('HW2 study v5: the attempt-pool runner against the real API (fake provider, di
     const deps: RunnerDeps = {
       api: client, ledger, log: (m) => logs.push(m), capabilityToken: token, stackId: STACK,
       sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 50))), pollIntervalMs: 50, pollTimeoutMs: 30_000,
-      pacingSleep: async (ms) => { paced.push(ms); },
+      // The fake wait moves the ledger clock, so the report's measured gaps cover the plan.
+      pacingSleep: async (ms) => { paced.push(ms); tick += ms; },
     };
     const requestsBefore = llm.requests.length;
     llm.script = [...script];
@@ -194,7 +195,12 @@ d('HW2 study v5: the attempt-pool runner against the real API (fake provider, di
     expect(charge(throttled)).toBe(RESERVATION); // unknown cost: held at its reservation, never released
     expect(spent(s.ledger.values())).toBeCloseTo(RESERVATION + 10 * 0.0002, 10);
     expect(s.validator).toEqual([]);
+    // The stack records the non-Skill fingerprint on the failed 429 run too (as the real v4 429 trace did).
+    const view = (await app.inject({ url: `/experiments/slots/${s.plan[0]!.attempt_id}` })).json();
+    expect(view.runs[0].experiment).toMatchObject({ dispatch_state: 'failed', usage_known: false, non_skill_fingerprint: nonSkill });
+    expect(view.runs[0].experiment.attempts[0]).toMatchObject({ httpStatus: 429, responseId: null, errorDetail: { origin: 'upstream_provider', limitSource: 'upstream_provider_shared_pool', providerName: 'DeepInfra' } });
     expect(s.report.trials.map((x) => x.label)).toEqual(Array(10).fill('observed'));
+    expect(s.report.trials[1]!.attempts[0]!.gap_ms).toBeGreaterThanOrEqual(30_000);
     expect(s.report.trials[0]).toMatchObject({ scoring_attempt_id: s.plan[1]!.attempt_id });
     expect(s.report.trials[0]!.attempts[0]).toMatchObject({ class: 'throttled', ledger_class: 'throttled' });
     expect(s.report.trials[0]!.attempts[0]!.provider_started_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);

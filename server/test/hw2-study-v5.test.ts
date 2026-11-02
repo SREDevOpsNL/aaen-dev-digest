@@ -21,6 +21,16 @@
  *  10. restart: drop the "trial ID is in the ledger" refusal in `attemptHistory`;
  *  11. classification: drop the frozen-provider check on a 429's `providerName`;
  *  12. P4: ignore blockers (`const blocked = blockers.length > 0` → false).
+ * Added after the 2026-11-02 reviews (each fails at least one test here):
+ *  13. F1: report ignores IDs with the study tag outside the plan (`unplanned` filter → none);
+ *  14. F2: report validates in plan order (drop the dispatch-order sort);
+ *  15. F3: drop the measured-gap pacing inconsistency in `buildP3Report`;
+ *  16. F4: the cap stop carries no attempt ID (`attempt_id: candidate.attempt_id` → null);
+ *  17. F5: adjudication accepts a label its attempts do not give (`derived.label !== trial.label` → false);
+ *  18. F1-sec: `authorize` accepts any budget ≥ M × reservation again;
+ *  19. F3-sec: `usage_known !== false` → `usage_known === true`;
+ *  20. F3-sec: drop the empty frozen provider-name check;
+ *  21. F7-sec: `shown` no longer cuts values to 80 characters.
  * The DB-backed hw2-study-v5-runner.it.test.ts also fails on 1, 2, 4, 6, 7 and 8b.
  */
 import { execFileSync } from 'node:child_process';
@@ -190,9 +200,10 @@ function harness() {
   const logs: string[] = [];
   const deps: RunnerDeps = {
     api, ledger, log: (m) => logs.push(m), capabilityToken: 'tok', sleep: async () => {}, pollIntervalMs: 0, pollTimeoutMs: 1_000,
-    pacingSleep: async (ms) => { paced.push(ms); },
+    // The fake wait moves the ledger clock, so the report can measure the real gaps.
+    pacingSleep: async (ms) => { paced.push(ms); tick += ms; },
   };
-  return { dir, ledger, api, paced, logs, deps, done: () => { ledger.release(); rmSync(dir, { recursive: true, force: true }); } };
+  return { dir, ledger, api, paced, logs, deps, advance: (ms: number) => { tick += ms; }, done: () => { ledger.release(); rmSync(dir, { recursive: true, force: true }); } };
 }
 type Harness = ReturnType<typeof harness>;
 
@@ -333,7 +344,10 @@ describe('strict 429 classification (structured fields only)', () => {
   });
 
   it('refuses a run that reports usage, a cost, two attempts, or a completed state', () => {
-    expect(throttleProblems(view(http429(), { usage_known: true }), cls, EXPECT).join()).toMatch(/usage is reported as known/);
+    expect(throttleProblems(view(http429(), { usage_known: true }), cls, EXPECT).join()).toMatch(/usage_known is true, not false/);
+    // Not merely "not true": a missing usage_known is not a classified 429 either.
+    expect(throttleProblems(view(http429(), { usage_known: undefined }), cls, EXPECT).join()).toMatch(/usage_known is unknown, not false/);
+    expect(throttleProblems(view(http429()), cls, { providerName: '' }).join()).toMatch(/no frozen provider/);
     expect(throttleProblems(view(http429(), {}, 0.0001), cls, EXPECT).join()).toMatch(/reports a cost/);
     expect(throttleProblems({ cost_usd: null, experiment: { dispatch_state: 'failed', attempts: [http429(), http429()] } } as AttemptRunView, cls, EXPECT).join()).toMatch(/exactly one attempt/);
     expect(throttleProblems(view(http429(), { dispatch_state: 'completed' }), cls, EXPECT).join()).toMatch(/dispatch_state completed/);
@@ -587,15 +601,17 @@ describe('protocolNext mirrors the model', () => {
 
 // ------------------------------------------------------------------ report
 
-function reportOf(h: Harness, semantics: StudySemantics = V5) {
+function reportOf(h: Harness, semantics: StudySemantics = V5, api: FakeApi = h.api) {
   const runs = new Map<string, SlotRunData | null>();
-  for (const a of plan) runs.set(a.attempt_id, (h.api.slots.get(a.attempt_id)?.runs[0] as unknown as SlotRunData) ?? null);
+  // Every planned attempt ID, and every trial ID (a trial is never dispatched under its own ID), as `cli.ts report` looks them up.
+  for (const id of [...plan.map((a) => a.attempt_id), ...TRIALS.map((t) => t.slot_id)]) runs.set(id, (api.slots.get(id)?.runs[0] as unknown as SlotRunData) ?? null);
   return buildP3Report({
     trials: TRIALS.map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition })),
     ledger: h.ledger.slots(), runs, rules: RULES, frozenNonSkill: { '17': NON_SKILL }, expectations: () => EXPECT, semantics,
     execution: { manifestFingerprint: MANIFEST, phase: 'confirmatory', fixture: () => ({ reviewer: 'Test Quality Reviewer', prNumber: 501, targetSkill: 'Edge Cases and Error Paths' }), skillFingerprint: (_e, c) => skillFingerprint(c) },
   });
 }
+const protocolOf = (r: ReturnType<typeof reportOf>) => Object.fromEntries(r.p3.map((x) => [x.experiment, x.protocol]));
 const detectingScript = () => TRIALS.map((t) => (t.condition === 'with' ? HIT : OBS));
 
 describe('report: labels, P4 bounds and missingness', () => {
@@ -712,10 +728,10 @@ describe('adjudication: condition-blinded packet, P4 at the reveal', () => {
     const h = (await pool([T429, T429, T429, ...detectingScript().slice(1)])).h;
     try {
       const r = reportOf(h);
-      const trials: Record<string, P3TrialEntry> = Object.fromEntries(r.trials.map((x) => [x.trial_id, { label: x.label, label_reason: x.label_reason, scoring_attempt_id: x.scoring_attempt_id, attempt_ids: x.attempts.map((a) => a.attempt_id) }]));
+      const trials: Record<string, P3TrialEntry> = Object.fromEntries(r.trials.map((x) => [x.trial_id, { label: x.label, label_reason: x.label_reason, scoring_attempt_id: x.scoring_attempt_id, attempt_ids: x.attempts.map((a) => a.attempt_id), attempt_classes: x.attempts.map((a) => a.class) }]));
       const design = { manifest_fingerprint: MANIFEST, experiments: ['17'], per_condition: 5, slots: TRIALS.map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition })) };
       let n = 0;
-      const prepared = preparePacketV2({ design, rows: r.trial_rows, runs: r.trial_runs, rules: { '17': TECHNICAL_RULES['17']! }, screenRules: RULES, skillNames: ['Edge Cases and Error Paths'], trials, newCaseId: () => `case-${String(50 - n++).padStart(3, '0')}` });
+      const prepared = preparePacketV2({ design, rows: r.trial_rows, runs: r.trial_runs, rules: { '17': TECHNICAL_RULES['17']! }, screenRules: RULES, skillNames: ['Edge Cases and Error Paths'], p3: { trials, protocol: protocolOf(r), attemptsPerTrial: 3 }, newCaseId: () => `case-${String(50 - n++).padStart(3, '0')}` });
       expect(prepared.packet.cases).toHaveLength(9);
       const packetText = JSON.stringify(prepared.packet);
       for (const leak of ['c-v5-', '-a1', 'with', 'without', 'run-']) expect(packetText).not.toContain(leak);
@@ -753,11 +769,11 @@ describe('adjudication: condition-blinded packet, P4 at the reveal', () => {
     const base = mkdtempSync(join(tmpdir(), 'hw2-v5-adj-'));
     try {
       const r = reportOf(h);
-      const trials = Object.fromEntries(r.trials.map((x) => [x.trial_id, { label: x.label, label_reason: x.label_reason, scoring_attempt_id: x.scoring_attempt_id, attempt_ids: x.attempts.map((a) => a.attempt_id) }]));
+      const trials = Object.fromEntries(r.trials.map((x) => [x.trial_id, { label: x.label, label_reason: x.label_reason, scoring_attempt_id: x.scoring_attempt_id, attempt_ids: x.attempts.map((a) => a.attempt_id), attempt_classes: x.attempts.map((a) => a.class) }]));
       const input = {
         design: { manifest_fingerprint: MANIFEST, experiments: ['17'], per_condition: 5, slots: TRIALS.map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition })) },
         rows: r.trial_rows, runs: Object.fromEntries(r.trial_runs), skill_names: ['Edge Cases and Error Paths'],
-        manifest_version: 5, study: STUDY_V5, screen_rules: RULES, trials,
+        manifest_version: 5, study: STUDY_V5, screen_rules: RULES, trials, protocol: protocolOf(r),
       };
       const file = join(base, 'input.json');
       writeFileSync(file, JSON.stringify(input));
@@ -771,7 +787,7 @@ describe('adjudication: condition-blinded packet, P4 at the reveal', () => {
       expect(mapping.entries.find((e: { slot_id: string }) => e.slot_id === TRIALS[0]!.slot_id).p3).toMatchObject({ label: 'observed', scoring_attempt_id: ids(0, 2)[0] });
       const bare = join(base, 'bare.json');
       writeFileSync(bare, JSON.stringify({ ...input, trials: undefined }));
-      await expect(adjudicationMain(['prepare', '--dir', join(base, 'record2'), '--input', bare], () => new Date(), () => {})).rejects.toThrow(/needs every trial's attempt-pool entry/);
+      await expect(adjudicationMain(['prepare', '--dir', join(base, 'record2'), '--input', bare], () => new Date(), () => {})).rejects.toThrow(/needs every trial's attempt-pool entry and the protocol state/);
     } finally {
       h.done();
       rmSync(base, { recursive: true, force: true });
@@ -782,9 +798,19 @@ describe('adjudication: condition-blinded packet, P4 at the reveal', () => {
     const h = (await pool(detectingScript())).h;
     try {
       const r = reportOf(h);
-      const trials: Record<string, P3TrialEntry> = Object.fromEntries(r.trials.map((x) => [x.trial_id, { label: 'bounded' as const, label_reason: 'x', scoring_attempt_id: null, attempt_ids: [] }]));
       const design = { manifest_fingerprint: MANIFEST, experiments: ['17'], per_condition: 5, slots: TRIALS.map(({ slot_id, experiment, condition }) => ({ slot_id, experiment, condition })) };
-      expect(() => preparePacketV2({ design, rows: r.trial_rows, runs: r.trial_runs, rules: { '17': 'rule' }, screenRules: RULES, skillNames: [], trials })).toThrow(/labelled bounded but is counted/);
+      const honest: Record<string, P3TrialEntry> = Object.fromEntries(r.trials.map((x) => [x.trial_id, { label: x.label, label_reason: x.label_reason, scoring_attempt_id: x.scoring_attempt_id, attempt_ids: x.attempts.map((a) => a.attempt_id), attempt_classes: x.attempts.map((a) => a.class) }]));
+      const first = TRIALS[0]!.slot_id;
+      const p3 = (trials: Record<string, P3TrialEntry>) => ({ trials, protocol: protocolOf(r), attemptsPerTrial: 3 });
+      // A label the attempts do not support, a forged class list, and a non-plan attempt ID are each refused.
+      const relabelled = { ...honest, [first]: { ...honest[first]!, label: 'bounded' as const, scoring_attempt_id: null } };
+      expect(() => preparePacketV2({ design, rows: r.trial_rows, runs: r.trial_runs, rules: { '17': 'rule' }, screenRules: RULES, skillNames: [], p3: p3(relabelled) })).toThrow(/labelled bounded; its attempts give observed/);
+      const forged = { ...honest, [first]: { ...honest[first]!, attempt_ids: [`${first}-a1`, `${first}-a2`, `${first}-a3`], attempt_classes: ['throttled', 'throttled', 'throttled'] as never, label: 'bounded' as const, scoring_attempt_id: null } };
+      expect(() => preparePacketV2({ design, rows: r.trial_rows, runs: r.trial_runs, rules: { '17': 'rule' }, screenRules: RULES, skillNames: [], p3: p3(forged) })).toThrow(/labelled bounded but is counted/);
+      const offPlan = { ...honest, [first]: { ...honest[first]!, attempt_ids: [`${first}-a2`] } };
+      expect(() => preparePacketV2({ design, rows: r.trial_rows, runs: r.trial_runs, rules: { '17': 'rule' }, screenRules: RULES, skillNames: [], p3: p3(offPlan) })).toThrow(/not a prefix of its planned attempt IDs/);
+      const trials = Object.fromEntries(r.trials.map((x) => [x.trial_id, { label: 'bounded' as const, label_reason: 'x', scoring_attempt_id: null, attempt_ids: [], attempt_classes: [] }]));
+      expect(() => preparePacketV2({ design, rows: r.trial_rows, runs: r.trial_runs, rules: { '17': 'rule' }, screenRules: RULES, skillNames: [], p3: p3(trials) })).toThrow(/labelled bounded; its attempts give incomplete/);
     } finally {
       h.done();
     }
@@ -831,7 +857,8 @@ describe('budget: the capability and the reservations cover M attempts', () => {
     let contacted = false;
     const stack = { stackId: 'hw2f-standin5' } as Stack;
     const deps = { stack: async () => ((contacted = true), stack), verify: async () => ({ fingerprint: 'f' }), root, log: () => {}, home };
-    await expect(authorize({ prereg: file, budget: '0.1', ceiling: '1', hours: '1' }, 'confirmatory', deps)).rejects.toThrow(/does not cover 30 attempts × \$0.005 = \$0.15000000/);
+    await expect(authorize({ prereg: file, budget: '0.1', ceiling: '1', hours: '1' }, 'confirmatory', deps)).rejects.toThrow(/must equal 30 attempts × \$0.005 = \$0.15000000/);
+    await expect(authorize({ prereg: file, budget: '0.2', ceiling: '1', hours: '1' }, 'confirmatory', deps)).rejects.toThrow(/must equal 30 attempts/);
     expect(contacted).toBe(false);
     expect(existsSync(join(home, '.devdigest', 'hw2-experiments', 'hw2f-standin5', 'capability.json'))).toBe(false);
     await authorize({ prereg: file, budget: '0.15', ceiling: '1', hours: '1' }, 'confirmatory', deps);
@@ -862,6 +889,156 @@ describe('budget: the capability and the reservations cover M attempts', () => {
       await expect(main(['plan', '--study', 'v4', '--experiments', '17', '--prereg', file], () => {})).rejects.toThrow(/is not the itemb-v4 pre-registration/);
     } finally {
       process.chdir(cwd);
+    }
+  });
+});
+
+// ------------------------------------------------------------------ review fixes (2026-11-02)
+
+/** Record one attempt directly on the ledger and the fake stack (what a runner, or a stray path, would leave). */
+function record(h: Harness, planned: (typeof plan)[number], outcome: Outcome, klass: string, delay = planned.delay_before_ms) {
+  const id = planned.attempt_id;
+  const base = { slot_id: id, phase: 'confirmatory' as const, reservation_usd: 0.005 };
+  h.ledger.append({ ...base, state: 'reserved', detail: { expected_non_skill_fingerprint: NON_SKILL, p3_attempt: { study_id: 'itemb-v5', trial_id: planned.trial_id, attempt: planned.attempt, plan_index: planned.plan_index, delay_before_ms: delay } } });
+  h.ledger.append({ ...base, state: 'dispatched', run_id: `run-${id}` });
+  h.ledger.append({ ...base, state: outcome.dispatch_state, run_id: `run-${id}`, cost_usd: outcome.usage_known ? outcome.cost : null, detail: { fingerprint_mismatch: false, p3: { class: klass, reasons: [] } } });
+  h.api.slots.set(id, lookup(id, planned.condition, outcome));
+}
+
+describe('report re-checks (review findings F1–F4, F6, I1)', () => {
+  let h: Harness;
+  beforeEach(() => (h = harness()));
+  afterEach(() => h.done());
+
+  it('F1: an ID with the study tag outside the plan (a trial ID, an -a4) is listed and blocks the claim', async () => {
+    h.api.script = detectingScript();
+    await runAttemptPool(h.deps, STUDY_V5, trialRuns());
+    expect(reportOf(h).p3[0]!.p4.claim).toBe('detected');
+    const bare = TRIALS[0]!.slot_id;
+    const a4 = `${TRIALS[1]!.slot_id}-a4`;
+    h.ledger.append({ slot_id: a4, phase: 'confirmatory', reservation_usd: 0.005, state: 'reserved' });
+    h.ledger.append({ slot_id: a4, phase: 'confirmatory', reservation_usd: 0.005, state: 'refused', cost_usd: 0 });
+    h.api.slots.set(bare, lookup(bare, TRIALS[0]!.condition, OBS)); // on the stack only
+    const r = reportOf(h);
+    expect(r.p3[0]!.unplanned.sort()).toEqual([a4, bare].sort());
+    expect(r.p3[0]!.inconsistencies.join('\n')).toMatch(new RegExp(`${a4} carries the study tag but is not in the frozen attempt plan \\(refused\\)`));
+    expect(r.p3[0]!.inconsistencies.join('\n')).toMatch(/on the stack only/);
+    expect(r.p3[0]!.p4).toMatchObject({ claim: 'incomplete', bounds_descriptive: true });
+    expect(renderP3Report(r, V5)).toMatch(/Attempts outside the frozen plan: c-v5-17-/);
+  });
+
+  it('F2: an out-of-order dispatch is checked in the order it happened, and blocks the claim', () => {
+    record(h, plan[3]!, OBS, 'observed');
+    h.advance(30_000);
+    record(h, plan[0]!, OBS, 'observed');
+    const r = reportOf(h);
+    expect(r.p3[0]!.inconsistencies.join()).toMatch(/protocol: .*fixed order requires trial 1/);
+    expect(r.p3[0]!.p4.claim).toBe('incomplete');
+  });
+
+  it('F3: the measured gap must cover the declared delay; a skipped wait blocks the claim, a correct one does not', async () => {
+    record(h, plan[0]!, OBS, 'observed');
+    h.advance(30_000);
+    record(h, plan[3]!, OBS, 'observed');
+    expect(reportOf(h).p3[0]!.inconsistencies).toEqual([]);
+    expect(reportOf(h).trials[1]!.attempts[0]!.gap_ms).toBe(31_000);
+    record(h, plan[6]!, OBS, 'observed'); // no wait at all
+    const r = reportOf(h);
+    expect(r.p3[0]!.inconsistencies).toEqual([`pacing: ${plan[6]!.attempt_id} was armed 1000 ms after ${plan[3]!.attempt_id} finished; the plan declares 30000 ms`]);
+    expect(r.p3[0]!.p4.claim).toBe('incomplete');
+  });
+
+  it('F3: a runner whose waits did not really happen is caught by the report', async () => {
+    h.api.script = detectingScript();
+    await runAttemptPool({ ...h.deps, pacingSleep: async () => {} }, STUDY_V5, trialRuns());
+    const r = reportOf(h);
+    expect(r.p3[0]!.inconsistencies.filter((x) => x.startsWith('pacing:'))).toHaveLength(9);
+    expect(r.p3[0]!.p4.claim).toBe('incomplete');
+  });
+
+  it('F4: a trial cut short by the cap M is bounded, like the model counts it (test-only policy, M = 3)', async () => {
+    const capped = withPolicy({ ...P3_ATTEMPT_POLICY_V5, max_total_attempts: 3 });
+    h.api.script = [OBS, T429, T429, OBS];
+    const run = await runAttemptPool(h.deps, STUDY_V5, trialRuns(capped));
+    expect(run.stopped).toMatch(/attempt cap/);
+    const r = reportOf(h, capped);
+    expect(r.p3[0]!.protocol).toEqual({ state: 'stopped', reason: 'attempt_cap', attempt_id: plan[5]!.attempt_id });
+    expect(r.trials[1]).toMatchObject({ label: 'bounded', pool_exhausted: false });
+    expect(r.trials[1]!.label_reason).toMatch(/2 classified 429\(s\), then the attempt cap/);
+    expect(r.trials.slice(2).every((t) => t.label === 'bounded')).toBe(true);
+    expect(r.p3[0]!.inconsistencies).toEqual([]);
+  });
+
+  it('F6, I1: the strict line names imputed truncations; descriptive bounds are said to be descriptive', async () => {
+    h.api.script = [OBS, FAIL500];
+    await runAttemptPool(h.deps, STUDY_V5, trialRuns());
+    const md = renderP3Report(reportOf(h), V5);
+    expect(md).toMatch(/Strict \(observed plus v4-imputed truncations; every trial must be counted\): incomplete/);
+    expect(md).not.toMatch(/Observed \(strict/);
+    expect(md).toMatch(/The bounds are descriptive only/);
+    expect(md).toMatch(/\| with \| 5 \| \d \| \d \| 0 \| 0 \| \d \|/); // observed and imputed in separate columns
+  });
+});
+
+describe('F7-sec: quoted provider values are bounded', () => {
+  it('cuts a long limit_source, origin or provider name to 80 characters', () => {
+    const long = 'x'.repeat(500);
+    const problems = throttleProblems({ cost_usd: null, experiment: { dispatch_state: 'failed', usage_known: false, attempts: [http429({ origin: long, limitSource: `${long}\u0007`, providerName: long })] } } as AttemptRunView, P3_ATTEMPT_POLICY_V5.throttle_classification, EXPECT);
+    expect(problems).toHaveLength(3);
+    for (const p of problems) {
+      expect(p).not.toContain('x'.repeat(81));
+      expect(p).toContain('…');
+      expect(p).not.toContain('\u0007');
+    }
+  });
+});
+
+describe('Run Review mode (--via-ui) with v5', () => {
+  /** The fake stack also arms a slot; the operator's click (the prompt) starts its run. */
+  class ArmingApi extends FakeApi {
+    events: string[] = [];
+    private armed = new Map<string, 'with' | 'without'>();
+    override async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+      const arm = /^\/experiments\/slots\/([^/]+)\/arm$/.exec(path);
+      if (method === 'POST' && arm) {
+        this.events.push(`arm:${arm[1]}`);
+        this.armed.set(arm[1]!, (body as { condition: 'with' | 'without' }).condition);
+        return { armed_until: '2026-11-03T01:00:00.000Z' } as T;
+      }
+      if (method === 'POST' && path === '/experiments/runs') throw new Error('Run Review mode must not dispatch directly');
+      return super.request<T>(method, path, body);
+    }
+    click(id: string) {
+      const next = this.script.shift();
+      if (!next) throw new Error('script exhausted');
+      this.posts.push(id);
+      this.slots.set(id, lookup(id, this.armed.get(id)!, next));
+    }
+  }
+
+  it('paces before arming, names the attempt ID in each prompt, and arms a2 of the same trial after a classified 429', async () => {
+    const h = harness();
+    try {
+      const api = new ArmingApi();
+      api.script = [T429, OBS, ...Array(9).fill(OBS)];
+      const prompts: string[] = [];
+      const deps: RunnerDeps = {
+        ...h.deps, api,
+        pacingSleep: async (ms) => { api.events.push(`pace:${ms}`); h.advance(ms); },
+        viaUi: { clickTimeoutMs: 1_000, prompt: (m) => { prompts.push(m); const id = /^Slot (\S+) is armed/.exec(m)![1]!; api.events.push(`prompt:${id}`); api.click(id); } },
+      };
+      const result = await runAttemptPool(deps, STUDY_V5, trialRuns());
+      expect(result.stopped).toBeNull();
+      const [a1, a2] = ids(0, 1, 2) as [string, string];
+      const t2 = ids(1, 1)[0]!;
+      expect(api.events.slice(0, 8)).toEqual([`arm:${a1}`, `prompt:${a1}`, 'pace:60000', `arm:${a2}`, `prompt:${a2}`, 'pace:30000', `arm:${t2}`, `prompt:${t2}`]);
+      expect(prompts[0]).toMatch(new RegExp(`^Slot ${a1} is armed until .*click Run Review`));
+      expect(prompts).toHaveLength(11);
+      expect(h.ledger.slots().get(a1)!.events[0]!.detail).toMatchObject({ via: 'run_review', p3_attempt: { attempt: 1 } });
+      expect(h.ledger.slots().get(a1)!.events.at(-1)!.detail).toMatchObject({ p3: { class: 'throttled' } });
+      expect(reportOf(h, V5, api).p3[0]!.inconsistencies).toEqual([]);
+    } finally {
+      h.done();
     }
   });
 });
