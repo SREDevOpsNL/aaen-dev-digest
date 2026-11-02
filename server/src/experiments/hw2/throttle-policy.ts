@@ -670,11 +670,12 @@ export function expectedSpend(metrics: PolicyMetrics, inputs: CostInputs = COST_
 export const THROTTLE_SCENARIOS = Object.freeze([0.02, 0.05, 0.1, 0.2, 0.3, 0.4]);
 
 /**
- * Placeholder for Agent R's empirical 429 rate per dispatched attempt to
- * `deepinfra/fp8`. Null until R's inventory is accepted; the coordinator's
- * rough count (4 of about 19 dispatches) is not a substitute for it.
+ * Agent R's verified inventory (2026-11-02): 4 HTTP 429s in 19 paid
+ * dispatches to the pinned `deepinfra/fp8` endpoint, Clopper–Pearson 95%
+ * [0.061, 0.456]. #17 alone: 3 of 9. A point estimate from 19 requests, not
+ * a design input on its own: the proposal keeps the scenario grid.
  */
-export const EMPIRICAL_THROTTLE_RATE: number | null = null;
+export const EMPIRICAL_THROTTLE_RATE = Object.freeze({ overall: 4 / 19, experiment17: 3 / 9, ci95: Object.freeze([0.061, 0.456] as const) });
 
 /** The policies the proposal compares (P4 is `sensitivity` applied to any of them). */
 export const PROPOSED_POLICIES: Readonly<Record<string, Policy>> = Object.freeze({

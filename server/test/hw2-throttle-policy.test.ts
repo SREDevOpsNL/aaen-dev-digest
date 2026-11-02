@@ -4,6 +4,7 @@ import { buildSchedule, mulberry32, type Slot } from '../src/experiments/hw2/sch
 import {
   ATTEMPT_ID,
   COST_INPUTS_20261102,
+  EMPIRICAL_THROTTLE_RATE,
   PROPOSED_PACING,
   PROPOSED_POLICIES,
   THROTTLE_SCENARIOS,
@@ -276,6 +277,12 @@ describe('HW2 429 policy: exact probabilities and seeded simulation', () => {
     expect(exactMetrics(SCHEDULE, P1, { throttle: 0.2, detect: H1 }).all_observed).toBeCloseTo(0.8 ** 10, 12);
     expect(exactMetrics(SCHEDULE, P3, { throttle: 0.2, detect: H1 }).all_observed).toBeCloseTo((1 - 0.008) ** 10, 12);
     expect(exactMetrics(SCHEDULE, P3, { throttle: 0.4, detect: H1 }).all_observed).toBeCloseTo(0.5161, 4);
+  });
+
+  it('gives the proposal values at Agent R empirical rates (4/19 overall, 3/9 for #17)', () => {
+    expect(exactMetrics(SCHEDULE, P1, { throttle: EMPIRICAL_THROTTLE_RATE.overall, detect: H1 }).all_observed).toBeCloseTo(0.0941, 4);
+    expect(exactMetrics(SCHEDULE, P3, { throttle: EMPIRICAL_THROTTLE_RATE.overall, detect: H1 }).all_observed).toBeCloseTo(0.9105, 4);
+    expect(exactMetrics(SCHEDULE, P3, { throttle: EMPIRICAL_THROTTLE_RATE.experiment17, detect: H1 }).all_observed).toBeCloseTo(0.6856, 4);
   });
 
   it('a fixed seed gives a fixed simulation result', () => {
