@@ -276,3 +276,31 @@ needs a corrected freeze and a fresh approval.
   - any further #17 decision;
   - the #18 Skill v2 review;
   - #21.
+
+## 2026-11-02: #17 provider reliability analysis and 429 policy proposal (unpaid)
+
+- **Owner request.** An unpaid reliability analysis and a prospective
+  429-policy proposal. No paid call, capability or new study.
+- **Records:**
+  - [proposals/429-reliability-analysis.md](proposals/429-reliability-analysis.md),
+    sanitized;
+  - [proposals/429-policy-proposal.md](proposals/429-policy-proposal.md),
+    **unapproved**;
+  - the pure model `server/src/experiments/hw2/throttle-policy.ts`, which no
+    runtime path imports, and its 40 tests.
+- **Findings:**
+  - 19 paid dispatches, 4 of them HTTP 429 (21 %, CP95 6–46 %), all from
+    DeepInfra's shared upstream pool, none billed;
+  - no association with the experiment or with the Skill condition;
+  - at the #17 rate, stop-on-429 completes 1.7 % of the time.
+- **Recommended for owner review:** P3, a predeclared pool of 3 attempt IDs
+  per trial (cap 30), re-attempted only after a classified pre-generation
+  429, plus an outage stop after 6 consecutive 429s and P4 worst/best-case
+  reporting. New reservations $0.15. Recompute the ceiling from the live
+  ledger before any freeze.
+- **Reviews.** An independent methodological review (4 major, 10 minor, then
+  5 minor on re-review) and a security/cost review (3 low, 2 info, then 1
+  low) are all resolved. Server typecheck passes; hermetic 573/573.
+- **Unchanged:** #17 stays Implemented. Frozen records, adjudications, the
+  Skill, the rule and the fixture are unchanged; #18 and #21 are untouched.
+- **Owner decisions** are listed in the proposal. Nothing is authorized.

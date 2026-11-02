@@ -214,3 +214,21 @@ says which file a finding goes in.
     settlement confirmed the 429 was not billed.
 
   Record: `docs/homework/L02/evidence/item-b-v4-confirmatory/README.md`.
+- **2026-11-02 — The #17 interruptions are a design-policy problem, not a
+  #17 problem** (extends the 2026-11-01 entry above).
+  - **Scale.** Across all 19 paid HW2 dispatches, 4 got HTTP 429: 2 on
+    `main`'s Gate 3 (one of them experiment 18), plus Phase 1 and v4. That
+    is 21 % (CP95 6–46 %).
+  - **Source.** All came from DeepInfra's shared upstream pool (OpenRouter
+    `limit_source`), with no rate-limit headers, and none was billed.
+  - **No association** with the experiment (p = 0.30) or the Skill
+    (p = 1.0). The Skill adds only about 100 prompt tokens.
+  - **What fails is the policy.** Stop-on-429 combined with a pinned single
+    provider. At the #17 rate, a 10-slot study completes 1.7 % of the time
+    under stop-on-429. It completes 69 % of the time under a predeclared
+    3-attempt pool that re-attempts only on a classified pre-generation 429.
+  - **Reviewer catch.** The independent methodological review found that
+    the first validator accepted traces that ended early. Protocol validators
+    must check where a trace ends, not only each step.
+
+  Records: `docs/homework/L02/proposals/`.
