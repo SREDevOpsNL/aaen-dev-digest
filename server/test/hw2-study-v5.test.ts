@@ -9,7 +9,8 @@
  *      (`!classification.limit_sources.includes(detail.limitSource)` → false), attempt-policy.ts;
  *   2. response-ID check dropped (`if (present(a.responseId)) …` removed);
  *   3. usage check dropped (`present(a.tokensIn) || present(a.tokensOut) || present(a.costUsd)` → false);
- *   4. pool cap K: `attempt.attempt < per` → `attempt.attempt <= per` in `protocolNext`;
+ *   4. pool cap K: `attempt.attempt < per` → `attempt.attempt < per - 1` in `protocolNext`
+ *      (`<= per` is an equivalent mutation: after aK, `plan_index + 1` is the next trial's a1);
  *   5. total cap M: drop `if (steps.length >= cap) return { … 'attempt_cap' … }` in `protocolNext`;
  *   6. outage stop: drop the `streak >= limit` stop in `protocolNext`;
  *   7. pacing: never call `pace(planned.delay_before_ms)` in `runAttemptPool`;
@@ -17,7 +18,10 @@
  *      (exempts every attempt) and, separately, → `() => false` (counts 429s too);
  *   9. restart consistency: the `traceProblems(…, { prefix: true })` result in
  *      `attemptHistory` → `[]` (accept any recorded history);
- *  10. restart: drop the "trial ID is in the ledger" refusal in `attemptHistory`.
+ *  10. restart: drop the "trial ID is in the ledger" refusal in `attemptHistory`;
+ *  11. classification: drop the frozen-provider check on a 429's `providerName`;
+ *  12. P4: ignore blockers (`const blocked = blockers.length > 0` → false).
+ * The DB-backed hw2-study-v5-runner.it.test.ts also fails on 1, 2, 4, 6, 7 and 8b.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -102,7 +106,7 @@ const valid = (extra: Record<string, unknown> = {}) => ({
 const http429 = (detail: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => ({
   dispatch: 'dispatched', outcome: 'http_error', httpStatus: 429, servedModel: null, responseId: null, generationIdHeader: null,
   tokensIn: null, tokensOut: null, costUsd: null, router: null, generation: null, startedAt: '2026-11-03T00:00:00.000Z',
-  errorDetail: { origin: 'upstream_provider', code: 429, message: 'Provider returned error', errorType: null, providerCode: null, providerName: 'DeepInfra', limitSource: 'upstream_provider_shared_pool', upstreamRawPresent: false, requestId: null, retryAfter: null, rateLimit: {}, redacted: false, ...detail },
+  errorDetail: { origin: 'upstream_provider', code: 429, message: 'Provider returned error', errorType: null, providerCode: null, providerName: 'DeepInfra', limitSource: 'upstream_provider_shared_pool', upstreamRawPresent: true, requestId: null, retryAfter: null, rateLimit: {}, redacted: false, ...detail },
   ...extra,
 });
 

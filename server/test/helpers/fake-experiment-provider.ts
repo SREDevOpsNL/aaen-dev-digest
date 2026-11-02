@@ -27,19 +27,44 @@ export const TRUNCATED_OUTPUT = `{"verdict":"comment","summary":"Synthetic parti
 /** The usage the v3 truncated slot reported (input, the 4,000-token cap, cost); public numbers. */
 export const TRUNCATED_USAGE = { tokensIn: 1142, tokensOut: 4000, costUsd: 0.00082278 };
 
-export type FakeMode = 'ok' | 'fail-after-dispatch' | 'hold' | 'truncate' | 'http-429';
+export type FakeMode =
+  | 'ok'
+  | 'fail-after-dispatch'
+  | 'hold'
+  | 'truncate'
+  | 'http-429'
+  /** A 429 shaped like the recorded v4 one: DeepInfra's shared pool, no response ID, no usage. */
+  | 'http-429-shared-pool'
+  /** The same 429, but carrying a response ID (not a pre-generation refusal). */
+  | 'http-429-with-response-id'
+  /** A 429 from OpenRouter itself (`openrouter_key_limit`), not the upstream. */
+  | 'http-429-openrouter'
+  /** An upstream 429 with a limit_source outside the v5 allowlist. */
+  | 'http-429-other-limit';
+
+const THROTTLE_DETAIL = {
+  'http-429-shared-pool': { origin: 'upstream_provider', providerName: 'DeepInfra', limitSource: 'upstream_provider_shared_pool' },
+  'http-429-with-response-id': { origin: 'upstream_provider', providerName: 'DeepInfra', limitSource: 'upstream_provider_shared_pool' },
+  'http-429-openrouter': { origin: 'openrouter', providerName: null, limitSource: 'openrouter_key_limit' },
+  'http-429-other-limit': { origin: 'upstream_provider', providerName: 'DeepInfra', limitSource: 'upstream_provider_rate_limit' },
+} as const;
 
 /**
  * Stands in for OpenRouter: reports one attempt the way the real provider
  * does (experiment telemetry and the stage lifecycle), and costs nothing.
  * - `truncate`: a 200 with finish_reason=length, its usage, and a
  *   ProviderOutputError carrying the partial text;
- * - `http-429`: an HTTP 429 with no response and no usage.
+ * - `http-429`: an HTTP 429 with no response and no usage;
+ * - `http-429-shared-pool`, `-with-response-id`, `-openrouter`, `-other-limit`: HTTP 429s
+ *   with the structured error detail the real extractor writes.
+ * `script` sets the mode of each next request in turn (then `mode`).
  */
 export class FakeExperimentProvider implements LLMProvider {
   readonly id = 'openrouter' as const;
   requests: StructuredRequest<unknown>[] = [];
   mode: FakeMode = 'ok';
+  /** Modes for the next requests, consumed one per request; `mode` applies once it is empty. */
+  script: FakeMode[] = [];
   private release?: () => void;
   held = new Promise<void>((resolve) => (this.release = resolve));
   endpoints: OpenRouterEndpointInfo[] = [FAKE_ENDPOINT];
@@ -66,21 +91,24 @@ export class FakeExperimentProvider implements LLMProvider {
   }
   async completeStructured<T>(req: LifecycleStructuredRequest<T>): Promise<StructuredResult<T>> {
     this.requests.push(req as StructuredRequest<unknown>);
+    const mode = this.script.shift() ?? this.mode;
     const tracked = new AttemptRecorder(req.lifecycle).submit('initial');
-    if (this.mode === 'hold') await this.held;
-    const failed = this.mode === 'fail-after-dispatch' || this.mode === 'http-429';
-    const truncated = this.mode === 'truncate';
+    if (mode === 'hold') await this.held;
+    const throttle = mode in THROTTLE_DETAIL ? THROTTLE_DETAIL[mode as keyof typeof THROTTLE_DETAIL] : null;
+    const http429 = mode === 'http-429' || throttle !== null;
+    const failed = mode === 'fail-after-dispatch' || http429;
+    const truncated = mode === 'truncate';
     const usage = truncated ? TRUNCATED_USAGE : { tokensIn: 900, tokensOut: 120, costUsd: 0.0002 };
     const attempt: StructuredAttemptTelemetry = {
       sequence: 1,
       dispatch: 'dispatched',
-      outcome: this.mode === 'fail-after-dispatch' ? 'network_error' : this.mode === 'http-429' ? 'http_error' : truncated ? 'truncated' : 'valid',
-      failureReason: this.mode === 'fail-after-dispatch' ? 'socket hang up' : this.mode === 'http-429' ? '429 Provider returned error' : truncated ? 'output reached the max_tokens cap' : null,
-      httpStatus: this.mode === 'fail-after-dispatch' ? null : this.mode === 'http-429' ? 429 : 200,
+      outcome: mode === 'fail-after-dispatch' ? 'network_error' : http429 ? 'http_error' : truncated ? 'truncated' : 'valid',
+      failureReason: mode === 'fail-after-dispatch' ? 'socket hang up' : http429 ? '429 Provider returned error' : truncated ? 'output reached the max_tokens cap' : null,
+      httpStatus: mode === 'fail-after-dispatch' ? null : http429 ? 429 : 200,
       startedAt: new Date().toISOString(),
       durationMs: 5,
       requested: { model: req.model, routing: req.experiment?.routing ?? null, maxTokens: req.experiment?.maxTokens ?? null },
-      responseId: failed ? null : 'gen-1793471676-synthetic0001',
+      responseId: mode === 'http-429-with-response-id' ? 'gen-1793471676-synthetic0429' : failed ? null : 'gen-1793471676-synthetic0001',
       generationIdHeader: null,
       servedModel: failed ? null : FAKE_MODEL,
       finishReason: failed ? null : truncated ? 'length' : 'stop',
@@ -90,14 +118,16 @@ export class FakeExperimentProvider implements LLMProvider {
       router: failed ? null : { selected: [{ provider: 'DeepInfra', model: FAKE_MODEL }], attempt: 1, attemptsCount: 1, requested: FAKE_MODEL, strategy: 'direct' },
       generation: null,
       routerMetadataRaw: failed ? null : this.routerMetadataRaw,
-      errorDetail: null,
+      errorDetail: throttle
+        ? { origin: throttle.origin, code: 429, message: 'Provider returned error', errorType: null, providerCode: null, providerName: throttle.providerName, limitSource: throttle.limitSource, upstreamRawPresent: false, requestId: null, retryAfter: null, rateLimit: {}, redacted: false }
+        : null,
     };
     req.onAttempt?.(attempt);
-    if (this.mode === 'fail-after-dispatch') {
+    if (mode === 'fail-after-dispatch') {
       tracked.failed('network_error');
       throw new Error('socket hang up');
     }
-    if (this.mode === 'http-429') {
+    if (http429) {
       tracked.failed('http_error', { http_status: 429 });
       throw new Error('429 Provider returned error');
     }
