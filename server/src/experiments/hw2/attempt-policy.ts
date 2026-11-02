@@ -134,6 +134,23 @@ export interface AttemptRunView {
 
 const present = (value: unknown) => value !== null && value !== undefined;
 
+/** The longest provider-controlled value quoted in a reason, a log line or a report cell. */
+export const SHOWN_MAX = 80;
+
+/**
+ * A recorded value as it may be quoted: a string cut to `SHOWN_MAX`
+ * characters with control characters removed, a finite number, or a fixed
+ * word. Never the raw value of an unexpected type.
+ */
+export function shown(value: unknown, missing = 'unknown'): string {
+  if (value === null || value === undefined) return missing;
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'not a finite number';
+  if (typeof value !== 'string') return `(${typeof value})`;
+  // eslint-disable-next-line no-control-regex
+  const text = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
+  return text.length > SHOWN_MAX ? `${text.slice(0, SHOWN_MAX - 1)}…` : text;
+}
+
 /**
  * Why a settled run is not a strictly classified upstream pre-generation 429
  * (empty when it is). Every test reads a structured field; no message or body
@@ -148,15 +165,15 @@ export function throttleProblems(run: AttemptRunView | null, classification: Thr
   const experiment = run?.experiment ?? null;
   if (!experiment) return ['no experiment block'];
   if (run!.status === 'running') problems.push('the run is still running');
-  if (experiment.dispatch_state !== 'failed') problems.push(`dispatch_state ${experiment.dispatch_state ?? 'unknown'}, not failed`);
-  if (experiment.usage_known === true) problems.push('usage is reported as known');
+  if (experiment.dispatch_state !== 'failed') problems.push(`dispatch_state ${shown(experiment.dispatch_state)}, not failed`);
+  if (experiment.usage_known !== false) problems.push(`usage_known is ${shown(experiment.usage_known === true ? 'true' : experiment.usage_known)}, not false`);
   if (run!.cost_usd !== null && run!.cost_usd !== undefined) problems.push('the run reports a cost');
   const attempts = experiment.attempts ?? [];
   if (attempts.length !== 1) return [...problems, `expected exactly one attempt, found ${attempts.length}`];
   const a = attempts[0]!;
-  if (a.dispatch !== 'dispatched') problems.push(`attempt dispatch ${a.dispatch ?? 'unknown'}: the request did not reach the provider`);
-  if (a.outcome !== 'http_error') problems.push(`attempt outcome ${a.outcome ?? 'unknown'}, not http_error`);
-  if (typeof a.httpStatus !== 'number' || a.httpStatus !== classification.http_status) problems.push(`HTTP status ${a.httpStatus ?? 'unknown'}, not ${classification.http_status}`);
+  if (a.dispatch !== 'dispatched') problems.push(`attempt dispatch ${shown(a.dispatch)}: the request did not reach the provider`);
+  if (a.outcome !== 'http_error') problems.push(`attempt outcome ${shown(a.outcome)}, not http_error`);
+  if (typeof a.httpStatus !== 'number' || a.httpStatus !== classification.http_status) problems.push(`HTTP status ${shown(a.httpStatus)}, not ${classification.http_status}`);
   if (present(a.responseId)) problems.push('the attempt carries a response ID');
   if (present(a.generationIdHeader)) problems.push('the attempt carries a generation ID');
   if (present(a.tokensIn) || present(a.tokensOut) || present(a.costUsd)) problems.push('the attempt reports generation usage or cost');
@@ -166,12 +183,12 @@ export function throttleProblems(run: AttemptRunView | null, classification: Thr
   }
   const detail = a.errorDetail ?? null;
   if (!detail) return [...problems, 'no structured error detail'];
-  if (detail.origin !== classification.origin) problems.push(`error origin ${detail.origin ?? 'unknown'}, not ${classification.origin}`);
+  if (detail.origin !== classification.origin) problems.push(`error origin ${shown(detail.origin)}, not ${classification.origin}`);
   if (typeof detail.limitSource !== 'string' || !classification.limit_sources.includes(detail.limitSource)) {
-    problems.push(`limit_source ${detail.limitSource ?? 'missing'} is not in the allowlist (${classification.limit_sources.join(', ')})`);
+    problems.push(`limit_source ${shown(detail.limitSource, 'missing')} is not in the allowlist (${classification.limit_sources.join(', ')})`);
   }
-  if (!expected) problems.push('no frozen provider to compare the 429 with');
-  else if (detail.providerName !== expected.providerName) problems.push(`the 429 names provider ${detail.providerName ?? 'unknown'}, not ${expected.providerName}`);
+  if (!expected || typeof expected.providerName !== 'string' || expected.providerName.length === 0) problems.push('no frozen provider to compare the 429 with');
+  else if (detail.providerName !== expected.providerName) problems.push(`the 429 names provider ${shown(detail.providerName)}, not ${shown(expected.providerName)}`);
   return problems;
 }
 
@@ -228,12 +245,56 @@ export function protocolNext(plan: readonly PlannedAttempt[], policy: Policy, st
       : plan[(attempt.trial_index + 1) * per];
   }
   if (!candidate) return { kind: 'done' };
-  if (steps.length >= cap) return { kind: 'stopped', reason: 'attempt_cap', attempt_id: null };
+  // The cap names the attempt it refused, so a trial cut short by it can be labelled bounded.
+  if (steps.length >= cap) return { kind: 'stopped', reason: 'attempt_cap', attempt_id: candidate.attempt_id };
   return { kind: 'next', attempt: candidate };
 }
 
 /** 429-caused stops: trials they leave undispatched are `bounded`, not `incomplete`. */
 export const THROTTLE_STOPS: ReadonlySet<StopReason> = new Set(['throttle', 'throttle_outage', 'attempt_cap']);
+
+/** Where a study's protocol stands, as the report records it (and the adjudication input carries it). */
+export interface ProtocolSummary {
+  state: 'done' | 'stopped' | 'in_progress';
+  reason: string | null;
+  /** The stop's attempt (the last dispatched, or the one the cap refused); the attempt still owed when in progress. */
+  attempt_id: string | null;
+}
+
+/**
+ * A trial's label from its own attempt classes (in attempt order) and where
+ * the protocol stands. The report and the adjudication `prepare` both use
+ * it, so a label in the adjudication input is re-derived, never trusted.
+ * `observed` here means an observation the report counted.
+ */
+export function trialLabel(args: {
+  classes: readonly AttemptClass[];
+  attemptsPerTrial: number;
+  /** Every planned attempt ID of the trial. */
+  planIds: readonly string[];
+  protocol: ProtocolSummary;
+}): { label: TrialLabel; reason: string; scoring: number | null; pool_exhausted: boolean } {
+  const { classes, protocol } = args;
+  const scoringIndex = classes.findIndex((c) => c !== 'throttled');
+  const throttles = scoringIndex === -1 ? classes.length : scoringIndex;
+  const pool_exhausted = classes.length === args.attemptsPerTrial && classes.every((c) => c === 'throttled');
+  const throttleStop = protocol.state === 'stopped' && THROTTLE_STOPS.has(protocol.reason as StopReason);
+  const base = { scoring: scoringIndex === -1 ? null : scoringIndex + 1, pool_exhausted };
+  if (scoringIndex !== -1) {
+    const c = classes[scoringIndex]!;
+    const k = scoringIndex + 1;
+    if (c === 'observed') return { ...base, label: 'observed', reason: k === 1 ? 'observed on a1' : `observed on a${k} after ${throttles} classified 429(s)` };
+    if (c === 'truncated') return { ...base, label: 'imputed', reason: `truncated on a${k}; imputed against the hypothesis, never re-attempted` };
+    return { ...base, label: 'incomplete', reason: `a${k} failed` };
+  }
+  if (pool_exhausted) return { ...base, label: 'bounded', reason: `pool exhausted: ${classes.length} classified 429s` };
+  if (classes.length > 0 && throttleStop && protocol.attempt_id !== null && args.planIds.includes(protocol.attempt_id)) {
+    return { ...base, label: 'bounded', reason: `${classes.length} classified 429(s), then the ${protocol.reason === 'attempt_cap' ? 'attempt cap' : 'outage stop'}` };
+  }
+  if (classes.length === 0 && throttleStop) return { ...base, label: 'bounded', reason: `not dispatched: the study stopped on ${protocol.reason}` };
+  if (classes.length > 0) return { ...base, label: 'incomplete', reason: `${classes.length} classified 429(s) and an attempt still owed` };
+  return { ...base, label: 'incomplete', reason: protocol.state === 'stopped' ? `not dispatched: the study stopped on ${protocol.reason}` : 'not dispatched' };
+}
 
 // ---------------------------------------------------------------------------
 // P4 reporting: observations apart from the bounds
@@ -276,6 +337,12 @@ export interface P4Result {
   balance: ReturnType<typeof missingnessBalance>;
   /** Anything that forces the claim to `incomplete` whatever the tallies (protocol or record inconsistencies). */
   blockers: string[];
+  /**
+   * True when a trial is missing for a reason other than classified 429s
+   * (an `incomplete` trial, such as an ambiguous adjudicated verdict) or a
+   * blocker applies: the bounds are then descriptive only and support no claim.
+   */
+  bounds_descriptive: boolean;
 }
 
 /**
@@ -311,5 +378,18 @@ export function p4Result(tallies: Record<'with' | 'without', P4Tally>, blockers:
     claim_label,
     balance: missingnessBalance({ with: model(tallies.with), without: model(tallies.without) }),
     blockers: [...blockers],
+    bounds_descriptive: blocked || tallies.with.incomplete + tallies.without.incomplete > 0,
   };
+}
+
+/** Report wording shared by the runner report and the adjudication report (F6, I1). */
+export function p4Lines(p: P4Result, source: 'screen' | 'adjudicated'): string[] {
+  return [
+    `- Strict (observed plus v4-imputed truncations; every trial must be counted): ${p.strict}.`,
+    `- Sensitivity bounds over bounded trials: worst case ${p.worst_case}, best case ${p.best_case}.`,
+    `- Claim${source === 'screen' ? ' (regex screen)' : ''}: **${p.claim}**: ${p.claim_label}.`,
+    ...(p.bounds_descriptive ? ['- The bounds are descriptive only: a trial is missing for a reason other than classified 429s (an incomplete trial or an ambiguous adjudicated verdict), or the record is inconsistent.'] : []),
+    '- A worst-case success is a conditional bound. It is never a Verified or accepted result.',
+    `- Missing per condition: with ${p.balance.missing_with} of ${p.balance.scheduled_with}, without ${p.balance.missing_without} of ${p.balance.scheduled_without}; Fisher two-sided p = ${p.balance.fisher_two_sided_p.toFixed(3)} (reported, not a gate).`,
+  ];
 }
