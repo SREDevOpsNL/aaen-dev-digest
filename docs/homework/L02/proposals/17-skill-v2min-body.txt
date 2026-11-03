@@ -1,0 +1,1 @@
+Look for untested empty, missing, malformed, boundary, authorization, and dependency-failure inputs relevant to this diff. For each comparison or limit the diff adds or changes, require a test at the exact on-point value and one just across it; tests with only distant values cannot tell >= from >. Require fail-closed behavior where security or data integrity is involved.

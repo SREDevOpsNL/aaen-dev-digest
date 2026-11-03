@@ -362,3 +362,39 @@ needs a corrected freeze and a fresh approval.
   [evidence/item-b-v5-confirmatory/README.md](evidence/item-b-v5-confirmatory/README.md#teardown-2026-11-02).
 - **No disposable HW2 stack is running.** #17 stays Implemented;
   acceptance stays 50/2/1.
+
+## 2026-11-03: acceptance cycle for #17, #18 and #21 (unpaid)
+
+- **Branch:** `docs/l02-acceptance-cycle` (worktree
+  `aaen-dev-digest-l02-acceptance`), built on PR head `7b066cb`, then
+  fast-forwarded into PR #53.
+- **Agents:**
+  - A: #17 analysis;
+  - B: #18 Skill v2 review;
+  - C: #21 readiness;
+  - D: methodology review, three rounds;
+  - E: security, architecture and acceptance audit, two rounds;
+  - F: applied the corrections.
+
+  All findings are resolved or recorded
+  ([review record](proposals/17-18-21-review-record.md)).
+- **#17.** With Skill v1 there is no detectable difference on part (b): 1/5
+  *with* against 1/4 *without*, underpowered.
+  - The model often writes the on-point test but does not name the
+    boundary; the frozen rule credits naming only.
+  - More v1 runs are not recommended.
+  - A generic, unapproved v2 (`7b41e38b…`) is proposed, together with a
+    held-out evaluation template shared with #18.
+- **#18.** The corrected, unapproved v2 (`412b92e2…`) awaits an owner
+  decision. Its primary limitation is that it echoes the frozen rule's
+  wording.
+- **#21.** Readiness is re-verified. A guarded pre-run step (owner decision)
+  and an ingestion parser are ready. Q1–Q5 are mentor questions.
+- **Nested e2e fix** (`fix/e2e-pg-anonymous-volume`, from `main`
+  `b75059f`, uncommitted at last check): not integrated.
+  - Its 2-line `-v` patch applies cleanly to the PR head (dry run only).
+  - Integration needs separate authorization. Note that `scripts/e2e.sh`
+    is part of the implementation fingerprint.
+- **Unchanged:** statuses (#17 and #18 Implemented, #21 Blocked;
+  acceptance 50/2/1); seeded Skills; the allowlist; frozen records; the
+  ledger. No spending.

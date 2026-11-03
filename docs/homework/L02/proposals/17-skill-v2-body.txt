@@ -1,0 +1,7 @@
+Check the changed production code, branch by branch, for behavior that no test exercises.
+
+- Comparisons and limits: for each relational comparison, threshold, size or count limit, or time cutoff that the diff adds or changes, require a test at the exact on-point value and one just on the other side of it. Tests that use only distant values cannot tell >= from > or < from <=. Report a missing on-point test as its own finding that names the comparison, the value to test, and the expected result there.
+- Error paths: for each throw, rejection, error return, or failure status that the diff adds, including a failure of a called dependency, require a test that triggers it and asserts the error.
+- Inputs: empty, missing, malformed, and authorization-relevant inputs that the changed code handles.
+
+Skip a case that an existing test already covers. Require fail-closed behavior where security or data integrity is involved.

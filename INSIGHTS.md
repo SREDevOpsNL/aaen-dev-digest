@@ -249,3 +249,21 @@ says which file a finding goes in.
     should be verified against an independent clock after the fact.
 
   Record: `docs/homework/L02/evidence/item-b-v5-confirmatory/`.
+- **2026-11-03 — #17's missing half is a reporting gap, not a blindness**
+  (refines the 2026-11-02 entry).
+  - **What the findings show.** In the archived v3–v5 findings, the exact
+    on-point instant appears in a suggested test in 5/5 *with*-Skill reviews
+    and 2/4 *without*. Yet only 2 of 9 reviews, one per arm, *name* the
+    equality boundary in a title or rationale. That naming is all the frozen
+    rule, and the blinded adjudicators, can credit.
+  - **The difference is exploratory and not significant** (p = 0.167). The
+    official verdicts stand.
+  - **Lesson.** A Skill that measurably changes what a model writes can
+    still show no effect when the scoring instrument reads only some fields.
+    Before blaming the Skill, check which fields the rubric scores.
+  - **Overfitting risk.** A Skill revision that tells the model to "report
+    it as its own finding" targets the instrument, so it needs a held-out
+    evaluation with co-primary explicit and implicit endpoints.
+
+  Records: `docs/homework/L02/proposals/17-skill-effectiveness-analysis.md`,
+  `17-18-21-review-record.md`.
