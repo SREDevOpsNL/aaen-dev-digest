@@ -267,3 +267,21 @@ says which file a finding goes in.
 
   Records: `docs/homework/L02/proposals/17-skill-effectiveness-analysis.md`,
   `17-18-21-review-record.md`.
+- **2026-11-04 — L02 #21: the owner's `/pr-self-review` run, and a safeguard
+  that was never in force.** The owner's typed run read both Skill sets in
+  one invocation and reported PASS, so #21 moved to Verified. The run itself
+  went as designed. The surprise was the environment:
+  - **The deny step had nothing to deny.** The owner steps relied on approving
+    the router and checks and denying any edit or push. Claude Code ran the
+    session in `auto` mode by default, so it never asked for anything. No
+    write was attempted, so the result holds, but no denial was tested. That
+    is now a mentor question rather than a claim.
+  - **The coordinator touched the evidence checkout.** A coordinator session
+    whose folder was the scratch checkout scheduled a fallback wake-up.
+    Claude Code then wrote `.claude/scheduled_tasks.lock` there, which broke
+    the evidence's `diff -r` claim after it was written. Two independent
+    reviewers caught it.
+
+  Durable rules: [`LEARNINGS.md`](LEARNINGS.md#codebase-patterns--tool--library-notes)
+  and [`LEARNINGS.md`](LEARNINGS.md#recurring-errors--fixes) (2026-11-04).
+  Record: `docs/homework/L02/evidence/criterion-21-session.md`.

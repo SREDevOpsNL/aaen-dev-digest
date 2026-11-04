@@ -55,8 +55,8 @@ Also on the branch, as prerequisites:
 
 ## Status
 
-See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md): 50 Verified,
-2 Implemented, 1 Blocked. Still open:
+See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md): 51 Verified,
+2 Implemented, 0 Blocked. Still open:
 - criterion 14 is **Verified**. The mentor ruled on 2026-10-30 that Skills
   belong in the system-role message, and a live run trace confirmed it on
   2026-10-31 ([evidence](evidence/criterion-14-system-role.md)).
@@ -73,9 +73,11 @@ See the count at the top of [ACCEPTANCE.md](ACCEPTANCE.md): 50 Verified,
     ([record](evidence/item-b-v5-confirmatory/README.md)).
   - Under Skill v1, #18 is unresolved/unsupported. A disclosed Skill v2 needs
     the owner's review ([proposal](prereg/proposal-breaking-change-skill-v2.md)).
-- criterion 21 is **Blocked**. It needs a real *interactive* Claude Code
-  session in which the owner types `/pr-self-review --base HEAD`
-  ([preparation](evidence/criterion-21-preparation.md)).
+- criterion 21 is **Verified**. The owner typed `/pr-self-review --base HEAD`
+  in the scratch checkout on 2026-11-04. Both skill sets were read in one
+  invocation and the review reported PASS
+  ([evidence](evidence/criterion-21-session.md)). The mentor questions about
+  it, including the `auto` permission mode, are listed there.
 - original-source verification of the rubric, which was a recovered English
   translation.
 

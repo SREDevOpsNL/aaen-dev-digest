@@ -206,6 +206,16 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   cherry-pick it wholesale. Evidence: `git show
   641b637:docs/specs/conventions.md`; `git show --stat 641b637`.
 
+- **2026-11-04** — Claude Code can run a session in `auto` permission mode
+  with nothing configured: the L02 #21 transcript (CLI 2.1.278) records
+  `permission-mode: auto` from its first entry, with no `defaultMode` in user
+  or project settings. In `auto`, lower-risk tool calls run without a prompt,
+  so a procedure whose safety rests on a person approving or denying each call
+  is not in force. When a run depends on prompts, start the session in an
+  explicit prompting mode and check the transcript's `permission-mode`
+  entries afterwards. Evidence: `docs/homework/L02/evidence/criterion-21-session.md`
+  ("Permission mode").
+
 ## Decisions
 
 - **2026-09-21** — Use the Ubuntu 24.04 WSL2 checkout at
@@ -274,6 +284,15 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
     applies) in the teardown. Until it is fixed, identify a stack's volume
     with `docker inspect` *before* tearing it down. Never bulk-prune: the
     host also holds `devdigest_pgdata`.
+
+- **2026-11-04** — A Claude Code session that schedules a wake-up (a `/loop`
+  or fallback timer) creates `.claude/scheduled_tasks.lock` in its working
+  folder. Git ignores it (`.git/info/exclude`), so `git status` stays clean,
+  but `diff -r` on `.claude/` no longer matches. Do not schedule wake-ups
+  from a session whose folder is an evidence or scratch checkout; run the
+  coordinator from another worktree. Evidence:
+  `docs/homework/L02/evidence/criterion-21-session.md` ("No push hook",
+  `.claude/` row).
 
 ## Session Notes
 

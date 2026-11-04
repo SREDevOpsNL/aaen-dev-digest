@@ -73,3 +73,17 @@ Checked from the Claude Code desktop session working on PR #53:
 
 Criterion 21 stays Blocked until the owner opens a Code-tab session whose
 folder is the scratch checkout and types `/pr-self-review --base HEAD`.
+
+## Run captured (2026-11-04)
+
+The owner ran `/pr-self-review --base HEAD` in a new Claude Code CLI session
+whose folder was the scratch checkout, on 2026-11-04 from 08:56:14 to
+08:58:08 UTC. Before the run, the owner-authorized guarded pre-run step had
+moved the checkout from `21c8f09` to the PR head
+`b67740ed01038f2c6ef88c16f07deda6631710ea` and re-added the same two marker
+lines. The run routed both files, read all seven routed `SKILL.md` files,
+passed the five checks and reported `PR Self Review: PASS`, with no edit,
+commit or push. It ran in Claude Code's default `auto` permission mode, so no
+permission-denial test took place. The sanitized evidence is in
+[criterion-21-session.md](criterion-21-session.md). Criterion 21 is now
+Verified. The text above records the earlier, blocked state and is unchanged.

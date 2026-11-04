@@ -252,3 +252,21 @@ database and ports, at `0945a18`; it is code-identical to the pushed
 | independent reviews | security: 2 medium, 2 low and 3 info, then 6 follow-ups, then 5 follow-ups, all fixed and re-reviewed. Architecture: 2 medium, 3 low and 5 info, fixed; M2 (report semantics) documented. Drawer fix: READY |
 | GitHub CI on `5f96fc1` | 7 / 7 pass |
 | secret scan / L03 exclusion | no real secret in the tree; no intent code added |
+
+## Criterion 21: owner's `/pr-self-review` run (2026-11-04, unpaid)
+
+Run by the owner's session, as the skill instructs, in the scratch checkout at `b67740e` plus two comment
+lines, as reported in the owner's session
+([evidence](evidence/criterion-21-session.md)). These are the session's own
+results, not a separate verification run.
+
+| Check | Result |
+| --- | --- |
+| client typecheck / lint | pass / pass (no diagnostics printed) |
+| client tests | **136 / 136** (31 files) |
+| server typecheck | pass (no diagnostics printed) |
+| server hermetic tests | **654 / 654** (50 files) |
+| DB-backed tests | not run (the router does not select them for this diff) |
+
+Each command ran through `| tail`, so the status shown is from the printed
+output, not the exit code.

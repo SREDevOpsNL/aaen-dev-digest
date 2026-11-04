@@ -398,3 +398,27 @@ needs a corrected freeze and a fresh approval.
 - **Unchanged:** statuses (#17 and #18 Implemented, #21 Blocked;
   acceptance 50/2/1); seeded Skills; the allowlist; frozen records; the
   ledger. No spending.
+
+## 2026-11-04: #21 run captured and ingested (unpaid)
+
+- **Run:** the owner typed `/pr-self-review --base HEAD` in a new Claude Code
+  CLI 2.1.278 session (model `claude-sonnet-5`) whose folder was the scratch
+  checkout, 08:56:14–08:58:08 UTC.
+  - Baseline: the scratch checkout, moved by the authorized guarded pre-run
+    step to `b67740e` (the PR head then), plus the two marker lines.
+  - Verdict: `PR Self Review: PASS`; client 136/136 and server 654/654 tests.
+- **Ingestion:** the checklist parser on the raw transcript found one start
+  marker, seven successful `SKILL.md` `Read` calls (both sets), 0 `Skill`
+  calls, 0 subagents and 0 push/commit/PR calls; a separate tool-call
+  listing found 0 Edit/Write calls.
+  - The static no-push-hook checks are unchanged.
+  - The scratch checkout is still `b67740e` plus two marker lines.
+  - The raw transcript stays outside Git (SHA-256 `406124c4…`).
+  - Evidence: [criterion-21-session.md](evidence/criterion-21-session.md).
+- **Permission mode:** the session ran in Claude Code's default `auto` mode.
+  Nothing needed denying, so no permission-denial test took place. It is a
+  mentor question, not a failure.
+- **Acceptance:** #21 Blocked → Verified; **51 Verified, 2 Implemented
+  (17, 18), 0 Blocked.** Q1–Q5 stay mentor questions.
+- **Unchanged:** the scratch checkout, seeded Skills, #17/#18 records, frozen
+  evidence, the ledger. No spending; no paid experiment rerun.

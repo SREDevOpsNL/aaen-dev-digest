@@ -30,6 +30,13 @@ Read `.claude/skills/frontend-ui-architecture/SKILL.md`,
 `.claude/skills/pr-self-review/SKILL.md`. In Claude Code, `/pr-self-review` on
 a diff that touches both `client/` and `server/` loads both skill sets.
 
+The owner's manual run on 2026-11-04 shows this on a two-line client/server
+diff: the router, seven `SKILL.md` reads, five passing checks and
+`PR Self Review: PASS`, with no commit or push
+([evidence](evidence/criterion-21-session.md)). It ran in Claude Code's default
+`auto` permission mode; see the evidence for what that does and does not
+show.
+
 ## 2. Skills Lab (rows 6–12, 15, 16, 22–29, 44, 52)
 
 1. The sidebar shows **SKILLS LAB** with Conventions, Agents and Skills

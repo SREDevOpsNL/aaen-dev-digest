@@ -258,3 +258,9 @@ Its JSON result reported zero input/output tokens, zero tool turns and zero
 model cost. This is evidence of the blocker, **not** evidence that criterion 21
 passed. The owner must sign in to Claude Code, then rerun the manual skill in
 that same scratch checkout and preserve the complete report.
+
+**Update, 2026-11-04.** The owner's manual run in that scratch checkout,
+moved to `b67740e`, completed. Both skill sets were read in one invocation
+and the review reported PASS. See
+[criterion-21-session.md](criterion-21-session.md). The blocker above is
+historical.
