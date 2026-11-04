@@ -216,6 +216,20 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   entries afterwards. Evidence: `docs/homework/L02/evidence/criterion-21-session.md`
   ("Permission mode").
 
+- **2026-11-04** — A commit that changes only Markdown is not automatically
+  instruction-neutral. The root `AGENTS.md` (and so every `CLAUDE.md`
+  symlink) tells agents to read the root and module `LEARNINGS.md` and
+  `INSIGHTS.md` before work, so appending to them changes what a later
+  session may load. When an agent run at an earlier commit is reused as
+  evidence for a later head, list the changed files
+  (`git diff --name-status <run> <head>`), check each one against the
+  instruction surface (`.claude/`, `AGENTS.md`/`CLAUDE.md`, the insights
+  files, and the routed `SKILL.md` files and their references), and check
+  in the transcript which of them the run actually read. Write a "this
+  command prints nothing" claim only once the commit's file set is final,
+  and rerun it at the new head. Evidence: `AGENTS.md:32`;
+  `docs/homework/L02/evidence/criterion-21-session.md` (the Q5 correction).
+
 ## Decisions
 
 - **2026-09-21** — Use the Ubuntu 24.04 WSL2 checkout at

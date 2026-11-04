@@ -333,3 +333,63 @@ screenshots are filed with this record.
 | B. No push or commit | met: 0 calls; scratch `HEAD` unchanged |
 | C. Static no-push-hook evidence unchanged | met |
 | D. Redaction | met; raw jsonl not committed |
+
+## Correction and preliminary review (2026-11-04, later)
+
+Appended after the commit that added this file (`85ab923`). The text above
+is unchanged.
+
+### Correction to the Q5 note
+
+The Q5 note in [Open mentor questions](#open-mentor-questions) says that
+`git diff --stat b67740e <head> -- . ':!docs'` "should print nothing". At
+`85ab923` it prints `INSIGHTS.md` and `LEARNINGS.md`: the root insights
+entries were added to that commit after the note was written. The correct
+statement:
+
+- Between `b67740e` and `85ab923`, only `docs/homework/L02/**`, the root
+  `INSIGHTS.md` and the root `LEARNINGS.md` changed
+  (`git diff --name-status b67740e 85ab923`).
+- `.claude/`, every `AGENTS.md` and `CLAUDE.md`, `.github/`, `scripts/` and
+  all package source are unchanged. This prints nothing:
+  `git diff --stat b67740e <head> -- . ':!docs' ':!INSIGHTS.md' ':!LEARNINGS.md'`.
+- The root `AGENTS.md` tells agents to read the root `LEARNINGS.md` and
+  `INSIGHTS.md` for cross-package work, so those two files belong to the
+  general instruction surface. They do not affect the router, the
+  permissions or the `pr-self-review` instructions. The recorded run read
+  neither: its only `Read` calls were the seven `SKILL.md` files.
+
+### Preliminary review of the mentor questions
+
+On 2026-11-04 the owner shared a written review of Q1–Q5 and the
+permission-mode question, titled as a mentor review. It says its verdicts are
+"engineering judgments based on the provided criterion, rather than a claim
+that the instructor has approved the implementation", and it works from the
+translated rubric, not the original. It is recorded here as a **preliminary
+review, not a mentor or instructor ruling**. Its reading of the translated
+criterion adds two points to the row's paraphrase: automatic invocation
+through a `git push` hook is disabled locally, and the manual run must load
+both Skill sets at the same time. The rubric text itself stays private.
+
+| Question | Preliminary verdict and its condition | This run |
+| --- | --- | --- |
+| Q1 (loading) | Conditionally yes. Native invocation of the dispatcher plus reading both child `SKILL.md` sets is sufficient, though it is not native activation of each child Skill, *provided the transcript shows their instructions being applied* | Native invocation: yes; the typed command is followed by the skill text Claude Code injects. Dispatcher instructions applied: the report follows its format, its security rule is reflected ("security review wasn't triggered since nothing touches credentials, untrusted input, or auth") and the verdict follows its PASS rule. Child skills: all seven were read in full and each file was discussed in its own domain (the Next.js `"use client"` directive, the Fastify route module). The comment-only diff gave no rule anything to act on, so **no finding shows a child skill changing the outcome** |
+| Q2 (no push hook) | Yes for the static configuration, though not absolute proof of runtime behaviour. A real push is needed only if the original rubric asks for one | The static checks in [No push hook](#no-push-hook) cover the effective git hooks, `core.hooksPath`, husky/lefthook/package scripts, Claude Code settings and the workflows |
+| Q3 (CI) | Not a push hook, provided CI never invokes the review skill | CI runs only the router's fixture tests and the instruction checker |
+| Q5 (earlier commit) | Valid if the effective harness is unchanged; documentation can change agent behaviour, so check the changed files | Met, with the correction above |
+| Permission mode | `auto` is acceptable as manual: who started the run and how tools are approved are separate | Met: the owner typed the command |
+| Original rubric | Not verified against the original LMS text | Still open |
+
+What follows for row 21:
+
+- The review recommends marking the criterion "Implemented" once its
+  conditions hold. In this matrix, **Implemented** means *not* shown at
+  runtime, so the review's recommendation corresponds to what row 21 already
+  records. Row 21 stays **Verified**; the count stays 51 Verified,
+  2 Implemented, 0 Blocked.
+- **Weakest point:** the Q1 condition that the child skills' instructions are
+  applied. On this diff it is shown only as each skill being read and
+  considered. A stronger demonstration needs a new run on a diff that breaks
+  a rule from each set. No new run is authorized.
+- **Still open:** whether the original rubric requires native activation of
+  each child Skill. The translated wording cannot settle it.

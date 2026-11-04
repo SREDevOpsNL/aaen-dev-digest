@@ -422,3 +422,18 @@ needs a corrected freeze and a fresh approval.
   (17, 18), 0 Blocked.** Q1–Q5 stay mentor questions.
 - **Unchanged:** the scratch checkout, seeded Skills, #17/#18 records, frozen
   evidence, the ledger. No spending; no paid experiment rerun.
+
+## 2026-11-04 (later): #21 evidence correction and preliminary review (unpaid)
+
+- **Correction**, appended to
+  [criterion-21-session.md](evidence/criterion-21-session.md#correction-and-preliminary-review-2026-11-04-later):
+  `b67740e..85ab923` also changed the root `INSIGHTS.md` and `LEARNINGS.md`,
+  which `AGENTS.md` tells agents to read. The run read neither; `.claude/`,
+  `AGENTS.md`/`CLAUDE.md`, workflows and source are unchanged.
+- **Preliminary review:** the owner-shared review of Q1–Q5 and the permission
+  mode is recorded there. It is *not* an instructor ruling. It accepts all
+  five with conditions. The weakest condition is visible child-skill
+  influence, which is barely shown on the comment-only diff.
+- **CI at `85ab923`:** 6/6 workflows and 7/7 check runs passed.
+- **Unchanged:** #21 Verified; acceptance 51/2/0; PR #53 Draft; no rerun,
+  no spending, no Skill change.
