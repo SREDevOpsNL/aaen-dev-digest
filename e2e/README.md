@@ -101,3 +101,7 @@ a CI artifact by `.github/workflows/e2e-web.yml`).
 | `06-onboarding` | `/onboarding` → add-repository form renders (no submit) |
 | `07-settings` | `/settings/api-keys` + `/settings/models` → section titles render |
 | `07a-findings-preview-scroll` | PR #482 → Agent runs tab → Timeline severity counters (runs/reviews GETs stubbed in the page) → preview stays open through a scrollbar drag, an in-place list scroll, and keyboard PageDown; closes on pointer leave, Tab-out, and page scroll |
+| `11-skills-lab` | SKILLS LAB sidebar section → skill card side preview → Open details → Versioning tab → Add menu → Create dialog (not submitted) → skill and agent delete confirmations dismissed with Cancel and X |
+| `12-agent-skills` | Agent Skills tab: a link toggle and category label on every skill; only linked, enabled skills are draggable; arrows remain (nothing is reordered) |
+| `13-api-contract` | API Contract Reviewer with its three seeded skills in order (3 / 4), the skills on the Skills page without `deprecation-policy` (import-only), and fixture PRs #501 / #502 in the PR list (nothing is linked, imported or reviewed). Needs the opt-in experiment-fixture seed, which the hermetic runner and CI enable in their disposable `devdigest_e2e` database |
+| `14-agent-skill-count` | Agents page and the agent editor's agent list: every seeded agent card shows its linked-skill count from `GET /agents` (Test Quality Reviewer 4, API Contract Reviewer 3, others 0) |

@@ -6,11 +6,69 @@
 
 ## What Doesn't Work
 
+- **2026-10-25** — Extension of the 2026-10-17 `agent-browser drag` entry in
+  `LEARNINGS.md`: a real-pointer `left_click_drag` from the Claude desktop
+  built-in browser also starts no native HTML5 drag. Dragging the
+  `deprecation-policy` handle onto the first linked row on the L02 walkthrough
+  stack left `agent_skills.order` unchanged. Drag-and-drop acceptance (L02
+  rows 13, 14, 31) therefore needs a person's mouse; automation can only check
+  eligibility (`draggable` per row) and dispatch synthetic `DragEvent`s.
+  Evidence: `docs/homework/L02/evidence/api-sql-transcript.md` (rows 13, 31,
+  37).
+
 ## Codebase Patterns & Tool / Library Notes
 
 ## Decisions
 
 ## Recurring Errors & Fixes
+
+- **2026-10-25: Two stacks from one checkout share `client/.next`, and the API
+  base is compiled into it.** A hermetic run (`scripts/e2e.sh`, web :3100, API
+  :3101) next to a running `--serve` experiment stack (web :3250, API :3251)
+  recompiled the shared `.next`. The :3250 server then served pages whose
+  inlined `NEXT_PUBLIC_API_BASE` was :3101 ("Cannot reach the DevDigest engine
+  at http://localhost:3101"), even though its own environment said :3251. The
+  fix was to restart only the :3250 `next dev` after removing `client/.next`.
+  `--serve` waits only on the API process, so the API, the database and the
+  ledger were untouched. Run a hermetic suite from a separate worktree while a
+  serve stack is up. Evidence: `/proc/<pid>/environ` showed :3251 while `grep
+  -rl localhost:3101 client/.next` matched compiled pages;
+  `scripts/e2e.sh:84,212`.
+
+- **2026-10-25: Read flow data through test ids, not DOM shape, and never
+  reuse a row id's prefix.** Flow 13 took a skill's name from `label > span`.
+  When the Skills tab's attach switch got its own `<label>` with a hidden
+  "Attach {name} to this agent" span, the selector silently returned that
+  text, and the flow failed only in CI. The fix's first test id,
+  `agent-skill-name`, broke flow 12 and a unit test the other way: both
+  select rows with `[data-testid^=agent-skill-]`, so every name span counted
+  as an extra row. A value a flow reads needs a test id outside every prefix
+  that is used for matching (`skill-row-name`). Run the whole hermetic suite,
+  not only the flow that names the component. Evidence:
+  `e2e/specs/13-api-contract.flow.json`,
+  `e2e/specs/12-agent-skills.flow.json`, `SkillsTab.test.tsx`; CI run
+  40215740455.
+
+- **2026-10-24** — `wait --url /pulls` does not mean the PR list has
+  rendered: a `find text "<PR title>" click` right after it races
+  `GET /repos/:id/pulls` and fails intermittently. On the L01 baseline the
+  hermetic suite went 7/8 on flow 05, and once 05 was guarded the next run
+  failed 07a the same way, so fixing the one failing flow was not enough.
+  Precede every text click with `wait --text` for the same text (flow 02 already
+  did), and audit all flows for the pattern rather than the one that failed.
+  Evidence: `e2e/specs/02-repo-pulls-detail.flow.json:7` (the guard),
+  `e2e/specs/04-pr-findings.flow.json:7`, `e2e/specs/05-pr-diff.flow.json:7`,
+  `e2e/specs/07a-findings-preview-scroll.flow.json:13`; two consecutive 8/8
+  runs after the guard.
+
+- **2026-10-25** — Correction to the 2026-10-24 row-click entry above: the
+  same race also hits clicks on content that a slow request renders, not only
+  the PR row. On the hermetic stack `GET /pulls/:id` first tries a GitHub
+  refresh, offline for about 2 s, and `wait --load networkidle` returned before
+  it, so flow 05's "Files changed" tab click failed. Guard every click that
+  follows a navigation with `wait --text` for that control, including tabs.
+  Evidence: `e2e/specs/05-pr-diff.flow.json:11`; the API log showed the detail
+  request still open when the click ran; two consecutive 14/14 runs after.
 
 ## Session Notes
 

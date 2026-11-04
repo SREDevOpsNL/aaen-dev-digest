@@ -1,0 +1,263 @@
+{
+  "version": 2,
+  "implementation_fingerprint": "201ffa9ad50a91ae23dd2bab213823e492739dabb32f23aeb4f58d4fffd804cb",
+  "non_skill_fingerprints": {
+    "17": "c6010d90c44151bb6cc144d21cdbd9493dab1947cbf40e5791860c9a71d1a860",
+    "18": "e72553e45551e83d63d5cda58aafb8c40dcdbb2edb4b6c64d7cdd112b07b479c"
+  },
+  "stack": {
+    "database": "devdigest_hw2f_1fe1aeec",
+    "provider": "deepinfra/fp8",
+    "providerName": "DeepInfra",
+    "model": "deepseek/deepseek-v4-flash",
+    "servedModel": "deepseek/deepseek-v4-flash-20260423",
+    "maxOutputTokens": 4000,
+    "prices": {
+      "input": 9e-8,
+      "output": 1.8e-7,
+      "request": 0
+    },
+    "generationLookup": {
+      "attempts": 13,
+      "delayMs": 5000
+    }
+  },
+  "retry": {
+    "transport": 0,
+    "structured": 0
+  },
+  "temperature": 0,
+  "fixtures": [
+    {
+      "number": 501,
+      "reviewer": "Test Quality Reviewer",
+      "target_skill": "Edge Cases and Error Paths",
+      "title": "Add coupon discounts to checkout totals",
+      "body_sha": "b5f97b1344d9373409683432b2afa1af87accc47e1eafad0650cb7e2c84d168d",
+      "files": [
+        {
+          "path": "src/billing/discount.ts",
+          "patch_sha": "7eb352792002ea7fc5529a569389e2494f4e2fc092a73b795605e3d558c125b3"
+        },
+        {
+          "path": "src/billing/discount.test.ts",
+          "patch_sha": "5f24016e1b325057ae923b19a38e5dd6d096b0cab4b6996db4daa5a4e7de5db1"
+        }
+      ],
+      "diff_sha256": "8e0ba13345806d37f29233f6ba28057f52fd17c010ce0a482267b8cbc527d186",
+      "expected_anchors": [
+        {
+          "file": "src/billing/discount.test.ts",
+          "start_line": 4,
+          "end_line": 8
+        },
+        {
+          "file": "src/billing/discount.ts",
+          "start_line": 11,
+          "end_line": 12
+        }
+      ]
+    },
+    {
+      "number": 502,
+      "reviewer": "API Contract Reviewer",
+      "target_skill": "breaking-change",
+      "title": "Look up payments by public reference",
+      "body_sha": "387de49c6cb25db06004266235df61e387f7ce64b7c9e6e64d3a6f7fa5a0d81d",
+      "files": [
+        {
+          "path": "src/api/payments.ts",
+          "patch_sha": "5f3781d3ed00c7d7c1420ece951f0d5f3b0e2868feab8597fc1f64122f9a4b7f"
+        },
+        {
+          "path": "src/payments/store.ts",
+          "patch_sha": "f2fd75cc1d52fb60ee5adaa2a06a2410d83b0d761c08b49d7afc0082ac089abc"
+        }
+      ],
+      "diff_sha256": "db6475df8244efc5ef4a323a07bf0b1433abf0a6bc820ef2229dc409868116fc",
+      "expected_anchors": [
+        {
+          "file": "src/api/payments.ts",
+          "start_line": 12,
+          "end_line": 13
+        }
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "name": "breaking-change",
+      "body_sha": "0d3d2e49739250a4c085e9287f9d0c76e48d2158d8bbf0d08c17369a155c6770"
+    },
+    {
+      "name": "Edge Cases and Error Paths",
+      "body_sha": "82a7461ebbbe62468b147ed04fb2571b0bf7d8d1adeb794839739e77d48ed17f"
+    }
+  ],
+  "agents": [
+    {
+      "name": "API Contract Reviewer",
+      "system_prompt_sha": "234bd58a28dd2bd385dfda320407e095241282669084a5735a8d45492666c276",
+      "model": "deepseek/deepseek-v4-flash",
+      "strategy": "single-pass",
+      "repo_intel": false
+    },
+    {
+      "name": "Test Quality Reviewer",
+      "system_prompt_sha": "8ad1660b08790d0506aebbfa2f2b7b69c5f130155edc31ca9771aae4fea6c3ad",
+      "model": "deepseek/deepseek-v4-flash",
+      "strategy": "single-pass",
+      "repo_intel": false
+    }
+  ],
+  "schedule": {
+    "seed": 20261030,
+    "slots": [
+      {
+        "slot_id": "c-18-with-5",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-18-without-5",
+        "experiment": "18",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-17-with-1",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-without-1",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-17-without-2",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-17-with-2",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-with-5",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-without-5",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-without-1",
+        "experiment": "18",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-with-1",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-18-without-3",
+        "experiment": "18",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-with-3",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-without-4",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-17-with-4",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-with-3",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-17-without-3",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-with-2",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-18-without-2",
+        "experiment": "18",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-18-with-4",
+        "experiment": "18",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-18-without-4",
+        "experiment": "18",
+        "condition": "without"
+      }
+    ]
+  },
+  "rules": {
+    "17": {
+      "anchors": [
+        {
+          "file": "src/billing/discount.test.ts",
+          "start_line": 4,
+          "end_line": 8
+        },
+        {
+          "file": "src/billing/discount.ts",
+          "start_line": 9,
+          "end_line": 12
+        }
+      ],
+      "keywords": [
+        "\\b(expir\\w*)\\b[^.]{0,80}\\b(boundary|equal\\w*|exactly|same (instant|time|moment)|>=|at (the )?expir\\w*)\\b",
+        "\\b(boundary|equal\\w*|exactly)\\b[^.]{0,80}\\bexpir\\w*",
+        "now\\s*(==|===|>=)\\s*(coupon\\.)?expiresAt",
+        "\\b(unknown|expired|invalid)\\b[^.]{0,60}\\b(code|coupon)\\b[^.]{0,60}\\b(test\\w*|untested|covered|coverage)\\b",
+        "\\b(error|failure|exception|throw\\w*|negative|sad)[- ](paths?|cases?|branch(es)?)\\b",
+        "happy[- ]path"
+      ]
+    },
+    "18": {
+      "anchors": [
+        {
+          "file": "src/api/payments.ts",
+          "start_line": 12,
+          "end_line": 13
+        },
+        {
+          "file": "src/payments/store.ts",
+          "start_line": 12,
+          "end_line": 13
+        }
+      ],
+      "keywords": [
+        "\\b404\\b",
+        "\\b(look\\w*[- ]?up|find\\w*|resolv\\w*|query|treat\\w*|interpret\\w*)\\b[^.]{0,80}\\b(public )?reference\\b[^.]{0,80}\\b(instead of|rather than|not)\\b[^.]{0,20}\\b(the )?(payment )?id\\b",
+        "\\b(existing|old|current|v1) (clients?|callers?|consumers?|requests?|urls?|links?)\\b[^.]{0,120}\\b(id|ids)\\b[^.]{0,80}\\b(fail\\w*|break\\w*|not found|no longer)\\b",
+        "\\b(id|ids)\\b[^.]{0,80}\\b(no longer|not found|fail\\w*|break\\w*)\\b"
+      ]
+    }
+  },
+  "per_slot_reservation_usd": 0.005
+}

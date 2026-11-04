@@ -48,6 +48,26 @@ describe("A5 Run Trace drawer (smoke)", () => {
     expect(screen.getByText("Tool calls")).toBeInTheDocument();
   });
 
+  // The header must show the persisted agent_runs.status, not assume success:
+  // a run refused before model dispatch still has a trace document.
+  it.each([
+    ["failed", "PR #502 · failed"],
+    ["cancelled", "PR #502 · cancelled"],
+    ["running", "PR #502 · running"],
+    ["done", "PR #502 · completed"],
+  ])("shows the persisted run status %s in the header", (status, subtitle) => {
+    renderWithIntl(
+      <RunTraceDrawer runId="r1" agentName="Security" prNumber={502} status={status} onClose={() => {}} />,
+    );
+    expect(screen.getByText(subtitle)).toBeInTheDocument();
+  });
+
+  it("does not claim completion while the run status is unknown", () => {
+    renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={502} onClose={() => {}} />);
+    expect(screen.getByText("PR #502")).toBeInTheDocument();
+    expect(screen.queryByText(/completed/)).not.toBeInTheDocument();
+  });
+
   it("switches to the live log tab", () => {
     renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />);
     fireEvent.click(screen.getByText("log"));

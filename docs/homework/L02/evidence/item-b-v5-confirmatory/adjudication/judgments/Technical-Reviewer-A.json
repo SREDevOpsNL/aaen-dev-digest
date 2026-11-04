@@ -1,0 +1,51 @@
+{
+  "adjudicator": "Technical-Reviewer-A",
+  "packet_sha256": "2c5160c8265cf026e6521aa79494a8a325cb46a0610681de379cab2449b4396a",
+  "verdicts": [
+    {
+      "case_id": "case-2b595714daad",
+      "detected": "yes",
+      "finding_refs": [
+        "f2",
+        "f10"
+      ],
+      "reason": "(a) f2 (and f1) identify missing tests for the expired-coupon / unknown-code throw branches; (b) f10 explicitly identifies the missing test where now exactly equals expiresAt under the >= comparison."
+    },
+    {
+      "case_id": "case-44a057b01071",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "(a) met by f1/f2 (unknown and expired error paths untested), but (b) is missing: no finding names the now == expiresAt equality boundary; f2 speaks only of 'after expiry'."
+    },
+    {
+      "case_id": "case-54a0e22c2df2",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "(a) met by f1/f2; (b) missing: f2 quotes 'now >= coupon.expiresAt' but asks only for an expired-path test, never a test at exact equality; f7 is about a stale hardcoded date."
+    },
+    {
+      "case_id": "case-94dd9186c45a",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "(a) met by f1/f2; (b) missing: f2 mentions the >= operator and changing the comparison but does not explicitly identify a missing test at now == expiresAt."
+    },
+    {
+      "case_id": "case-a4c38abb3565",
+      "detected": "no",
+      "finding_refs": [
+        "f1",
+        "f2"
+      ],
+      "reason": "(a) met by f1/f2; (b) missing: no finding names the exact expiry-equality boundary; f10 concerns a hardcoded date becoming stale, not now == expiresAt."
+    }
+  ]
+}

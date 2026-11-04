@@ -1,5 +1,6 @@
 /**
- * tokenizer adapter — token counter for the repo-map budget search (T3).
+ * tokenizer adapter — token counter for the repo-map budget search (T3) and the
+ * Skills block of the run trace.
  *
  * The repo-map renderer (pipeline/repo-map.ts) binary-searches the largest set
  * of symbols that fits a token budget; that loop calls `count()` ≤ ~13 times.
@@ -8,8 +9,9 @@
  * lazy-initialised (loading the BPE ranks is the heavy part) and any failure
  * falls back to the `ceil(chars / 4)` heuristic — the renderer must never throw.
  *
- * Scope: in-process, ONLY under modules/repo-intel. Swappable in tests via a
- * mock counter (ContainerOverrides.tokenizer).
+ * Scope: in-process — the repo-map budget under modules/repo-intel, and the
+ * run trace's Skills-section token count (modules/reviews). Swappable in tests
+ * via a mock counter (ContainerOverrides.tokenizer).
  */
 import { getEncoding, type Tiktoken } from 'js-tiktoken';
 

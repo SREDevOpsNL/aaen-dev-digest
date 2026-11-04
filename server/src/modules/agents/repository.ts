@@ -1,9 +1,20 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
-import type { Db } from '../../db/client.js';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import type { Db, Tx } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
+import type { CiFailOn, Provider, ReviewStrategy, SkillApproval } from '@devdigest/shared';
+import { latestSkillDecisions, skillApprovalState } from '../_shared/skill-approval.js';
 import { DEFAULT_AGENT_DESCRIPTION, INITIAL_AGENT_VERSION } from './constants.js';
 import { isConfigChange } from './helpers.js';
+import {
+  exceedsSkillLimit,
+  insertSkillAt,
+  linkedSkillIds,
+  lockAgent,
+  MAX_AGENT_SKILLS,
+  missingWorkspaceSkills,
+  setAgentSkillEnabled,
+  writeAgentSkills,
+} from '../_shared/agent-skill-links.js';
 
 /**
  * A2 — agents data-access. Owns `agents`, `agent_versions`, and the
@@ -46,13 +57,64 @@ export interface UpdateAgent {
 export interface LinkedSkillRow {
   skill: typeof t.skills.$inferSelect;
   order: number;
+  /** The per-agent switch on the link (agent_skills.enabled). */
+  linkEnabled: boolean;
+  /** Whether the skill's CURRENT content is approved for the system message. */
+  approval: SkillApproval;
 }
+
+type LinkRowWithoutApproval = Omit<LinkedSkillRow, 'approval'>;
+
+/** Attach each linked skill's approval state, read in the skills' own workspace. */
+async function withApproval(db: Db | Tx, rows: LinkRowWithoutApproval[]): Promise<LinkedSkillRow[]> {
+  if (rows.length === 0) return [];
+  // An agent's links are all in its workspace (the join enforces it), so one lookup.
+  const workspaceId = rows[0]!.skill.workspaceId;
+  const latest = await latestSkillDecisions(db, workspaceId, rows.map((r) => r.skill.id));
+  // Decisions are read in that workspace only: anything else reads as unapproved.
+  return rows.map((row) => ({ ...row, approval: skillApprovalState(row.skill, latest.get(row.skill.id)) }));
+}
+
+/** An agent with the number of skills linked to it. */
+export interface AgentWithSkillCount {
+  agent: AgentRow;
+  skillCount: number;
+}
+
+export type SetSkillsResult =
+  | { kind: 'ok'; links: LinkedSkillRow[] }
+  | { kind: 'agent_not_found' }
+  | { kind: 'skills_not_found'; skillIds: string[] }
+  | { kind: 'limit_exceeded'; max: number };
+
+export type SetSkillEnabledResult = { kind: 'ok' } | { kind: 'agent_not_found' } | { kind: 'link_not_found' };
 
 export class AgentsRepository {
   constructor(private db: Db) {}
 
-  async list(workspaceId: string): Promise<AgentRow[]> {
-    return this.db.select().from(t.agents).where(eq(t.agents.workspaceId, workspaceId));
+  /**
+   * The workspace's agents, each with its linked-skill count, in one statement.
+   * The count is a correlated subquery rather than a GROUP BY, so the outer scan
+   * (and the row order clients see) is the same as a plain select. It counts
+   * links to skills in the agent's own workspace, enabled or not; for links made
+   * through the API that equals the "N / 4 attached" count of `linkedSkills`.
+   */
+  async list(workspaceId: string): Promise<AgentWithSkillCount[]> {
+    // Drizzle renders a single-table select's columns unqualified ("id"), which
+    // inside the subquery would bind to the inner tables, so the outer agent
+    // columns are qualified explicitly.
+    const agentId = sql`${t.agents}.${sql.identifier(t.agents.id.name)}`;
+    const agentWorkspaceId = sql`${t.agents}.${sql.identifier(t.agents.workspaceId.name)}`;
+    const linkedCount = this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(t.agentSkills)
+      .innerJoin(t.skills, and(eq(t.skills.id, t.agentSkills.skillId), eq(t.skills.workspaceId, agentWorkspaceId)))
+      .where(eq(t.agentSkills.agentId, agentId));
+    const rows = await this.db
+      .select({ agent: t.agents, skillCount: sql<number>`(${linkedCount})` })
+      .from(t.agents)
+      .where(eq(t.agents.workspaceId, workspaceId));
+    return rows.map((row) => ({ agent: row.agent, skillCount: row.skillCount }));
   }
 
   async listEnabled(workspaceId: string): Promise<AgentRow[]> {
@@ -191,12 +253,36 @@ export class AgentsRepository {
   /** Skills linked to an agent, in `order` ascending. */
   async linkedSkills(agentId: string): Promise<LinkedSkillRow[]> {
     const rows = await this.db
-      .select({ skill: t.skills, order: t.agentSkills.order })
+      .select({ skill: t.skills, order: t.agentSkills.order, linkEnabled: t.agentSkills.enabled })
       .from(t.agentSkills)
       .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
       .where(eq(t.agentSkills.agentId, agentId))
-      .orderBy(asc(t.agentSkills.order));
-    return rows.map((r) => ({ skill: r.skill, order: r.order }));
+      .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
+    return withApproval(this.db, rows.map((r) => ({ skill: r.skill, order: r.order, linkEnabled: r.linkEnabled })));
+  }
+
+  /**
+   * Enabled skill bodies used by the review prompt, in deterministic link
+   * order, each with its approval state. Disabled skills (globally or for this
+   * agent) are excluded here; the caller must refuse the review when any
+   * returned skill is not `approved` (fail closed, see the review executor).
+   */
+  async enabledSkillsForPrompt(agentId: string): Promise<LinkedSkillRow[]> {
+    const rows = await this.db
+      .select({ skill: t.skills, order: t.agentSkills.order, linkEnabled: t.agentSkills.enabled })
+      .from(t.agentSkills)
+      .innerJoin(t.agents, eq(t.agentSkills.agentId, t.agents.id))
+      .innerJoin(
+        t.skills,
+        and(
+          eq(t.agentSkills.skillId, t.skills.id),
+          eq(t.skills.workspaceId, t.agents.workspaceId),
+        ),
+      )
+      // Both switches must be on: the skill's own (global) and the link's (per agent).
+      .where(and(eq(t.agentSkills.agentId, agentId), eq(t.skills.enabled, true), eq(t.agentSkills.enabled, true)))
+      .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
+    return withApproval(this.db, rows.map((row) => ({ skill: row.skill, order: row.order, linkEnabled: row.linkEnabled })));
   }
 
   async skillIdsForAgent(agentId: string): Promise<string[]> {
@@ -204,33 +290,82 @@ export class AgentsRepository {
     return links.map((l) => l.skill.id);
   }
 
-  /** Link a skill to an agent at a given order (idempotent: upserts order). */
-  async linkSkill(agentId: string, skillId: string, order: number): Promise<void> {
-    await this.db
-      .insert(t.agentSkills)
-      .values({ agentId, skillId, order })
-      .onConflictDoUpdate({
-        target: [t.agentSkills.agentId, t.agentSkills.skillId],
-        set: { order },
-      });
-  }
-
-  async unlinkSkill(agentId: string, skillId: string): Promise<void> {
-    await this.db
-      .delete(t.agentSkills)
-      .where(and(eq(t.agentSkills.agentId, agentId), eq(t.agentSkills.skillId, skillId)));
-  }
-
   /**
    * Replace the full set of linked skills for an agent with `skillIds`, assigning
    * order = index. Used by the "Skills" editor tab (attach/reorder). Skills not in
    * the list are unlinked.
    */
-  async setSkills(agentId: string, skillIds: string[]): Promise<void> {
-    await this.db.delete(t.agentSkills).where(eq(t.agentSkills.agentId, agentId));
-    if (skillIds.length === 0) return;
-    await this.db
-      .insert(t.agentSkills)
-      .values(skillIds.map((skillId, i) => ({ agentId, skillId, order: i })));
+  async setSkills(
+    workspaceId: string,
+    agentId: string,
+    skillIds: string[],
+  ): Promise<SetSkillsResult> {
+    return this.relink(workspaceId, agentId, () => skillIds);
+  }
+
+  /**
+   * Link one skill at `order` (default: the end), or move it there if already
+   * linked. The read of the current links happens under the agent row lock, in
+   * the same transaction as the write, so concurrent link-one requests cannot
+   * overwrite each other.
+   */
+  async linkSkill(
+    workspaceId: string,
+    agentId: string,
+    skillId: string,
+    order?: number,
+  ): Promise<SetSkillsResult> {
+    return this.relink(workspaceId, agentId, (previous) => insertSkillAt(previous, skillId, order));
+  }
+
+  /**
+   * Turn the per-agent switch of one linked skill on or off, under the same
+   * agent row lock as every other link write.
+   */
+  async setSkillEnabled(
+    workspaceId: string,
+    agentId: string,
+    skillId: string,
+    enabled: boolean,
+  ): Promise<SetSkillEnabledResult> {
+    return this.db.transaction(async (tx) => {
+      const agent = await lockAgent(tx, workspaceId, agentId);
+      if (!agent) return { kind: 'agent_not_found' };
+      return (await setAgentSkillEnabled(tx, agentId, skillId, enabled)) ? { kind: 'ok' } : { kind: 'link_not_found' };
+    });
+  }
+
+  /** Lock the agent, compute the next links from the current ones, validate, write. */
+  private async relink(
+    workspaceId: string,
+    agentId: string,
+    nextFrom: (previous: string[]) => string[],
+  ): Promise<SetSkillsResult> {
+    return this.db.transaction(async (tx) => {
+      const agent = await lockAgent(tx, workspaceId, agentId);
+      if (!agent) return { kind: 'agent_not_found' };
+
+      const previous = await linkedSkillIds(tx, agentId);
+      const next = nextFrom(previous);
+      const missing = await missingWorkspaceSkills(tx, workspaceId, next);
+      if (missing.length > 0) return { kind: 'skills_not_found', skillIds: missing };
+      if (exceedsSkillLimit(previous, next)) return { kind: 'limit_exceeded', max: MAX_AGENT_SKILLS };
+
+      await writeAgentSkills(tx, agent, previous, next);
+
+      const links = await tx
+        .select({ skill: t.skills, order: t.agentSkills.order, linkEnabled: t.agentSkills.enabled })
+        .from(t.agentSkills)
+        .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
+        .where(eq(t.agentSkills.agentId, agentId))
+        .orderBy(asc(t.agentSkills.order), asc(t.skills.id));
+      return {
+        kind: 'ok',
+        links: await withApproval(
+          tx,
+          links.map((row) => ({ skill: row.skill, order: row.order, linkEnabled: row.linkEnabled })),
+        ),
+      };
+    });
   }
 }

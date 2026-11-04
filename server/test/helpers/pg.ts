@@ -1,5 +1,7 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { sql } from 'drizzle-orm';
 import { createDb, type DbHandle } from '../../src/db/client.js';
+import { DISPOSABLE_MARKER_TABLE } from '../../src/db/disposable.js';
 import { runMigrations } from '../../src/db/migrate.js';
 
 /**
@@ -34,13 +36,16 @@ export async function dockerAvailable(): Promise<boolean> {
 
 export async function startPg(): Promise<PgFixture> {
   const container = await new PostgreSqlContainer('pgvector/pgvector:pg16')
-    .withDatabase('devdigest')
+    // A disposable name (db/disposable.ts): the dev database is `devdigest`.
+    .withDatabase('devdigest_test')
     .withUsername('devdigest')
     .withPassword('devdigest')
     .start();
   const url = container.getConnectionUri();
   await runMigrations(url);
   const handle = createDb(url, { max: 5 });
+  // Provenance for buildApp's test guard: only this fresh container gets the marker.
+  await handle.db.execute(sql.raw(`create table ${DISPOSABLE_MARKER_TABLE} (marked_at timestamptz not null default now())`));
   return {
     container,
     handle,

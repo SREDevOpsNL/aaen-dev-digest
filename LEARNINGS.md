@@ -86,6 +86,47 @@ typecheck and tests. Do not treat the earlier absence as current state.
 Evidence: client/eslint.config.mjs:15, client/package.json:10,
 .github/workflows/client.yml:47.
 
+- **2026-10-02** — `CLAUDE.md → AGENTS.md` compatibility symlinks failed
+  silently. During L02 development the five Git symlink blobs stored
+  `AGENTS.md\n`, so every native checkout pointed at a file named with a
+  trailing newline, and the verifier of that time accepted them by trimming the
+  target. They are not needed: Claude Code loads `AGENTS.md` itself when no
+  `CLAUDE.md` exists (verified 2026-10-07 under What Works). Keep `AGENTS.md` as
+  the only instruction file; `node scripts/verify-agent-instructions.mjs`
+  rejects symlinks and `CLAUDE.md`-style files. Evidence:
+  `git cat-file -p 1be590e:CLAUDE.md | od -c` → `A G E N T S . m d \n`, from the
+  original L02 branch. That commit is not part of the rewritten PR #4 history,
+  which never contains the symlinks, so the blob is reproducible only where
+  `1be590e` is still held (a local reflog or an older clone).
+
+- **2026-10-16** — Correction to the 2026-10-02 `CLAUDE.md` symlink entry: the
+  Homework 2 rubric requires a `CLAUDE.md` next to each `AGENTS.md`, so the five
+  are back as symlinks, and they work when the stored target is exactly
+  `AGENTS.md`. The rubric's other allowed form, a one-line `@AGENTS.md` import,
+  fails: Claude Code 2.1.278 expands an `@` import only in the starting
+  directory's `CLAUDE.md`, not in an ancestor's, and once any `CLAUDE.md` exists
+  it no longer reads `AGENTS.md` directly. With imports, a session started in
+  `client/` lost the root `AGENTS.md`, and one started in `client/src/app` got
+  no project instructions at all. With symlinks, sessions started at the root,
+  `client/`, `client/src/app` and `server/src/modules` each received the root
+  and package sentinels exactly once; without any `CLAUDE.md` the same nested
+  probe also passes. Probe below a package root, not only at it. Evidence:
+  headless `claude -p --tools ""` sentinel runs (0 tool calls), sentinels
+  removed afterwards; `scripts/verify-agent-instructions.mjs` (requires Git
+  mode 120000 and the exact stored target).
+
+- **2026-10-19** — A committed document cannot freeze the commit it lives in.
+  The first PR-F2 runner refused a confirmatory run unless the
+  pre-registration's frozen `git rev-parse HEAD` equalled the current `HEAD`,
+  but committing the pre-registration creates a new `HEAD`, so the check
+  could never pass. Freeze a fingerprint of the implementation instead: the
+  committed blob ids (`git ls-tree -r HEAD -- <paths>`) of the paths that
+  determine behaviour, which a docs-only commit leaves unchanged, and refuse
+  uncommitted changes in those paths so the fingerprint describes the running
+  code. Evidence: `server/src/experiments/hw2/source.ts`
+  (`implementationFingerprint`), `server/test/hw2-source.test.ts` (a real Git
+  lifecycle: HEAD moves when the pre-registration is committed, the
+  fingerprint does not; a mutation back to HEAD fails it).
 
 ## Codebase Patterns & Tool / Library Notes
 
@@ -157,6 +198,38 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   `reviewer-core/src/review/run.ts:159-184` (`reviewPullRequest`),
   `server/src/platform/container.ts:181-188` (`Container.buildLlm`).
 
+- **2026-09-25** — The reverted history contains a complete Conventions
+  Extractor specification, implementation, and tests in commit `641b637`, but
+  that commit also bundles an older Skills implementation and migrations
+  `0011`-`0015`. Use it as a porting reference against the current L02 Skills
+  contracts and generate a new migration from the current schema; do not
+  cherry-pick it wholesale. Evidence: `git show
+  641b637:docs/specs/conventions.md`; `git show --stat 641b637`.
+
+- **2026-11-04** — Claude Code can run a session in `auto` permission mode
+  with nothing configured: the L02 #21 transcript (CLI 2.1.278) records
+  `permission-mode: auto` from its first entry, with no `defaultMode` in user
+  or project settings. In `auto`, lower-risk tool calls run without a prompt,
+  so a procedure whose safety rests on a person approving or denying each call
+  is not in force. When a run depends on prompts, start the session in an
+  explicit prompting mode and check the transcript's `permission-mode`
+  entries afterwards. Evidence: `docs/homework/L02/evidence/criterion-21-session.md`
+  ("Permission mode").
+
+- **2026-11-04** — A commit that changes only Markdown is not automatically
+  instruction-neutral. The root `AGENTS.md` (and so every `CLAUDE.md`
+  symlink) tells agents to read the root and module `LEARNINGS.md` and
+  `INSIGHTS.md` before work, so appending to them changes what a later
+  session may load. When an agent run at an earlier commit is reused as
+  evidence for a later head, list the changed files
+  (`git diff --name-status <run> <head>`), check each one against the
+  instruction surface (`.claude/`, `AGENTS.md`/`CLAUDE.md`, the insights
+  files, and the routed `SKILL.md` files and their references), and check
+  in the transcript which of them the run actually read. Write a "this
+  command prints nothing" claim only once the commit's file set is final,
+  and rerun it at the new head. Evidence: `AGENTS.md:32`;
+  `docs/homework/L02/evidence/criterion-21-session.md` (the Q5 correction).
+
 ## Decisions
 
 - **2026-09-21** — Use the Ubuntu 24.04 WSL2 checkout at
@@ -188,6 +261,52 @@ Evidence: client/eslint.config.mjs:15, client/package.json:10,
   multi-step experiments. Evidence: `devdigest-final-review-db` was healthy,
   then exited with code 0 before the next migration command; the same sequence
   completed when kept in one session (`migrate` → `seed` → API → two reviews).
+
+- **2026-10-13** — In a fresh worktree, `server` `pnpm typecheck` fails with
+  `TS2322: Type 'unknown' is not assignable to type 'T'` in
+  `src/adapters/llm/anthropic.ts` and `openai.ts` even when the code is
+  unchanged, because the server compiles `reviewer-core` source through a path
+  alias and `reviewer-core/node_modules` is missing, so its Zod types do not
+  resolve. Run `npm ci` in `reviewer-core/` before typechecking `server/` in a
+  new worktree. Evidence: the same commit typechecked cleanly after
+  `npm ci` in `reviewer-core/`, with identical `typescript` and `zod`
+  versions in `server/`.
+
+- **2026-10-31** — The root `.gitignore` rule `*.log` (line 18) silently drops
+  any `.log` file copied into `docs/` as evidence: `git add` of the directory
+  skips it without a warning, and Markdown links to it break only on the
+  remote. Commit evidence logs as `.txt`, and check with `git ls-files <dir>`
+  that every linked file is tracked. Evidence:
+  `docs/homework/L02/evidence/item-b-confirmatory/` (five logs missing from
+  `a782927`, restored as `*-log.txt`).
+
+- **2026-11-02** — `scripts/e2e.sh` leaks one anonymous Docker volume per
+  stack.
+  - **Cause.** It starts Postgres with `docker run -d --rm`, but its teardown
+    (line 139, and the pre-start cleanup at line 146) runs
+    `docker rm -f "$PG_CONTAINER"` without `-v`.
+  - **What `--rm` does.** It removes the image's anonymous data volume only
+    when the container exits on its own. `docker rm -f` without `-v` leaves
+    the volume behind.
+  - **Evidence.** The v5 stack's normal Ctrl-C teardown removed the container
+    but left its only mount, volume `5f5713dd…`, with no users. Another
+    unattached volume, `744cbee1…`, appeared during that day's
+    `npm run e2e:hermetic` matrix run. The other unidentified anonymous
+    volumes on this host plausibly have the same origin, but that is not
+    proven per volume.
+  - **How to apply.** Use `docker rm -f -v` (or `docker stop`, so `--rm`
+    applies) in the teardown. Until it is fixed, identify a stack's volume
+    with `docker inspect` *before* tearing it down. Never bulk-prune: the
+    host also holds `devdigest_pgdata`.
+
+- **2026-11-04** — A Claude Code session that schedules a wake-up (a `/loop`
+  or fallback timer) creates `.claude/scheduled_tasks.lock` in its working
+  folder. Git ignores it (`.git/info/exclude`), so `git status` stays clean,
+  but `diff -r` on `.claude/` no longer matches. Do not schedule wake-ups
+  from a session whose folder is an evidence or scratch checkout; run the
+  coordinator from another worktree. Evidence:
+  `docs/homework/L02/evidence/criterion-21-session.md` ("No push hook",
+  `.claude/` row).
 
 ## Session Notes
 

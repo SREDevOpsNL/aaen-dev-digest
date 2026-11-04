@@ -1,0 +1,4 @@
+2026-11-02 ~16:37Z, after the run, on the same host (free checks, no provider call):
+1) node: setTimeout 60000 ms -> wall 54859 ms, monotonic 60062 ms (wall/monotonic 0.9134)
+2) node: 120.06 s monotonic (setTimeout 120000) -> wall 109.51 s, external (www.google.com Date header) 110 s
+Conclusion: the host's monotonic clock (setTimeout, performance.now) runs ~9% fast against real time; the wall clock agrees with the external clock. The runner's pacing waits were therefore ~8-9% short in real time.

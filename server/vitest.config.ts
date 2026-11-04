@@ -12,6 +12,8 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['test/**/*.test.ts', 'src/**/*.test.ts'],
+    // Before every test file: no server/.env, and a closed, disposable DATABASE_URL.
+    setupFiles: ['test/setup/isolate-database.ts'],
     // Testcontainers integration tests can be slow to spin up Postgres.
     testTimeout: 120_000,
     hookTimeout: 120_000,

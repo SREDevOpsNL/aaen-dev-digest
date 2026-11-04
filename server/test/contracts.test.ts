@@ -172,6 +172,61 @@ describe('AI contracts parse fixtures', () => {
     expect(trace.stats.cost_usd).toBeUndefined();
   });
 
+  // The shape every failure path wrote before lifecycle evidence existed (as
+  // in the preserved Item B v3 failure trace; all text here is synthetic).
+  const legacyFailedTrace = {
+    config: { agent: 'Test Quality Reviewer', version: '16', provider: 'openrouter', model: 'deepseek/deepseek-v4-flash', pr: 501, source: 'local' },
+    stats: { duration_ms: 106577, tokens_in: 0, tokens_out: 0, cost_usd: null, findings: 0, grounding: '0/0 passed' },
+    prompt_assembly: { system: 'Synthetic reviewer system prompt.', skills: null, memory: null, specs: null, user: '' },
+    tool_calls: [],
+    raw_output: '',
+    memory_pulled: [],
+    specs_read: [],
+    log: [{ t: '00.00', kind: 'error', msg: 'Run failed: output reached the max_tokens cap (finish_reason=length) for Review; experiment mode does not reprompt' }],
+    experiment: {
+      stack_id: 'hw2f-synthetic', slot_id: 'c-17-with-2', experiment: '17', condition: 'with', phase: 'confirmatory',
+      manifest_fingerprint: 'a'.repeat(64), dispatch_state: 'failed', refusal_reason: 'output reached the max_tokens cap',
+      diff_sha256: 'b'.repeat(64), expected_diff_sha256: 'b'.repeat(64), non_skill_fingerprint: 'c'.repeat(64),
+      skill_fingerprint: 'd'.repeat(64), expected_non_skill_fingerprint: 'c'.repeat(64),
+      routing: { order: ['deepinfra/fp8'], only: ['deepinfra/fp8'], allow_fallbacks: false }, preflight: null, usage_known: true,
+      attempts: [{ sequence: 1, dispatch: 'dispatched', outcome: 'truncated', tokensIn: 1142, tokensOut: 4000, costUsd: 0.00082278, finishReason: 'length' }],
+    },
+  };
+
+  it('an old JSONB trace (legacy failure fallback, no lifecycle fields) still validates unchanged', () => {
+    const trace = RunTrace.parse(legacyFailedTrace);
+    expect(trace).toEqual(legacyFailedTrace);
+    expect(trace.dispatch).toBeUndefined();
+    expect(trace.prompt_assembly_source).toBeUndefined();
+    expect(trace.stats.usage_state).toBeUndefined();
+  });
+
+  it('a trace with lifecycle evidence validates; unknown usage is null, never a fallback zero', () => {
+    const assembly = { system: 'Synthetic system.', skills: '<untrusted source="skill-0">\n### Synthetic\n</untrusted>', user: 'Synthetic diff' };
+    const trace = RunTrace.parse({
+      ...legacyFailedTrace,
+      stats: { ...legacyFailedTrace.stats, tokens_in: null, tokens_out: null, cost_usd: null, usage_state: 'unknown' },
+      prompt_assembly: assembly,
+      prompt_assembly_source: 'dispatched_request',
+      prompt_assembly_sha256: 'e'.repeat(64),
+      dispatch: { state: 'dispatched' },
+      stages: [
+        {
+          stage_id: 'single-0', kind: 'single', index: 0, count: 1, label: 'all files', state: 'failed',
+          assembly_sha256: 'e'.repeat(64), assembly_bytes: 60, assembly_complete: true, usage_state: 'unknown',
+          usage: { tokens_in: null, tokens_out: null, cost_usd: null },
+          attempts: [{ attempt: 1, retry: 'initial', phase: 'submitted', submitted_at: '2026-11-01T00:00:00Z', response_id: null, finish_reason: null, http_status: 429, failure: 'http_error', usage: null, verified_usage: null }],
+        },
+      ],
+      partial_output: null,
+      persistence: { state: 'reaped', at: '2026-11-01T00:00:00Z', note: 'n' },
+    });
+    expect(trace.stats.tokens_in).toBeNull();
+    expect(trace.stages?.[0]?.attempts[0]?.phase).toBe('submitted');
+    expect(() => RunTrace.parse({ ...trace, dispatch: { state: 'sent' } })).toThrow();
+    expect(() => RunTrace.parse({ ...trace, partial_output: { kind: 'truncated', text: 'x', provider_incomplete: false } })).toThrow();
+  });
+
   it('accepts authoritative run cost across PR, review, and run DTOs', () => {
     const pr = PrMeta.parse({
       number: 482,

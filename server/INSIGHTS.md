@@ -40,11 +40,74 @@ server/src/vendor/shared/contracts/platform.ts:178.
 
 ## What Doesn't Work
 
+- **2026-10-24** — A prompt-content assertion can pass through an unrelated
+  prompt section. Porting L02 without L03 broke the seed test asserting that a
+  fixture PR is "reviewed from the stored patch": on `main` it had passed only
+  because the L03 intent block cited the file, while the mock git diff was used.
+  Assert on text only the intended source contains and on the absence of the
+  decoy. Details: the 2026-10-24 entry in `LEARNINGS.md`. Evidence:
+  `server/test/seed.it.test.ts` (fixture review case).
+
+- **2026-10-20** — HW2 experiment 17 could never have run, and three PRs of
+  experiment tooling did not show it. The experiment executor refuses any
+  reviewer with repo intel on. The seeded Test Quality Reviewer sets no
+  `repoIntel`, so it got the schema default `true`.
+  - Only experiment 18 (the API Contract Reviewer, seeded single-pass without
+    repo intel) had a happy-path test.
+  - The refusal test used the Test Quality Reviewer as its *negative* example,
+    so a gap read as passing coverage.
+  - The free preview and the Gate 4 `manifest` would have refused it too.
+
+  It was found in a read-only Gate 3 review, before any paid request. Fixture
+  mode now seeds that reviewer with the experiment shape. When one guard covers
+  several actors, give each of them a positive test, and make a refusal test
+  build an explicitly invalid input rather than reuse a real one. Evidence:
+  `server/src/db/schema/agents.ts:31` (`repoIntel` default),
+  `server/src/modules/reviews/experiment-run.ts` (`prepareExperimentSlot`),
+  `server/src/db/seed.ts` (`EXPERIMENT_REVIEWER_SHAPE`),
+  `server/test/experiments.it.test.ts`.
+
 ## Codebase Patterns & Tool / Library Notes
 
 ## Decisions
 
 ## Recurring Errors & Fixes
+
+- **2026-10-25 — A relink silently resets per-agent switches and order the
+  operator set.** `writeAgentSkills` keeps the `enabled` flag only for links
+  that survive a write. The HW2 runner and the free condition preview relinked
+  the reviewer to the condition's skills and then wrote back the original ids
+  only. That brought removed links back switched on, and a condition slot left
+  the reviewer relinked. Either one would have undone the operator's
+  drag-and-drop arrangement before the trace-evidence slot that depends on it,
+  and spent a paid slot on the wrong prompt. Snapshot `{skill_id, link_enabled}`
+  before any relink and restore the ids *and* every switch afterwards. Read the
+  snapshot before the ledger reservation, so a failed read costs nothing. Guard
+  the operator-links slot with a free preview whose Skill fingerprint must
+  equal the one recorded at preflight. Evidence:
+  `server/src/modules/_shared/agent-skill-links.ts` (`writeAgentSkills`),
+  `server/src/experiments/hw2/runner.ts` (`linkSnapshot`, `restoreLinks`),
+  `server/src/experiments/hw2/cli.ts` (`conditionPreview`),
+  `server/test/hw2-runner.test.ts`; commit `e78fe0b`.
+
+- **2026-10-27 — A one-use paid capability needs a durable intent before
+  its token can exist.** Writing a valid token before fsyncing the
+  authorization log allowed a crash window with an unlogged usable grant.
+  Sync the intent first, treat a crash as a consumed slot, and exercise the
+  boundary with a real child-process SIGKILL test. Evidence:
+  `server/src/experiments/hw2/conventions-runner.ts:222`
+  (`authorizeExtraction`),
+  `server/test/conventions-experiment.test.ts:327`
+  (`a real SIGKILL after token write`).
+
+- **2026-10-27 — A returned fingerprint failure is not durable evidence.**
+  The confirmatory runner stopped in memory on a mismatch, but a restart
+  could skip the completed known-cost slot and dispatch the next one.
+  Persist the mismatch in the terminal ledger event and reject
+  continuation after resume or reconciliation. Evidence:
+  `server/src/experiments/hw2/runner.ts:259` (`dispatchAndFollow`),
+  `server/test/hw2-runner.test.ts:500`
+  (`stops when a settled run does not reproduce`).
 
 ## Session Notes
 

@@ -14,8 +14,10 @@
 // Prompt assembly + prompt-injection hardening.
 export {
   assemblePrompt,
+  renderSkillsSection,
   wrapUntrusted,
   type PromptParts,
+  type SkillsSection,
   type AssembledPrompt,
 } from './prompt.js';
 
@@ -37,6 +39,10 @@ export { reduceReviews, sliceDiff } from './review/reduce.js';
 // The engine entry point: given (diff + resolved agent inputs + LLM) → grounded Review.
 export {
   reviewPullRequest,
+  reviewPromptParts,
+  singlePassMessages,
+  REVIEW_SCHEMA_NAME,
+  type ReviewPromptInput,
   DEFAULT_MAP_THRESHOLD_LINES,
   DEFAULT_REVIEW_MAX_RETRIES,
   type ReviewInput,
@@ -44,7 +50,33 @@ export {
   type ReviewEvent,
   type ReviewStrategy,
   type ReviewMode,
+  type ReviewStage,
+  type ReviewStageUsage,
+  type ReviewStageEvent,
+  type ReviewStageAttemptEvent,
 } from './review/run.js';
+
+// Request lifecycle evidence (stage attempts) and the typed provider errors.
+export {
+  AttemptRecorder,
+  reportedNumber,
+  safeIdentifier,
+  type AttemptHandle,
+  type AttemptLifecycle,
+  type AttemptLifecycleEvent,
+  type AttemptOutcome,
+  type AttemptPhase,
+  type AttemptRetryKind,
+  type AttemptUsage,
+  type LifecycleStructuredRequest,
+} from './llm/lifecycle.js';
+export {
+  PARTIAL_OUTPUT_MAX_BYTES,
+  ProviderOutputError,
+  ReviewRefusedError,
+  boundUtf8,
+  type ProviderOutputUsage,
+} from './llm/provider-output-error.js';
 
 // Output: grounded Review → GitHubReviewPayload (body + inline comments + event).
 export {
@@ -56,4 +88,22 @@ export {
 
 // The single OpenAI-compatible structured provider (OpenRouter), shared by the
 // CI runner and the server's openrouter path. Owns session grouping + guards.
-export { OpenRouterProvider, type OpenRouterProviderOptions } from './llm/openrouter.js';
+export {
+  GENERATION_LOOKUP_READ_TIMEOUT_MS,
+  METADATA_TIMEOUT_MS,
+  OPENROUTER_DEFAULT_TIMEOUT_MS,
+  OpenRouterProvider,
+  experimentRequestBody,
+  generationLookupDeadlineMs,
+  type OpenRouterProviderOptions,
+} from './llm/openrouter.js';
+// Sanitizers for provider-controlled text (error messages, tokens, counts).
+export { safeCount, safeToken, sanitizeErrorText, sanitizeText } from './llm/error-detail.js';
+// Pure parsers of OpenRouter's provenance metadata (HW2 experiment mode).
+export {
+  GENERATION_ID,
+  experimentOptionsProblem,
+  parseEndpoints,
+  summarizeGeneration,
+  summarizeRouterMetadata,
+} from './llm/openrouter-metadata.js';

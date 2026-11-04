@@ -6,6 +6,7 @@ import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
+import { ExperimentsService } from '../experiments/service.js';
 
 /**
  * reviews module.
@@ -34,6 +35,12 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
       ...(body.agentId !== undefined ? { agentId: body.agentId } : {}),
       ...(body.all !== undefined ? { all: body.all } : {}),
     });
+    // HW2 experiment mode: a Run Review click for the agent of an armed slot
+    // dispatches that slot (criteria 17–18: "PR page → Run Review").
+    if (container.config.experiment) {
+      const armed = await new ExperimentsService(container).reviewFromArmedSlot(workspaceId, req.params.id, targets, req.log);
+      if (armed) return { pr_id: req.params.id, runs: [{ run_id: armed.run_id, agent_id: targets[0]!.id, agent_name: targets[0]!.name }], reviews: [] };
+    }
     const { runs, reviews } = await service.runReview(
       workspaceId,
       req.params.id,
@@ -49,8 +56,12 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     '/runs/:id/events',
     { schema: { params: IdParams }, config: { rateLimit: false } },
     async (req, reply) => {
-    await getContext(container, req);
+    const { workspaceId } = await getContext(container, req);
     const runId = req.params.id;
+    // Refuse before opening the stream: a foreign run's buffer is never replayed.
+    if (!(await service.runInWorkspace(workspaceId, runId))) {
+      throw new NotFoundError('Run not found');
+    }
 
     reply.sse(
       (async function* () {
@@ -112,15 +123,15 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
 
   // ---- Cancel an in-flight run --------------------------------------------
   app.post('/runs/:id/cancel', { schema: { params: IdParams } }, async (req) => {
-    await getContext(container, req);
-    await service.cancelRun(req.params.id);
+    const { workspaceId } = await getContext(container, req);
+    await service.cancelRun(workspaceId, req.params.id);
     return { ok: true };
   });
 
   // ---- Run trace (single document; A5 enriches with multi-agent/stats) ----
   app.get('/runs/:id/trace', { schema: { params: IdParams } }, async (req) => {
-    await getContext(container, req);
-    const trace = await service.getRunTrace(req.params.id);
+    const { workspaceId } = await getContext(container, req);
+    const trace = await service.getRunTrace(workspaceId, req.params.id);
     if (!trace) throw new NotFoundError('Run trace not found');
     return trace;
   });

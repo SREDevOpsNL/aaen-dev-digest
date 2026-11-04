@@ -1,0 +1,7 @@
+{"adjudicator": "Technical Reviewer B", "packet_sha256": "9e798175776c0ed7e4eb3b13cc4b4044e720c90d00e80abc837e0a07e8512cc0", "verdicts": [
+{"case_id": "case-22da25c10c26", "detected": "no", "finding_refs": ["f1", "f2"], "reason": "Element (a) met: f1/f2 flag untested unknown-code and expired-coupon throws. Element (b) missing: f2 quotes `now >= coupon.expiresAt` but only says the test date is well before expiry; no finding identifies a missing test at now == expiresAt."},
+{"case_id": "case-6f8d3ce292a9", "detected": "no", "finding_refs": ["f1"], "reason": "f1 names only the :id to :reference parameter rename (parameter-name contract, destructuring) and a generic breaking-change claim; it never identifies that the lookup changed to public reference so payment-ID requests now 404 (it even notes the pattern is the same)."},
+{"case_id": "case-733ced5c04a6", "detected": "no", "finding_refs": [], "reason": "No findings."},
+{"case_id": "case-abd44b7d77f7", "detected": "no", "finding_refs": ["f1", "f2"], "reason": "Element (a) met: f1/f2 flag missing expired and unknown-code error tests. Element (b) missing: no finding mentions the exact expiry-equality boundary now == expiresAt."},
+{"case_id": "case-b178165d828f", "detected": "yes", "finding_refs": ["f1", "f2", "f7"], "reason": "(a) f1/f2 identify missing tests for the unknown-code and expired-coupon throws; (b) f7 explicitly identifies the missing test where now equals expiresAt under `now >= coupon.expiresAt`."}
+]}

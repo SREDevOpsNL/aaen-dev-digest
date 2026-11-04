@@ -22,15 +22,60 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# --serve: start a HW2 experiment stack instead of running the flows. It gets a
+# fresh stack id, a database and container named after it, Docker labels the
+# experiment runner checks, an empty per-stack clone directory, and the server
+# in experiment mode (DEVDIGEST_EXPERIMENT_* must be set by the operator; see
+# docs/homework/L02/EXPERIMENTS.md). It blocks until Ctrl-C, then
+# tears down like a normal run. No model is called by this script.
+SERVE=0
+CONVENTIONS=0
+for arg in "$@"; do
+  case "$arg" in
+    --serve) SERVE=1 ;;
+    --conventions) CONVENTIONS=1 ;;
+    *) echo "unknown argument: $arg (supported: --serve --conventions)"; exit 2 ;;
+  esac
+done
+[ "$CONVENTIONS" -eq 0 ] || [ "$SERVE" -eq 1 ] || { echo "--conventions requires --serve"; exit 2; }
+
 # --- config (all overridable; defaults dodge the dev stack on 5432/3000/3001) ---
 PG_CONTAINER="${E2E_PG_CONTAINER:-devdigest-e2e-postgres}"
 PG_PORT="${E2E_PG_PORT:-5433}"
 PG_IMAGE="${E2E_PG_IMAGE:-pgvector/pgvector:pg16}"
-PG_DB="${E2E_PG_DB:-devdigest}"
+# A disposable database name (server/src/db/disposable.ts); the dev DB is `devdigest`.
+PG_DB="${E2E_PG_DB:-devdigest_e2e}"
 PG_USER="${E2E_PG_USER:-devdigest}"
 PG_PASS="${E2E_PG_PASS:-devdigest}"
 API_PORT="${E2E_API_PORT:-3101}"
 WEB_PORT="${E2E_WEB_PORT:-3100}"
+PG_LABELS=(--label devdigest.disposable=true)
+# Extra `next dev` arguments; --serve binds the UI to loopback only.
+WEB_HOST_ARGS=()
+
+if [ "$SERVE" -eq 1 ]; then
+  NONCE="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+  STACK_ID="hw2f-${NONCE}"
+  PG_CONTAINER="devdigest-hw2f-${NONCE}"
+  PG_DB="devdigest_hw2f_${NONCE}"
+  PG_PORT="${E2E_PG_PORT:-5450}"
+  API_PORT="${E2E_API_PORT:-3251}"
+  WEB_PORT="${E2E_WEB_PORT:-3250}"
+  PG_LABELS+=(--label "devdigest.stack-id=${STACK_ID}" --label "devdigest.database=${PG_DB}")
+  # Loopback only, like Postgres and the experiment-mode API (config.apiHost):
+  # the UI's server side calls the API, so an exposed UI would expose it too.
+  WEB_HOST_ARGS=(-H 127.0.0.1)
+  for var in DEVDIGEST_EXPERIMENT_PROVIDER DEVDIGEST_EXPERIMENT_MODEL DEVDIGEST_EXPERIMENT_MAX_OUTPUT_TOKENS \
+             DEVDIGEST_EXPERIMENT_PRICE_INPUT DEVDIGEST_EXPERIMENT_PRICE_OUTPUT; do
+    [ -n "${!var:-}" ] || { echo "--serve needs $var (see docs/homework/L02/EXPERIMENTS.md)"; exit 2; }
+  done
+  export DEVDIGEST_EXPERIMENT_STACK_ID="$STACK_ID"
+  # Empty per-stack clone directory: a clone would replace the frozen fixture patches.
+  EXPERIMENT_DIR="${HOME}/.devdigest/hw2-experiments/${STACK_ID}"
+  mkdir -p "${EXPERIMENT_DIR}/clones"
+  chmod 700 "${HOME}/.devdigest/hw2-experiments" "${EXPERIMENT_DIR}"
+  export DEVDIGEST_CLONE_DIR="${EXPERIMENT_DIR}/clones"
+fi
 
 # Exported BEFORE any tsx/next spawn. dotenv (used by migrate/seed/config) does
 # not override already-set env, so these win over server/.env's :5432 / :3001
@@ -50,6 +95,21 @@ command -v docker >/dev/null || { echo "docker not found"; exit 1; }
 command -v pnpm   >/dev/null || { echo "pnpm not found (npm i -g pnpm)"; exit 1; }
 command -v agent-browser >/dev/null || \
   warn "agent-browser not found — install once: npm i -g agent-browser && agent-browser install"
+[ "$SERVE" -eq 0 ] || command -v ss >/dev/null || { echo "ss not found (iproute2): --serve checks its listeners with it"; exit 1; }
+
+# Every listener on these ports must be 127.0.0.1 only. Reads the kernel's
+# listening sockets, not the URLs the clients use; returns 1 otherwise.
+assert_loopback_listeners() {
+  local port addrs addr bad=0
+  for port in "$@"; do
+    addrs="$(ss -Hltn "sport = :$port" | awk '{print $4}')"
+    [ -n "$addrs" ] || { echo "no listener on :$port"; bad=1; continue; }
+    while read -r addr; do
+      [ "$addr" = "127.0.0.1:$port" ] || { echo "listener $addr is not loopback-only"; bad=1; }
+    done <<<"$addrs"
+  done
+  return "$bad"
+}
 
 # --- teardown trap (installed before we start anything) ----------------------
 SERVER_PID=""
@@ -84,11 +144,11 @@ trap cleanup EXIT INT TERM
 # --- fresh isolated Postgres (ephemeral: --rm, no named volume) --------------
 log "starting isolated Postgres '$PG_CONTAINER' on :$PG_PORT (ephemeral)"
 docker rm -f "$PG_CONTAINER" >/dev/null 2>&1 || true
-docker run -d --rm --name "$PG_CONTAINER" \
+docker run -d --rm --name "$PG_CONTAINER" "${PG_LABELS[@]}" \
   -e POSTGRES_USER="$PG_USER" \
   -e POSTGRES_PASSWORD="$PG_PASS" \
   -e POSTGRES_DB="$PG_DB" \
-  -p "${PG_PORT}:5432" \
+  -p "127.0.0.1:${PG_PORT}:5432" \
   --health-cmd="pg_isready -U $PG_USER -d $PG_DB" \
   --health-interval=5s --health-timeout=5s --health-retries=10 \
   "$PG_IMAGE" >/dev/null
@@ -124,8 +184,19 @@ case "$DATABASE_URL" in
 esac
 log "applying migrations (isolated db)"
 (cd server && pnpm db:migrate)
-log "seeding demo data (isolated db)"
-(cd server && pnpm db:seed)
+log "seeding demo data + HW2 experiment fixtures (isolated db)"
+# The fixtures (PRs #501/#502, flow 13) are opt-in, and the seed refuses unless
+# the database is demonstrably disposable.
+# --serve also seeds the labelled synthetic convention candidates for the final
+# Conventions walkthrough; the flow run does not (flow 09 expects no candidates).
+SYNTHETIC=0
+[ "$SERVE" -eq 1 ] && SYNTHETIC=1
+if [ "$CONVENTIONS" -eq 1 ]; then
+  log "seeding only the local workspace identity (no demo repository or PR fixtures)"
+  (cd server && DEVDIGEST_SEED_IDENTITY_ONLY=1 pnpm db:seed)
+else
+  (cd server && DEVDIGEST_SEED_EXPERIMENT_FIXTURES=1 DEVDIGEST_SEED_SYNTHETIC_CONVENTIONS="$SYNTHETIC" pnpm db:seed)
+fi
 
 # --- API on :$API_PORT -------------------------------------------------------
 # tsx directly (not `pnpm start`, which needs a build; not `tsx watch`, to avoid
@@ -143,9 +214,65 @@ done
 [ "$api_up" -eq 1 ] || { echo "API never became healthy on :$API_PORT"; exit 1; }
 log "API healthy"
 
+# In conventions serve mode, restart only the API while keeping the disposable
+# Postgres container alive for post-extraction persistence evidence. This must
+# never run during an active or unresolved paid slot.
+restart_conventions_api() {
+  [ "$CONVENTIONS" -eq 1 ] || return 1
+  if [ -e "${HOME}/.devdigest/hw2-experiments/runner.lock" ]; then
+    warn "runner lock exists; refusing API restart"
+    return 0
+  fi
+  local ledger_file="${HOME}/.devdigest/hw2-experiments/ledger.jsonl"
+  if [ -f "$ledger_file" ] && ! python3 -c '
+import json, sys
+states = {}
+for line in open(sys.argv[1], encoding="utf-8"):
+    if line.strip():
+        event = json.loads(line)
+        states[event["slot_id"]] = event["state"]
+sys.exit(any(state in ("reserved", "dispatched") for state in states.values()))
+' "$ledger_file"; then
+    warn "an unresolved ledger slot exists or the ledger is unreadable; refusing API restart"
+    return 0
+  fi
+  local in_flight
+  in_flight="$(curl -fsS "http://127.0.0.1:${API_PORT}/experiments/identity" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("in_flight_slot") or "none")')" ||
+    { warn "cannot verify an idle API; refusing restart"; return 0; }
+  if [ "$in_flight" != "none" ]; then
+    warn "generation is in flight; refusing API restart"
+    return 0
+  fi
+  log "restarting only the conventions API on :$API_PORT; disposable database stays up"
+  kill_tree "$SERVER_PID"
+  local port_busy=1
+  for _ in $(seq 1 60); do
+    if ! lsof -nP -iTCP:"$API_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+      port_busy=0
+      break
+    fi
+    sleep 1
+  done
+  [ "$port_busy" -eq 0 ] || { echo "old API listener did not stop"; exit 1; }
+  (cd server && pnpm exec tsx src/server.ts) &
+  SERVER_PID=$!
+  local api_ready=0
+  for _ in $(seq 1 60); do
+    curl -fsS "http://127.0.0.1:${API_PORT}/health" >/dev/null 2>&1 && { api_ready=1; break; }
+    kill -0 "$SERVER_PID" 2>/dev/null || { echo "replacement API exited"; exit 1; }
+    sleep 1
+  done
+  [ "$api_ready" -eq 1 ] || { echo "replacement API did not become healthy"; exit 1; }
+  assert_loopback_listeners "$API_PORT" || { echo "replacement API is not loopback-only"; exit 1; }
+  log "conventions API restarted; database and stack identity retained"
+}
+
 # --- web on :$WEB_PORT (next dev → reads NEXT_PUBLIC_API_BASE from env) -------
 log "starting web on :$WEB_PORT"
-(cd client && pnpm exec next dev -p "$WEB_PORT") &
+# `${a[@]+"${a[@]}"}`, not `"${a[@]}"`: under `set -u`, bash before 4.4 (macOS's
+# /bin/bash 3.2) aborts on an empty array, which the hermetic run passes.
+(cd client && pnpm exec next dev -p "$WEB_PORT" ${WEB_HOST_ARGS[@]+"${WEB_HOST_ARGS[@]}"}) &
 WEB_PID=$!
 log "waiting for web :$WEB_PORT"
 web_up=0
@@ -156,6 +283,34 @@ for _ in $(seq 1 60); do
 done
 [ "$web_up" -eq 1 ] || { echo "web never became reachable on :$WEB_PORT"; exit 1; }
 log "web up"
+
+# --- --serve: print the identity the runner checks, then wait ---------------
+if [ "$SERVE" -eq 1 ]; then
+  assert_loopback_listeners "$API_PORT" "$WEB_PORT" || { echo "refusing to serve: the stack is reachable beyond loopback"; exit 1; }
+  log "listeners on :$API_PORT and :$WEB_PORT are loopback-only"
+  log "HW2 experiment stack is up (Ctrl-C tears it down)"
+  cat <<IDENTITY
+  stack id   ${STACK_ID}
+  database   ${PG_DB}  (127.0.0.1:${PG_PORT})
+  container  ${PG_CONTAINER}
+  api        http://127.0.0.1:${API_PORT}
+  web        http://localhost:${WEB_PORT}
+  clones     ${DEVDIGEST_CLONE_DIR}
+  ledger     ${HOME}/.devdigest/hw2-experiments/ledger.jsonl (shared by every stack)
+  key file   ${HOME}/.devdigest/hw2-experiments/secrets.json
+IDENTITY
+  if [ "$CONVENTIONS" -eq 1 ]; then
+    log "after a completed extraction, restart only this API with: kill -USR1 $$"
+    trap restart_conventions_api USR1
+    while kill -0 "$SERVER_PID" 2>/dev/null; do
+      wait "$SERVER_PID" || true
+    done
+    echo "conventions API exited; tearing down its disposable stack"
+    exit 1
+  fi
+  wait "$SERVER_PID"
+  exit $?
+fi
 
 # --- run the flows; propagate the exit code through the trap -----------------
 log "running e2e flows against $E2E_BASE_URL"

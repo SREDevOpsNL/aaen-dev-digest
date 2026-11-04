@@ -27,6 +27,21 @@ pnpm db:seed                                       # idempotent demo data
 Plain `pnpm test` runs the `*.it.test.ts` files too, which need Docker. For a
 quick loop, use the hermetic subset.
 
+No test can reach your development database or read your keys.
+`test/setup/isolate-database.ts` runs before every test file:
+- it stops dotenv from reading `server/.env`;
+- it points `DATABASE_URL` at a closed test URL;
+- it gives secrets an empty, test-owned file and removes key variables from
+  the shell environment.
+
+In a test run, `buildApp` accepts only two databases:
+- without an injected `db`, that exact closed URL;
+- with an injected `db`, a database that proves it is a marked testcontainers
+  database (`test/helpers/pg.ts`).
+
+Both checks run before the stale-run reaper. A test that needs Postgres
+injects `startPg()`'s database.
+
 ## Architecture rules
 
 - One feature = one `src/modules/<name>/` plugin, registered statically in

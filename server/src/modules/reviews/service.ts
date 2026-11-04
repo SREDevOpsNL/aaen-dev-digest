@@ -1,6 +1,7 @@
 import type { Container } from '../../platform/container.js';
 import type { FindingActionKind, RunEventKind, RunTrace } from '@devdigest/shared';
-import { AppError, NotFoundError } from '../../platform/errors.js';
+import { AppError, NotFoundError, ValidationError } from '../../platform/errors.js';
+import type { ExperimentRunContext } from '../_shared/experiment.js';
 import type { AgentRow } from '../../db/rows.js';
 import { ReviewRepository } from './repository.js';
 import { type ReviewDto, type ReviewDtoFinding } from './helpers.js';
@@ -82,11 +83,23 @@ export class ReviewService {
    * so cancel also works for ORPHANED runs (whose background process died on a
    * server restart) where signalling alone would do nothing.
    */
-  async cancelRun(runId: string): Promise<void> {
-    this.publish(runId, 'info', 'Cancellation requested — stopping…');
+  async cancelRun(workspaceId: string, runId: string): Promise<void> {
+    // Ownership first: a foreign run gets a 404 and no bus signal or event.
+    if (!(await this.repo.runInWorkspace(workspaceId, runId))) {
+      throw new NotFoundError('Run not found');
+    }
+    // Fast-path signal, then the durable transition (the executor's
+    // authoritative check), then the event and stream completion — so a client
+    // that refetches on "done" already sees the cancelled row.
     this.container.runBus.cancel(runId);
-    await this.repo.cancelRunIfRunning(runId);
+    await this.repo.cancelRunIfRunning(workspaceId, runId);
+    this.publish(runId, 'info', 'Cancellation requested — stopping…');
     this.container.runBus.complete(runId);
+  }
+
+  /** Whether the run exists in this workspace (guards the SSE stream). */
+  runInWorkspace(workspaceId: string, runId: string): Promise<boolean> {
+    return this.repo.runInWorkspace(workspaceId, runId);
   }
 
   /** Reap runs left 'running' by a previous (now-dead) process. Called on boot. */
@@ -105,11 +118,13 @@ export class ReviewService {
     prId: string,
     targets: AgentRow[],
     logger?: Logger,
+    experiment?: ExperimentRunContext,
   ): Promise<{ runs: { run_id: string; agent_id: string; agent_name: string }[]; reviews: ReviewDto[] }> {
     const pull = await this.repo.getPull(workspaceId, prId);
     if (!pull) throw new NotFoundError('Pull request not found');
     const repo = await this.repo.getRepo(pull.repoId);
     if (!repo) throw new NotFoundError('Repo not found');
+    if (experiment && targets.length !== 1) throw new ValidationError('An experiment slot runs exactly one agent');
 
     // Create the agent_run rows up front so a runId is available IMMEDIATELY —
     // the client persists these in global state and subscribes to the SSE
@@ -130,11 +145,20 @@ export class ReviewService {
 
     // Fire-and-forget: the HTTP response returns now with the runIds; reviews
     // are persisted as each agent finishes and the client refetches on SSE done.
-    void this.executor.executeRuns(workspaceId, pull, repo, jobs, logger).catch((err) => {
+    void this.executor.executeRuns(workspaceId, pull, repo, jobs, logger, experiment).catch((err) => {
       logger?.error({ prId, err: (err as Error).message }, 'review: background execution crashed');
     });
 
     return { runs, reviews: [] };
+  }
+
+  /** HW2: the slot checks, fingerprints and preflight for `agent` on `prId`, with no model request. */
+  async previewExperiment(workspaceId: string, prId: string, agent: AgentRow, experiment: ExperimentRunContext) {
+    const pull = await this.repo.getPull(workspaceId, prId);
+    if (!pull) throw new NotFoundError('Pull request not found');
+    const repo = await this.repo.getRepo(pull.repoId);
+    if (!repo) throw new NotFoundError('Repo not found');
+    return this.executor.previewExperiment(workspaceId, pull, repo, agent, experiment);
   }
 
   private publish(runId: string, kind: RunEventKind, msg: string, data?: unknown) {
@@ -173,7 +197,7 @@ export class ReviewService {
     );
   }
 
-  async getRunTrace(runId: string): Promise<RunTrace | undefined> {
-    return this.repo.getRunTrace(runId);
+  async getRunTrace(workspaceId: string, runId: string): Promise<RunTrace | undefined> {
+    return this.repo.getRunTrace(workspaceId, runId);
   }
 }

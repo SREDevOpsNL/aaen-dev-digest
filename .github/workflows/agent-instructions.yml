@@ -1,8 +1,9 @@
 # agent-instructions — the repository side of the AGENTS.md contract.
 # The five canonical project/package AGENTS.md files are regular files with
-# resolvable links and an explicit hierarchy, and no CLAUDE.md-style file
-# shadows them. Skill-local files such as .claude/skills/*/AGENTS.md are out of
-# scope. No dependencies: plain Node.
+# resolvable links and an explicit hierarchy; each has a CLAUDE.md symlink to
+# it, and no other CLAUDE-style file shadows them. Skill-local files such as
+# .claude/skills/*/AGENTS.md are out of scope. Also runs the pr-self-review
+# router's fixture tests. No dependencies: plain Node.
 #
 # Deliberately not path-filtered: a shadowing file or a renamed link target can
 # arrive in any change, and the check takes seconds.
@@ -32,3 +33,5 @@ jobs:
           node-version: 22
 
       - run: node scripts/verify-agent-instructions.mjs
+
+      - run: node --test .claude/skills/pr-self-review/scripts/route-diff.test.mjs

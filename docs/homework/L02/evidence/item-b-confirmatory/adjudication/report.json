@@ -1,0 +1,100 @@
+{
+  "generated_at": "2026-10-31T18:39:43.629Z",
+  "result": {
+    "status": "revealed",
+    "cases": [
+      {
+        "case_id": "case-6f8d3ce292a9",
+        "slot_id": "c-18-with-5",
+        "condition": "with",
+        "experiment": "18",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-B": "no",
+          "Technical-Reviewer-A": "no"
+        }
+      },
+      {
+        "case_id": "case-733ced5c04a6",
+        "slot_id": "c-18-without-5",
+        "condition": "without",
+        "experiment": "18",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-B": "no",
+          "Technical-Reviewer-A": "no"
+        }
+      },
+      {
+        "case_id": "case-b178165d828f",
+        "slot_id": "c-17-with-1",
+        "condition": "with",
+        "experiment": "17",
+        "final": "yes",
+        "verdicts": {
+          "Technical-Reviewer-B": "yes",
+          "Technical-Reviewer-A": "yes"
+        }
+      },
+      {
+        "case_id": "case-abd44b7d77f7",
+        "slot_id": "c-17-without-1",
+        "condition": "without",
+        "experiment": "17",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-B": "no",
+          "Technical-Reviewer-A": "no"
+        }
+      },
+      {
+        "case_id": "case-22da25c10c26",
+        "slot_id": "c-17-without-2",
+        "condition": "without",
+        "experiment": "17",
+        "final": "no",
+        "verdicts": {
+          "Technical-Reviewer-B": "no",
+          "Technical-Reviewer-A": "no"
+        }
+      }
+    ],
+    "experiments": [
+      {
+        "experiment": "17",
+        "with": {
+          "scheduled": 5,
+          "adjudicated": 1,
+          "detected": 1,
+          "ambiguous": 0
+        },
+        "without": {
+          "scheduled": 5,
+          "adjudicated": 2,
+          "detected": 0,
+          "ambiguous": 0
+        },
+        "outcome": "incomplete",
+        "note": "4 with and 3 without scheduled slot(s) lack an unambiguous adjudicated verdict"
+      },
+      {
+        "experiment": "18",
+        "with": {
+          "scheduled": 5,
+          "adjudicated": 1,
+          "detected": 0,
+          "ambiguous": 0
+        },
+        "without": {
+          "scheduled": 5,
+          "adjudicated": 1,
+          "detected": 0,
+          "ambiguous": 0
+        },
+        "outcome": "incomplete",
+        "note": "4 with and 4 without scheduled slot(s) lack an unambiguous adjudicated verdict"
+      }
+    ],
+    "blinding_compromised": true
+  }
+}

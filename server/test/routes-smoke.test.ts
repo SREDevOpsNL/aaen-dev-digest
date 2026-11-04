@@ -64,4 +64,38 @@ describe('routes (no DB)', () => {
     expect(res.json().error.code).toBe('validation_error');
     await app.close();
   });
+
+  it('rejects malformed skill config and ambiguous link operations before DB access', async () => {
+    const app = await buildApp({ config });
+    const invalidSkill = await app.inject({
+      method: 'POST',
+      url: '/skills',
+      payload: { name: '   ', description: '', type: 'executable', body: '' },
+    });
+    expect(invalidSkill.statusCode).toBe(422);
+
+    const spoofedSource = await app.inject({
+      method: 'POST',
+      url: '/skills',
+      payload: {
+        name: 'Not really community-authored',
+        description: '',
+        type: 'custom',
+        source: 'community',
+        body: 'Text only.',
+      },
+    });
+    expect(spoofedSource.statusCode).toBe(422);
+
+    const ambiguousLink = await app.inject({
+      method: 'POST',
+      url: '/agents/00000000-0000-0000-0000-000000000000/skills',
+      payload: {
+        skill_ids: [],
+        skill_id: '00000000-0000-0000-0000-000000000001',
+      },
+    });
+    expect(ambiguousLink.statusCode).toBe(422);
+    await app.close();
+  });
 });

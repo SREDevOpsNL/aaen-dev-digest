@@ -4,6 +4,12 @@ import { schema } from './schema.js';
 
 export type Db = PostgresJsDatabase<typeof schema>;
 
+/** The handle passed to a `db.transaction(async (tx) => …)` callback. */
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/** Accepts either the shared client or a transaction, for repo helpers used in both. */
+export type DbOrTx = Db | Tx;
+
 export interface DbHandle {
   db: Db;
   sql: postgres.Sql;

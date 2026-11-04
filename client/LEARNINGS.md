@@ -22,6 +22,16 @@ correction. Genuinely cross-package findings belong in
 
 ## Codebase Patterns & Tool / Library Notes
 
+- **2026-10-17** — The vendored `FormField` renders its `label` as a sibling of
+  the control, with no `htmlFor`, and the vendored `TextInput`/`Textarea` accept
+  no `id` or `aria-*` props. A field built with them has **no accessible name**,
+  so `getByRole("textbox", { name })` cannot find it. Without editing
+  `vendor/ui`, wrap the control in its own `<label>` holding a visually hidden
+  copy of the label text, and keep `FormField` for the visible label and hint.
+  Evidence: `client/src/vendor/ui/kit/FormField.tsx`,
+  `client/src/app/skills/_components/SkillsRail/_components/CreateSkillModal.tsx`
+  (body field), `client/src/app/skills/page.test.tsx` (selects it by name).
+
 ## Decisions
 
 ## Recurring Errors & Fixes
@@ -41,6 +51,18 @@ correction. Genuinely cross-package findings belong in
   (2026-10-19). Evidence:
   `client/src/app/repos/[repoId]/pulls/_components/FindingsPreview/FindingsPreview.tsx:49`
   (`onScroll`).
+
+- **2026-10-30** — A Skills-grid card whose footer is a non-wrapping flex row
+  overflows its `minmax(280px, 1fr)` grid column as soon as one more badge is
+  added: the card's min-content width (396 px) exceeded the ~305 px column at
+  1280 px, so each card slid under its right-hand neighbour. Accessible-name
+  queries still found the Delete button, but a pointer click landed on the
+  next card's title and opened its preview, so e2e flow 11 failed on the
+  missing delete dialog while every jsdom test passed. Let card footers wrap
+  (`flexWrap: "wrap"`) and check `document.elementFromPoint` at a control's
+  centre when a click "succeeds" but nothing happens. Evidence:
+  `client/src/app/skills/_components/SkillCard/SkillCard.tsx` (footer style),
+  `e2e/specs/11-skills-lab.flow.json` ("skill delete confirmation opens").
 
 ## Session Notes
 

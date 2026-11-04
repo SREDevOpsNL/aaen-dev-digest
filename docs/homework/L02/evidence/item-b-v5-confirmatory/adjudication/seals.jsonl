@@ -1,0 +1,4 @@
+{"at":"2026-11-02T16:40:50.425Z","event":"digests","packet_sha256":"2c5160c8265cf026e6521aa79494a8a325cb46a0610681de379cab2449b4396a","mapping_sha256":"f352e04e048f83bdaa552d3866235b5d559330630f6fc5558c32c34917f825d9"}
+{"at":"2026-11-02T16:41:53.663Z","event":"register","adjudicator":"Technical-Reviewer-A","seal":"5ddb5c3ef22a36c23300974158ad28611e9f9e181debaac49a6860b092f4dafa"}
+{"at":"2026-11-02T16:41:54.494Z","event":"register","adjudicator":"Technical-Reviewer-B","seal":"c8d74637b1cb5d1bb3989c1b6150fc35259f3ea0fac52dae5fd3213c899c6de8"}
+{"at":"2026-11-02T16:41:56.997Z","event":"reveal"}

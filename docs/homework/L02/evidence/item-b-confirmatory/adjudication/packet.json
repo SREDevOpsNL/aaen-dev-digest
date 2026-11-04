@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "rules": {
+    "17": "Detected only if one grounded finding (or findings together) explicitly identifies BOTH (a) a missing test for an error branch of applyDiscount (an expired coupon or an unknown code throwing) AND (b) a missing test at the exact expiry-equality boundary, now == expiresAt. Generic \"edge case\" or \"more tests\" wording does not count. Otherwise: no; if the text cannot be decided: ambiguous.",
+    "18": "Detected only if a grounded finding identifies that existing v1 requests that use a payment ID now fail (404) because the lookup changed from payment ID to public reference. Naming only the :id to :reference placeholder rename, or a generic breaking-change claim, does not count. Otherwise: no; if the text cannot be decided: ambiguous."
+  },
+  "ground_truth": {
+    "17": "Fixture PR #501 (src/billing/discount.ts): applyDiscount succeeds before expiry; throws \"Coupon expired\" at exactly now == expiresAt and after it; throws \"Unknown coupon\" for an unknown code. The added tests exercise only the success path: no error branch and no expiry-boundary case is tested.",
+    "18": "Fixture PR #502 (src/api/payments.ts, src/payments/store.ts): the published route GET /v1/payments/:id becomes /v1/payments/:reference in place and its handler calls findPaymentByReference. An old ID URL such as /v1/payments/pay_123 still matches the new pattern, but the parameter is now looked up as a public reference, so an existing client calling it with a payment ID gets 404 where it got 200. The placeholder rename on its own changes nothing; the lookup change breaks clients."
+  },
+  "cases": [
+    {
+      "case_id": "case-22da25c10c26",
+      "experiment": "17",
+      "findings": [
+        {
+          "ref": "f1",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for unknown coupon code (error path)",
+          "rationale": "The production function `applyDiscount` throws `Error('Unknown coupon: ${code}')` when the code is not found. The test never calls it with an unknown code, so a regression that silently returns a default value or NaN instead of throwing would not be caught. This is a caller-visible behavior that must be tested."
+        },
+        {
+          "ref": "f2",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for expired coupon (error path)",
+          "rationale": "The production function throws `Error('Coupon expired: ${code}')` when `now >= coupon.expiresAt`. The test uses a date well before expiry, so a regression that silently applies the discount even after expiry would not be caught. This is a critical security and correctness behavior."
+        },
+        {
+          "ref": "f3",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for rounding behavior",
+          "rationale": "The production code uses `Math.round` on the discounted total. The test uses a clean 10% of 10,000 = 9,000, which has no rounding. A regression that changes rounding direction (e.g., `Math.floor` or `Math.ceil`) would not be caught. Rounding is a caller-visible behavior that affects monetary amounts."
+        },
+        {
+          "ref": "f4",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for zero total or 100% off",
+          "rationale": "The production code clamps the result to `>= 0` and caps `percentOff` at 100. The test does not exercise these boundaries. A regression that returns a negative value or fails to cap at 100% would not be caught."
+        },
+        {
+          "ref": "f5",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for the second hardcoded coupon (HALF)",
+          "rationale": "The production code defines two coupons: SAVE10 and HALF. The test only exercises SAVE10. A regression that corrupts the HALF coupon data (e.g., wrong percentOff or expiresAt) would not be caught."
+        }
+      ]
+    },
+    {
+      "case_id": "case-6f8d3ce292a9",
+      "experiment": "18",
+      "findings": [
+        {
+          "ref": "f1",
+          "file": "src/api/payments.ts",
+          "start_line": 14,
+          "end_line": 15,
+          "title": "Path parameter renamed on existing v1 route breaks clients that rely on the parameter name",
+          "rationale": "The route `GET /v1/payments/:id` is changed to `GET /v1/payments/:reference`. While the route pattern itself is the same (a single path segment), the parameter name is part of the contract for clients that use it programmatically (e.g., OpenAPI-generated clients, documentation, or code that destructures `request.params.id`). Renaming it to `reference` without a version bump will break those clients. This is a CRITICAL breaking change per the breaking-change skill: a removal/rename on an existing published route."
+        }
+      ]
+    },
+    {
+      "case_id": "case-733ced5c04a6",
+      "experiment": "18",
+      "findings": []
+    },
+    {
+      "case_id": "case-abd44b7d77f7",
+      "experiment": "17",
+      "findings": [
+        {
+          "ref": "f1",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for expired coupon",
+          "rationale": "The production code throws for expired coupons (line 11 of discount.ts), but the test never exercises that path. A regression that silently accepts expired coupons would not be caught."
+        },
+        {
+          "ref": "f2",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for unknown coupon code",
+          "rationale": "The production code throws for unknown coupon codes (line 10 of discount.ts), but the test never exercises that path. A regression that silently accepts invalid codes would not be caught."
+        },
+        {
+          "ref": "f3",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for case-insensitive code matching",
+          "rationale": "The production code uses code.toUpperCase() (line 9 of discount.ts) to allow case-insensitive matching, but the test only uses an uppercase code. A regression that breaks case-insensitivity would not be caught."
+        },
+        {
+          "ref": "f4",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for discount cap at 100%",
+          "rationale": "The production code caps percentOff at 100 (line 12 of discount.ts), but the test only uses a 10% coupon. A regression that removes the cap or applies >100% discount would not be caught."
+        },
+        {
+          "ref": "f5",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for zero total after discount",
+          "rationale": "The production code ensures the result is at least 0 (line 13 of discount.ts), but the test only uses a 10% discount on a large total. A regression that produces negative totals would not be caught."
+        },
+        {
+          "ref": "f6",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for rounding behavior",
+          "rationale": "The production code uses Math.round (line 13 of discount.ts) to round the result to the nearest cent, but the test only uses a total that results in an exact integer. A regression that changes rounding behavior (e.g., floor or ceil) would not be caught."
+        },
+        {
+          "ref": "f7",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "Missing test for the HALF coupon",
+          "rationale": "The production code defines two coupons (SAVE10 and HALF), but the test only uses SAVE10. A regression that breaks the HALF coupon (e.g., incorrect percentOff or expiration) would not be caught."
+        }
+      ]
+    },
+    {
+      "case_id": "case-b178165d828f",
+      "experiment": "17",
+      "findings": [
+        {
+          "ref": "f1",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for unknown coupon code",
+          "rationale": "The production code throws for an unknown coupon code, but the test never verifies this behavior. A regression that silently returns 0 or applies no discount would go undetected, leading to incorrect checkout totals."
+        },
+        {
+          "ref": "f2",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for expired coupon",
+          "rationale": "The production code throws for an expired coupon, but the test never verifies this. A regression that applies a discount to an expired coupon would cause financial loss."
+        },
+        {
+          "ref": "f3",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for zero total",
+          "rationale": "The production code clamps the result to 0 via `Math.max(..., 0)`, but the test never exercises this path. A regression that returns a negative value would cause incorrect totals."
+        },
+        {
+          "ref": "f4",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for 100% discount",
+          "rationale": "The production code clamps `percentOff` to 100 via `Math.min(coupon.percentOff, 100)`, but the test never exercises this path. A regression that applies more than 100% discount would cause negative totals."
+        },
+        {
+          "ref": "f5",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for case-insensitive code matching",
+          "rationale": "The production code uses `code.toUpperCase()` to match coupons, but the test only uses uppercase input. A regression that breaks case-insensitivity would cause valid lowercase codes to fail."
+        },
+        {
+          "ref": "f6",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for rounding behavior",
+          "rationale": "The production code uses `Math.round` to handle fractional cents, but the test never exercises a case that requires rounding. A regression that uses `Math.floor` or `Math.ceil` instead would cause off-by-one errors."
+        },
+        {
+          "ref": "f7",
+          "file": "src/billing/discount.test.ts",
+          "start_line": 1,
+          "end_line": 8,
+          "title": "No test for boundary condition: exactly at expiration",
+          "rationale": "The production code uses `now >= coupon.expiresAt` to check expiration. The test never verifies the boundary where `now` equals `expiresAt`. A regression that changes `>=` to `>` would allow expired coupons to be used."
+        }
+      ]
+    }
+  ]
+}

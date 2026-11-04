@@ -17,12 +17,32 @@ export function traceLog(trace: RunTrace | undefined): LogLine[] {
   return trace?.log.map((l) => ({ t: l.t, k: l.kind as LogLine["k"], m: l.msg })) ?? [];
 }
 
+export type RunStatusLabel = "running" | "completed" | "failed" | "cancelled";
+
+/** Header status label from the persisted agent_runs.status (running | done |
+   failed | cancelled). A live SSE stream overrides it with "running"; an
+   unknown status yields null so the header never claims success it can't see. */
+export function runStatusLabel(status: string | null | undefined, live: boolean): RunStatusLabel | null {
+  if (live) return "running";
+  switch (status) {
+    case "running":
+    case "failed":
+    case "cancelled":
+      return status;
+    case "done":
+      return "completed";
+    default:
+      return null;
+  }
+}
+
 /** Seconds-formatted duration. */
 export function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-/** Token in→out summary (e.g. "12k→1.5k"). */
-export function formatTokens(tokensIn: number, tokensOut: number): string {
-  return `${(tokensIn / 1000).toFixed(0)}k→${(tokensOut / 1000).toFixed(1)}k`;
+/** Token in→out summary (e.g. "12k→1.5k"); "—" for a count the run did not report. */
+export function formatTokens(tokensIn: number | null, tokensOut: number | null): string {
+  const part = (n: number | null, digits: number) => (n === null ? "—" : `${(n / 1000).toFixed(digits)}k`);
+  return `${part(tokensIn, 0)}→${part(tokensOut, 1)}`;
 }

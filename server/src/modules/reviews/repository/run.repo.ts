@@ -1,7 +1,9 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
-import type { Db } from '../../../db/client.js';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import type { Db, DbOrTx } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
+import { REAPED_CANCELLED_NOTE, reapedTrace } from '../reaped-trace.js';
+import { pgSafeDeep, pgSafeText } from '../../../db/pg-text.js';
 
 // ---- in-flight / history --------------------------------------------------
 
@@ -102,25 +104,108 @@ export async function deleteAgentRun(
   return rows.length > 0;
 }
 
-/** Mark a still-running run as cancelled (no-op if it already finished). */
-export async function cancelRunIfRunning(db: Db, runId: string): Promise<boolean> {
+/** Whether `runId` exists and belongs to `workspaceId` (run-scoped route guard). */
+export async function runInWorkspace(db: Db, workspaceId: string, runId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: t.agentRuns.id })
+    .from(t.agentRuns)
+    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.workspaceId, workspaceId)));
+  return row !== undefined;
+}
+
+/** Mark a still-running run of this workspace as cancelled (no-op if it already finished). */
+export async function cancelRunIfRunning(
+  db: Db,
+  workspaceId: string,
+  runId: string,
+): Promise<boolean> {
   const rows = await db
     .update(t.agentRuns)
     .set({ status: 'cancelled' })
-    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.status, 'running')))
+    .where(
+      and(
+        eq(t.agentRuns.id, runId),
+        eq(t.agentRuns.workspaceId, workspaceId),
+        eq(t.agentRuns.status, 'running'),
+      ),
+    )
     .returning({ id: t.agentRuns.id });
   return rows.length > 0;
 }
 
 /** On boot: any run still 'running' is orphaned (its process died / restarted),
- *  so mark it failed. Prevents permanently stuck "running" runs in the UI. */
-export async function reapStaleRunningRuns(db: Db): Promise<number> {
-  const rows = await db
-    .update(t.agentRuns)
-    .set({ status: 'failed' })
-    .where(eq(t.agentRuns.status, 'running'))
-    .returning({ id: t.agentRuns.id });
-  return rows.length;
+ *  so mark it failed. Prevents permanently stuck "running" runs in the UI.
+ *  Each reaped run's trace is labelled `persistence: reaped` in the same
+ *  transaction (see `reapedTrace`): a partial trace is kept, never replaced,
+ *  and the row's persisted tokens and cost are left as they are. */
+export async function reapStaleRunningRuns(db: Db, now: Date = new Date()): Promise<number> {
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(t.agentRuns)
+      .set({ status: 'failed' })
+      .where(eq(t.agentRuns.status, 'running'))
+      .returning({
+        id: t.agentRuns.id,
+        agentId: t.agentRuns.agentId,
+        provider: t.agentRuns.provider,
+        model: t.agentRuns.model,
+        durationMs: t.agentRuns.durationMs,
+        tokensIn: t.agentRuns.tokensIn,
+        tokensOut: t.agentRuns.tokensOut,
+        costUsd: t.agentRuns.costUsd,
+      });
+    // A cancelled run with no trace at all (the cancel wrote the status, then
+    // the process died before the executor's trace): give it a minimal,
+    // labelled one. Nothing about its request is invented.
+    const orphanCancelled = await tx
+      .select({
+        id: t.agentRuns.id,
+        agentId: t.agentRuns.agentId,
+        provider: t.agentRuns.provider,
+        model: t.agentRuns.model,
+        durationMs: t.agentRuns.durationMs,
+        tokensIn: t.agentRuns.tokensIn,
+        tokensOut: t.agentRuns.tokensOut,
+        costUsd: t.agentRuns.costUsd,
+      })
+      .from(t.agentRuns)
+      .leftJoin(t.runTraces, eq(t.runTraces.runId, t.agentRuns.id))
+      .where(and(eq(t.agentRuns.status, 'cancelled'), isNull(t.runTraces.runId)));
+    if (orphanCancelled.length > 0) {
+      const agentIds = orphanCancelled.map((r) => r.agentId).filter((id): id is string => id !== null);
+      const names = new Map(
+        agentIds.length > 0
+          ? (await tx.select({ id: t.agents.id, name: t.agents.name }).from(t.agents).where(inArray(t.agents.id, agentIds))).map((a) => [a.id, a.name] as const)
+          : [],
+      );
+      for (const row of orphanCancelled) {
+        const agentName = row.agentId ? (names.get(row.agentId) ?? null) : null;
+        await saveRunTrace(tx, row.id, reapedTrace(undefined, { ...row, agentName }, now, REAPED_CANCELLED_NOTE));
+      }
+    }
+    if (rows.length === 0) return 0;
+    const ids = rows.map((r) => r.id);
+    const existing = new Map(
+      (await tx.select({ runId: t.runTraces.runId, trace: t.runTraces.trace }).from(t.runTraces).where(inArray(t.runTraces.runId, ids))).map(
+        (r) => [r.runId, r.trace] as const,
+      ),
+    );
+    const agentIds = rows.map((r) => r.agentId).filter((id): id is string => id !== null);
+    const names = new Map(
+      agentIds.length > 0
+        ? (await tx.select({ id: t.agents.id, name: t.agents.name }).from(t.agents).where(inArray(t.agents.id, agentIds))).map((a) => [a.id, a.name] as const)
+        : [],
+    );
+    for (const row of rows) {
+      const trace = reapedTrace(
+        existing.get(row.id),
+        { ...row, agentName: row.agentId ? (names.get(row.agentId) ?? null) : null },
+        now,
+      );
+      await saveRunTrace(tx, row.id, trace);
+    }
+    return rows.length;
+  });
 }
 
 // ---- observability: agent_runs + run_traces -------------------------------
@@ -151,27 +236,35 @@ export async function createAgentRun(
   return row!.id;
 }
 
+/** Terminal stats written when a run leaves `running`. */
+export type RunCompletion = {
+  status: 'done' | 'failed' | 'cancelled';
+  durationMs: number;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  /** Authoritative provider-reported USD cost; null when unavailable. */
+  costUsd: number | null;
+  findingsCount: number;
+  grounding: string;
+  /** Review score (0-100); null on failed/cancelled runs. */
+  score?: number | null;
+  /** Findings that tripped the agent's gate; 0 on failed/cancelled runs. */
+  blockers?: number | null;
+  /** Failure reason (status='failed') / cancellation note. Null clears it. */
+  error?: string | null;
+};
+
+/**
+ * Move a run from `running` to a terminal status. Compare-and-set: it applies
+ * only while the row is still `running`, so a run the user already cancelled
+ * is never overwritten to `done` or `failed`. Returns whether it applied.
+ */
 export async function completeAgentRun(
-  db: Db,
+  db: DbOrTx,
   runId: string,
-  values: {
-    status: 'done' | 'failed' | 'cancelled';
-    durationMs: number;
-    tokensIn: number;
-    tokensOut: number;
-    /** Authoritative provider-reported USD cost; null when unavailable. */
-    costUsd: number | null;
-    findingsCount: number;
-    grounding: string;
-    /** Review score (0-100); null on failed/cancelled runs. */
-    score?: number | null;
-    /** Findings that tripped the agent's gate; 0 on failed/cancelled runs. */
-    blockers?: number | null;
-    /** Failure reason (status='failed') / cancellation note. Null clears it. */
-    error?: string | null;
-  },
-): Promise<void> {
-  await db
+  values: RunCompletion,
+): Promise<boolean> {
+  const rows = await db
     .update(t.agentRuns)
     .set({
       status: values.status,
@@ -183,20 +276,65 @@ export async function completeAgentRun(
       grounding: values.grounding,
       score: values.score ?? null,
       blockers: values.blockers ?? null,
-      error: values.error ?? null,
+      error: values.error == null ? null : pgSafeText(values.error),
     })
+    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.status, 'running')))
+    .returning({ id: t.agentRuns.id });
+  return rows.length > 0;
+}
+
+/** Whether the run's durable status is `cancelled` (the authoritative signal). */
+export async function isRunCancelled(db: Db, runId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ status: t.agentRuns.status })
+    .from(t.agentRuns)
     .where(eq(t.agentRuns.id, runId));
+  return row?.status === 'cancelled';
 }
 
 /** Persist the WHOLE run log as ONE document. PK = runId → agent_runs. */
-export async function saveRunTrace(db: Db, runId: string, trace: RunTrace): Promise<void> {
+export async function saveRunTrace(db: DbOrTx, runId: string, trace: RunTrace): Promise<void> {
+  // Provider and prompt text may hold characters jsonb rejects (see pg-text.ts).
+  const safe = pgSafeDeep(trace);
   await db
     .insert(t.runTraces)
-    .values({ runId, trace })
-    .onConflictDoUpdate({ target: t.runTraces.runId, set: { trace } });
+    .values({ runId, trace: safe })
+    .onConflictDoUpdate({ target: t.runTraces.runId, set: { trace: safe } });
 }
 
-export async function getRunTrace(db: Db, runId: string): Promise<RunTrace | undefined> {
-  const [row] = await db.select().from(t.runTraces).where(eq(t.runTraces.runId, runId));
+/**
+ * An API-cancelled run's row keeps only the status the cancel wrote. Fill in
+ * the usage the executor measured, ONLY while the row is cancelled and has no
+ * usage yet; the status is never touched. Returns whether it applied.
+ */
+export async function recordCancelledRunUsage(
+  db: DbOrTx,
+  runId: string,
+  values: Pick<RunCompletion, 'durationMs' | 'tokensIn' | 'tokensOut' | 'costUsd'>,
+): Promise<boolean> {
+  const rows = await db
+    .update(t.agentRuns)
+    .set({ durationMs: values.durationMs, tokensIn: values.tokensIn, tokensOut: values.tokensOut, costUsd: values.costUsd })
+    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.status, 'cancelled'), isNull(t.agentRuns.tokensIn), isNull(t.agentRuns.costUsd)))
+    .returning({ id: t.agentRuns.id });
+  return rows.length > 0;
+}
+
+/** The run's current status (inside a transaction: as that transaction sees it). */
+export async function runStatus(db: DbOrTx, runId: string): Promise<string | null> {
+  const [row] = await db.select({ status: t.agentRuns.status }).from(t.agentRuns).where(eq(t.agentRuns.id, runId));
+  return row?.status ?? null;
+}
+
+export async function getRunTrace(
+  db: Db,
+  workspaceId: string,
+  runId: string,
+): Promise<RunTrace | undefined> {
+  const [row] = await db
+    .select({ trace: t.runTraces.trace })
+    .from(t.runTraces)
+    .innerJoin(t.agentRuns, eq(t.agentRuns.id, t.runTraces.runId))
+    .where(and(eq(t.runTraces.runId, runId), eq(t.agentRuns.workspaceId, workspaceId)));
   return row ? (row.trace as RunTrace) : undefined;
 }

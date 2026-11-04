@@ -30,7 +30,7 @@ import { users, workspaces, workspaceMembers, settings } from './schema/core';
 import { repos } from './schema/repos';
 import { pullRequests, prFiles, prCommits } from './schema/pulls';
 import { reviews, findings, prIntent, prBrief } from './schema/reviews';
-import { skills, skillVersions } from './schema/skills';
+import { skills, skillVersions, skillApprovals } from './schema/skills';
 import { agents, agentVersions, agentSkills } from './schema/agents';
 import { memory, conventions } from './schema/knowledge';
 import { codeChunks, symbols, references, onboarding } from './schema/context';
@@ -62,6 +62,7 @@ export const schema = {
   prBrief,
   skills,
   skillVersions,
+  skillApprovals,
   agents,
   agentVersions,
   agentSkills,

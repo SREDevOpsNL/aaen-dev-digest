@@ -1,0 +1,2 @@
+pre-registration matches: manifest fingerprint 3832fa254ce83dec6fb5fcf7e44c7158853a77d02ab38489f7a513769fdeb533
+capability for confirmatory (Gate 4) on hw2f-a88a535d: budget $0.15, expires 2026-11-02T19:03:54.995Z

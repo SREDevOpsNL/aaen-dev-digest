@@ -1,0 +1,7 @@
+Slot c-v4-17-without-2 is armed until 2026-11-01T20:12:40.283Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v4-17-without-2: completed
+Slot c-v4-17-with-2 is armed until 2026-11-01T20:13:29.809Z: open PR #501 and click Run Review for "Test Quality Reviewer" once.
+c-v4-17-with-2: failed — 429 Provider returned error (origin upstream_provider, provider DeepInfra, limit_source upstream_provider_shared_pool)
+charged: confirmatory $0.007696 of $1, total $0.021741 of $1.5
+STOPPED: confirmatory slot c-v4-17-with-2 is incomplete: 429 Provider returned error
+EXIT=0

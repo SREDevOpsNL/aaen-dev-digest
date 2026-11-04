@@ -1,0 +1,309 @@
+{
+  "version": 2,
+  "nonce": "310d7dbe857fa80fcd169660067d1f29aab11fc6094f0d096136a1b62834661c",
+  "packet_sha256": "2c5160c8265cf026e6521aa79494a8a325cb46a0610681de379cab2449b4396a",
+  "design": {
+    "manifest_fingerprint": "3832fa254ce83dec6fb5fcf7e44c7158853a77d02ab38489f7a513769fdeb533",
+    "experiments": [
+      "17"
+    ],
+    "per_condition": 5,
+    "slots": [
+      {
+        "slot_id": "c-v5-17-with-1",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v5-17-without-1",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v5-17-without-5",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v5-17-with-5",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v5-17-without-3",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v5-17-with-3",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v5-17-with-4",
+        "experiment": "17",
+        "condition": "with"
+      },
+      {
+        "slot_id": "c-v5-17-without-4",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v5-17-without-2",
+        "experiment": "17",
+        "condition": "without"
+      },
+      {
+        "slot_id": "c-v5-17-with-2",
+        "experiment": "17",
+        "condition": "with"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "slot_id": "c-v5-17-with-1",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": "case-54a0e22c2df2",
+      "not_counted_reason": null,
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": "14c2727a1b5d7d96dac71b6cdbba37b7bdfb9bd7cd94b0031f7a3287ebc64298",
+      "p3": {
+        "label": "observed",
+        "label_reason": "observed on a1",
+        "scoring_attempt_id": "c-v5-17-with-1-a1",
+        "attempt_ids": [
+          "c-v5-17-with-1-a1"
+        ],
+        "attempt_classes": [
+          "observed"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-without-1",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": "case-2b595714daad",
+      "not_counted_reason": null,
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": "5687996a5269b3952fdb94f2796ad4580ac768190ec26f7971d4f534dd477cf0",
+      "p3": {
+        "label": "observed",
+        "label_reason": "observed on a2 after 1 classified 429(s)",
+        "scoring_attempt_id": "c-v5-17-without-1-a2",
+        "attempt_ids": [
+          "c-v5-17-without-1-a1",
+          "c-v5-17-without-1-a2"
+        ],
+        "attempt_classes": [
+          "throttled",
+          "observed"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-without-5",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (bounded: pool exhausted: 3 classified 429s)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null,
+      "p3": {
+        "label": "bounded",
+        "label_reason": "pool exhausted: 3 classified 429s",
+        "scoring_attempt_id": null,
+        "attempt_ids": [
+          "c-v5-17-without-5-a1",
+          "c-v5-17-without-5-a2",
+          "c-v5-17-without-5-a3"
+        ],
+        "attempt_classes": [
+          "throttled",
+          "throttled",
+          "throttled"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-with-5",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": "case-44a057b01071",
+      "not_counted_reason": null,
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": "ffce3a3ff5a2d133bf610368545c00f0d9caee81f2d1f1d2ea53f3bc763ea526",
+      "p3": {
+        "label": "observed",
+        "label_reason": "observed on a1",
+        "scoring_attempt_id": "c-v5-17-with-5-a1",
+        "attempt_ids": [
+          "c-v5-17-with-5-a1"
+        ],
+        "attempt_classes": [
+          "observed"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-without-3",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (bounded: pool exhausted: 3 classified 429s)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null,
+      "p3": {
+        "label": "bounded",
+        "label_reason": "pool exhausted: 3 classified 429s",
+        "scoring_attempt_id": null,
+        "attempt_ids": [
+          "c-v5-17-without-3-a1",
+          "c-v5-17-without-3-a2",
+          "c-v5-17-without-3-a3"
+        ],
+        "attempt_classes": [
+          "throttled",
+          "throttled",
+          "throttled"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-with-3",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": "case-a4c38abb3565",
+      "not_counted_reason": null,
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": "8bc1d720b24de7617eeb9ac1286bd402d509756b23504c50a70cdfbffab3cc40",
+      "p3": {
+        "label": "observed",
+        "label_reason": "observed on a3 after 2 classified 429(s)",
+        "scoring_attempt_id": "c-v5-17-with-3-a3",
+        "attempt_ids": [
+          "c-v5-17-with-3-a1",
+          "c-v5-17-with-3-a2",
+          "c-v5-17-with-3-a3"
+        ],
+        "attempt_classes": [
+          "throttled",
+          "throttled",
+          "observed"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-with-4",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": "case-94dd9186c45a",
+      "not_counted_reason": null,
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": "57fda02411029f07033eb9e59c74e91773d070f745c5ec6bf6fcbc0763c73c5f",
+      "p3": {
+        "label": "observed",
+        "label_reason": "observed on a1",
+        "scoring_attempt_id": "c-v5-17-with-4-a1",
+        "attempt_ids": [
+          "c-v5-17-with-4-a1"
+        ],
+        "attempt_classes": [
+          "observed"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-without-4",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (bounded: pool exhausted: 3 classified 429s)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null,
+      "p3": {
+        "label": "bounded",
+        "label_reason": "pool exhausted: 3 classified 429s",
+        "scoring_attempt_id": null,
+        "attempt_ids": [
+          "c-v5-17-without-4-a1",
+          "c-v5-17-without-4-a2",
+          "c-v5-17-without-4-a3"
+        ],
+        "attempt_classes": [
+          "throttled",
+          "throttled",
+          "throttled"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-without-2",
+      "experiment": "17",
+      "condition": "without",
+      "case_id": null,
+      "not_counted_reason": "no run (bounded: pool exhausted: 3 classified 429s)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null,
+      "p3": {
+        "label": "bounded",
+        "label_reason": "pool exhausted: 3 classified 429s",
+        "scoring_attempt_id": null,
+        "attempt_ids": [
+          "c-v5-17-without-2-a1",
+          "c-v5-17-without-2-a2",
+          "c-v5-17-without-2-a3"
+        ],
+        "attempt_classes": [
+          "throttled",
+          "throttled",
+          "throttled"
+        ]
+      }
+    },
+    {
+      "slot_id": "c-v5-17-with-2",
+      "experiment": "17",
+      "condition": "with",
+      "case_id": null,
+      "not_counted_reason": "no run (bounded: not dispatched: the study stopped on throttle_outage)",
+      "imputed": null,
+      "redactions": 0,
+      "original_findings_sha256": null,
+      "p3": {
+        "label": "bounded",
+        "label_reason": "not dispatched: the study stopped on throttle_outage",
+        "scoring_attempt_id": null,
+        "attempt_ids": [],
+        "attempt_classes": []
+      }
+    }
+  ],
+  "blinding_warnings": [],
+  "redaction": {
+    "method": "r1",
+    "terms_sha256": "4e07a112cf6092631d32fa12519720c62987df9a12a7e46998ce6edd162297bc"
+  },
+  "originals_sha256": "ac07c2fd395857e01188102e2f349d3d3bed0c58d91840c8a2cb4544827fe441",
+  "residual": [],
+  "attempt_policy": "p3",
+  "p3_protocol": {
+    "17": {
+      "state": "stopped",
+      "reason": "throttle_outage",
+      "attempt_id": "c-v5-17-without-2-a3"
+    }
+  }
+}

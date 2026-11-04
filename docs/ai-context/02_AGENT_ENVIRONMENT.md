@@ -137,7 +137,8 @@ project/package instruction files — `AGENTS.md`, `client/AGENTS.md`,
 skill-local files such as `.claude/skills/zod/AGENTS.md`. It checks regular
 (non-symlink) files,
 resolvable relative links, each package file extending `../AGENTS.md`, the root
-map linking every package file, and no `CLAUDE.md`, `CLAUDE.local.md`, or
+map linking every package file, a `CLAUDE.md` beside each `AGENTS.md` that is a
+symlink whose stored target is exactly `AGENTS.md`, and no `CLAUDE.local.md` or
 `.claude/CLAUDE.md` in the instruction directories.
 
 Whether a particular agent surface actually loads the hierarchy is a runtime
@@ -146,4 +147,7 @@ that cannot be inferred from repository content — one in the root `AGENTS.md`,
 one in a package `AGENTS.md` — asked from a session started in that package,
 then remove the sentinels. Record each surface's result in
 [`LEARNINGS.md`](../../LEARNINGS.md); add a vendor compatibility shim only after
-a demonstrated failure, and allow exactly that form in the verifier.
+a demonstrated failure or an external requirement, and allow exactly that form
+in the verifier. Start one probe below a package root (for example
+`client/src/app`), not only at the package root: Claude Code does not expand an
+`@` import in an ancestor `CLAUDE.md`, a failure the package-root probe misses.

@@ -1,0 +1,28 @@
+{
+  "17": {
+    "anchors": [
+      { "file": "src/billing/discount.test.ts", "start_line": 4, "end_line": 8 },
+      { "file": "src/billing/discount.ts", "start_line": 9, "end_line": 12 }
+    ],
+    "keywords": [
+      "\\b(expir\\w*)\\b[^.]{0,80}\\b(boundary|equal\\w*|exactly|same (instant|time|moment)|>=|at (the )?expir\\w*)\\b",
+      "\\b(boundary|equal\\w*|exactly)\\b[^.]{0,80}\\bexpir\\w*",
+      "now\\s*(==|===|>=)\\s*(coupon\\.)?expiresAt",
+      "\\b(unknown|expired|invalid)\\b[^.]{0,60}\\b(code|coupon)\\b[^.]{0,60}\\b(test\\w*|untested|covered|coverage)\\b",
+      "\\b(error|failure|exception|throw\\w*|negative|sad)[- ](paths?|cases?|branch(es)?)\\b",
+      "happy[- ]path"
+    ]
+  },
+  "18": {
+    "anchors": [
+      { "file": "src/api/payments.ts", "start_line": 12, "end_line": 13 },
+      { "file": "src/payments/store.ts", "start_line": 12, "end_line": 13 }
+    ],
+    "keywords": [
+      "\\b404\\b",
+      "\\b(look\\w*[- ]?up|find\\w*|resolv\\w*|query|treat\\w*|interpret\\w*)\\b[^.]{0,80}\\b(public )?reference\\b[^.]{0,80}\\b(instead of|rather than|not)\\b[^.]{0,20}\\b(the )?(payment )?id\\b",
+      "\\b(existing|old|current|v1) (clients?|callers?|consumers?|requests?|urls?|links?)\\b[^.]{0,120}\\b(id|ids)\\b[^.]{0,80}\\b(fail\\w*|break\\w*|not found|no longer)\\b",
+      "\\b(id|ids)\\b[^.]{0,80}\\b(no longer|not found|fail\\w*|break\\w*)\\b"
+    ]
+  }
+}
